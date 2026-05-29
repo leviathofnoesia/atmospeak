@@ -4,7 +4,6 @@ mod models;
 mod services;
 mod tray;
 
-use anyhow::anyhow;
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -40,9 +39,11 @@ fn install_global_shortcut(app: &mut tauri::App) -> anyhow::Result<()> {
             eprintln!(
                 "failed to register Ctrl+Win+Space, falling back to Ctrl+Alt+Space: {error}"
             );
-            app.global_shortcut()
-                .register(fallback_shortcut)
-                .map_err(|error| anyhow!(error.to_string()))?;
+            if let Err(fallback_error) = app.global_shortcut().register(fallback_shortcut) {
+                eprintln!(
+                    "failed to register Ctrl+Alt+Space; global shortcut disabled: {fallback_error}"
+                );
+            }
         }
     }
 

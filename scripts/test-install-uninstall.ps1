@@ -42,9 +42,10 @@ if (-not (Test-Path (Join-Path $InstallDir "resources\whisper-runtime\whisper-cl
 
 $process = Start-Process -FilePath $AppExe -PassThru
 Start-Sleep -Seconds 5
-if (-not $process.HasExited) {
-  Stop-Process -Id $process.Id -Force
+if ($process.HasExited) {
+  throw "App exited during launch smoke with code $($process.ExitCode)"
 }
+Stop-Process -Id $process.Id -Force
 
 $Uninstaller = Get-ChildItem $InstallDir -Filter "*uninst*.exe" -File -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty FullName -First 1
