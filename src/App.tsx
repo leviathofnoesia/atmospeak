@@ -59,6 +59,12 @@ import type {
 } from "./types/dictation";
 
 const onboardingVersion = "desktop-parity-v2";
+const shortcutOptions = [
+  "Ctrl+Win+Space",
+  "Ctrl+Alt+Space",
+  "Ctrl+Shift+Space",
+  "Ctrl+Alt+D",
+];
 
 const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "home", label: "Home", icon: Radio },
@@ -309,6 +315,7 @@ function App() {
       setSettingsDraft(nextSnapshot.settings);
       setModelStatus(await getModelStatus());
       setModelInventory(await getModelInventory());
+      setShortcutStatus(await getShortcutStatus());
       setNotice({ tone: "success", message: "Settings saved." });
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
@@ -396,8 +403,10 @@ function App() {
             onboardingVersion,
           };
           const nextSnapshot = await saveSettings(nextSettings);
+          const nextShortcutStatus = await getShortcutStatus();
           setSnapshot(nextSnapshot);
           setSettingsDraft(nextSnapshot.settings);
+          setShortcutStatus(nextShortcutStatus);
           setNotice({ tone: "success", message: "Onboarding complete. Wind Speak is armed." });
         }}
       />
@@ -429,6 +438,8 @@ function App() {
         elapsedSeconds={elapsedSeconds}
         busy={busy}
         modelStatus={modelStatus}
+        hotkeyLabel={shortcutStatus?.hotkey || snapshot.settings.hotkey}
+        notice={shortcutStatus?.registered ? undefined : shortcutStatus?.message}
         onToggle={handleToggleRecording}
         onCancel={handleCancel}
       />
@@ -517,6 +528,7 @@ function App() {
               settings={settingsDraft}
               setSettings={setSettingsDraft}
               microphones={microphones}
+              shortcutStatus={shortcutStatus}
               onSave={handleSaveSettings}
               updateStatus={updateStatus}
               updateResult={updateResult}
@@ -867,6 +879,19 @@ function Onboarding({
                 "Wind Speak registers a global shortcut on launch and keeps the floating control available if a shortcut is taken."}
             </p>
             <label>
+              <span>Shortcut</span>
+              <select
+                value={settings.hotkey}
+                onChange={(event) => setSettings({ ...settings, hotkey: event.currentTarget.value })}
+              >
+                {shortcutOptions.map((shortcut) => (
+                  <option key={shortcut} value={shortcut}>
+                    {shortcut}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               <span>Capture mode</span>
               <select
                 value={settings.mode}
@@ -972,6 +997,7 @@ function SettingsPanel({
   settings,
   setSettings,
   microphones,
+  shortcutStatus,
   onSave,
   updateStatus,
   updateResult,
@@ -981,6 +1007,7 @@ function SettingsPanel({
   settings: AppSettings;
   setSettings: (settings: AppSettings) => void;
   microphones: MicrophoneInfo[];
+  shortcutStatus: ShortcutStatus | null;
   onSave: () => Promise<void>;
   updateStatus: UpdateStatus;
   updateResult: UpdateCheckResult | null;
@@ -1010,6 +1037,26 @@ function SettingsPanel({
           ))}
         </select>
       </label>
+      <label>
+        <span>Shortcut</span>
+        <select
+          value={settings.hotkey}
+          onChange={(event) => setSettings({ ...settings, hotkey: event.currentTarget.value })}
+        >
+          {shortcutOptions.map((shortcut) => (
+            <option key={shortcut} value={shortcut}>
+              {shortcut}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="instruction-card">
+        <h3>Global shortcut</h3>
+        <p>
+          {shortcutStatus?.message ??
+            "Wind Speak registers your saved shortcut when the desktop app starts."}
+        </p>
+      </div>
       <label>
         <span>Mode</span>
         <select

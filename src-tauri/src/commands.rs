@@ -9,7 +9,7 @@ use crate::{
         ModelInventory, ModelStatus, RecordingStarted, ShortcutStatus, Snippet, TranscriptSession,
     },
     services::{
-        app_state::AppState, cleanup, injection, runtime, startup, transcriber,
+        app_state::AppState, cleanup, injection, runtime, shortcuts, startup, transcriber,
     },
 };
 
@@ -42,6 +42,7 @@ pub fn save_settings(
             .and_then(|_| database.save_settings(&settings))
             .and_then(|_| {
                 let _ = runtime::model_status(&app, &settings);
+                shortcuts::register_shortcut(&app, state.shortcut_status.clone(), &settings.hotkey);
                 database.snapshot()
             }),
     )
