@@ -171,7 +171,8 @@ $Latest = [ordered]@{
     }
   }
 }
-$Latest | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 $LatestDest
+$LatestJson = $Latest | ConvertTo-Json -Depth 8
+[System.IO.File]::WriteAllText($LatestDest, "$LatestJson`n", [System.Text.UTF8Encoding]::new($false))
 
 $ReleaseFiles = Get-ChildItem $ReleaseDir -File | Where-Object { $_.Name -ne $ChecksumsName } | Sort-Object Name
 $HashLines = foreach ($file in $ReleaseFiles) {
