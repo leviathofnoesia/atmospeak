@@ -75,6 +75,12 @@ const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "advanced", label: "Advanced", icon: Cpu },
 ];
 
+interface ShortcutTestState {
+  active: boolean;
+  detected: boolean;
+  message: string;
+}
+
 function App() {
   const isOverlayView =
     typeof window !== "undefined" &&
@@ -100,11 +106,17 @@ function App() {
     tone: "neutral",
     message: "Wind Speak is standing by.",
   });
+  const [shortcutTest, setShortcutTest] = useState<ShortcutTestState>({
+    active: false,
+    detected: false,
+    message: "Shortcut test is idle.",
+  });
   const [dictionaryDraft, setDictionaryDraft] = useState({ phrase: "", replacement: "" });
   const [snippetDraft, setSnippetDraft] = useState({ trigger: "", body: "" });
   const recordingRef = useRef<RecordingStarted | null>(null);
   const busyRef = useRef(false);
   const settingsRef = useRef<AppSettings | null>(null);
+  const shortcutTestRef = useRef(shortcutTest);
 
   const refresh = useCallback(async () => {
     const [
@@ -145,6 +157,10 @@ function App() {
   useEffect(() => {
     settingsRef.current = settingsDraft;
   }, [settingsDraft]);
+
+  useEffect(() => {
+    shortcutTestRef.current = shortcutTest;
+  }, [shortcutTest]);
 
   useEffect(() => {
     refresh().catch((error: unknown) => {
@@ -231,6 +247,27 @@ function App() {
     }
   }, []);
 
+  const armShortcutTest = useCallback(() => {
+    const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "the active shortcut";
+    setShortcutTest({
+      active: true,
+      detected: false,
+      message: `Press ${label} now.`,
+    });
+    setNotice({ tone: "neutral", message: `Listening for ${label}.` });
+    window.setTimeout(() => {
+      setShortcutTest((current) =>
+        current.active && !current.detected
+          ? {
+              active: false,
+              detected: false,
+              message: "No shortcut press detected. Choose another shortcut or use the floating control.",
+            }
+          : current,
+      );
+    }, 8000);
+  }, [shortcutStatus?.hotkey]);
+
   useEffect(() => {
     if (!hasTauriRuntime()) {
       return undefined;
@@ -241,6 +278,19 @@ function App() {
     let removeShortcutStatusListener: (() => void) | undefined;
     listen<string>("wind-speak://shortcut", (event) => {
       const action = event.payload;
+      if (shortcutTestRef.current.active) {
+        if (action === "pressed" || action === "toggle") {
+          const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "shortcut";
+          setShortcutTest({
+            active: false,
+            detected: true,
+            message: `${label} detected by the desktop runtime.`,
+          });
+          setNotice({ tone: "success", message: `${label} detected.` });
+        }
+        return;
+      }
+
       const mode = settingsRef.current?.mode ?? "toggle";
       const activeRecording = recordingRef.current;
       if (mode === "pushToTalk") {
@@ -301,7 +351,7 @@ function App() {
       removeOverlayListener?.();
       removeShortcutStatusListener?.();
     };
-  }, [handleCancel, handleToggleRecording]);
+  }, [handleCancel, handleToggleRecording, shortcutStatus?.hotkey]);
 
   const handleSaveSettings = async () => {
     if (settingsDraft === null) {
@@ -396,6 +446,8 @@ function App() {
         microphones={microphones}
         modelStatus={modelStatus}
         shortcutStatus={shortcutStatus}
+        shortcutTest={shortcutTest}
+        onTestShortcut={armShortcutTest}
         onComplete={async () => {
           const nextSettings = {
             ...settingsDraft,
@@ -529,6 +581,8 @@ function App() {
               setSettings={setSettingsDraft}
               microphones={microphones}
               shortcutStatus={shortcutStatus}
+              shortcutTest={shortcutTest}
+              onTestShortcut={armShortcutTest}
               onSave={handleSaveSettings}
               updateStatus={updateStatus}
               updateResult={updateResult}
@@ -811,6 +865,8 @@ function Onboarding({
   microphones,
   modelStatus,
   shortcutStatus,
+  shortcutTest,
+  onTestShortcut,
   onComplete,
 }: {
   settings: AppSettings;
@@ -818,6 +874,8 @@ function Onboarding({
   microphones: MicrophoneInfo[];
   modelStatus: ModelStatus | null;
   shortcutStatus: ShortcutStatus | null;
+  shortcutTest: ShortcutTestState;
+  onTestShortcut: () => void;
   onComplete: () => Promise<void>;
 }) {
   return (
@@ -878,6 +936,13 @@ function Onboarding({
               {shortcutStatus?.message ??
                 "Wind Speak registers a global shortcut on launch and keeps the floating control available if a shortcut is taken."}
             </p>
+            <div className="shortcut-test">
+              <button className="button button--ghost" type="button" onClick={onTestShortcut}>
+                <Keyboard size={18} />
+                Test active shortcut
+              </button>
+              <p>{shortcutTest.message}</p>
+            </div>
             <label>
               <span>Shortcut</span>
               <select
@@ -998,6 +1063,8 @@ function SettingsPanel({
   setSettings,
   microphones,
   shortcutStatus,
+  shortcutTest,
+  onTestShortcut,
   onSave,
   updateStatus,
   updateResult,
@@ -1008,6 +1075,8 @@ function SettingsPanel({
   setSettings: (settings: AppSettings) => void;
   microphones: MicrophoneInfo[];
   shortcutStatus: ShortcutStatus | null;
+  shortcutTest: ShortcutTestState;
+  onTestShortcut: () => void;
   onSave: () => Promise<void>;
   updateStatus: UpdateStatus;
   updateResult: UpdateCheckResult | null;
@@ -1056,6 +1125,13 @@ function SettingsPanel({
           {shortcutStatus?.message ??
             "Wind Speak registers your saved shortcut when the desktop app starts."}
         </p>
+        <div className="shortcut-test">
+          <button className="button button--ghost" type="button" onClick={onTestShortcut}>
+            <Keyboard size={18} />
+            Test active shortcut
+          </button>
+          <p>{shortcutTest.message}</p>
+        </div>
       </div>
       <label>
         <span>Mode</span>
