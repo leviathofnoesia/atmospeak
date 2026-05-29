@@ -9,7 +9,8 @@ use crate::{
         ModelInventory, ModelStatus, RecordingStarted, ShortcutStatus, Snippet, TranscriptSession,
     },
     services::{
-        app_state::AppState, cleanup, injection, runtime, shortcuts, startup, transcriber,
+        app_state::AppState, cleanup, injection, recorder::FinishedRecording, runtime, shortcuts,
+        startup, transcriber,
     },
 };
 
@@ -55,8 +56,28 @@ pub fn start_recording(state: State<'_, AppState>) -> CommandResult<RecordingSta
 }
 
 #[tauri::command]
-pub fn stop_recording(app: AppHandle, state: State<'_, AppState>) -> CommandResult<DictationResult> {
-    to_command_result(stop_recording_inner(&app, &state))
+pub async fn stop_recording(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<DictationResult> {
+    let finished = to_command_result(state.recorder.stop())?;
+    let snapshot = to_command_result(state.database.lock().snapshot())?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        complete_recording_inner(&app, &snapshot, finished)
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(to_command_result)?;
+
+    to_command_result(
+        state
+            .database
+            .lock()
+            .insert_session(&result.session)
+            .context("failed to save transcript session"),
+    )?;
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -135,10 +156,11 @@ pub fn get_model_inventory(
     Ok(runtime::model_inventory(&app, &settings))
 }
 
-fn stop_recording_inner(app: &AppHandle, state: &State<'_, AppState>) -> Result<DictationResult> {
-    let finished = state.recorder.stop()?;
-    let database = state.database.lock();
-    let snapshot = database.snapshot()?;
+fn complete_recording_inner(
+    app: &AppHandle,
+    snapshot: &AppSnapshot,
+    finished: FinishedRecording,
+) -> Result<DictationResult> {
     let raw_text = transcriber::transcribe(app, &snapshot.settings, &finished.path)?;
     let cleaned_text = if snapshot.settings.cleanup_enabled {
         cleanup::clean_text(&raw_text, &snapshot.dictionary, &snapshot.snippets)
@@ -166,9 +188,6 @@ fn stop_recording_inner(app: &AppHandle, state: &State<'_, AppState>) -> Result<
             .unwrap_or(false),
         created_at: Utc::now(),
     };
-    database
-        .insert_session(&session)
-        .context("failed to save transcript session")?;
 
     Ok(DictationResult {
         session,
