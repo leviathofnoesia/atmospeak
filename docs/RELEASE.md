@@ -5,7 +5,7 @@ Wind Speak ships Windows-first release artifacts:
 - NSIS installer: primary user download.
 - MSI installer: enterprise-friendly fallback.
 - Portable zip: unzip-and-run build containing `wind-speak.exe`, sidecar runtime, and bundled resources.
-- NSIS updater zip: signed Tauri updater bundle used by `latest.json`.
+- NSIS updater signature: signed Tauri v2 updater artifact used by `latest.json`.
 - `latest.json`: Tauri updater metadata for GitHub Releases.
 - `SHA256SUMS.txt`: checksum manifest for public verification.
 
@@ -20,10 +20,9 @@ bun run release:build
 The private updater key must stay outside the repository. The matching public
 key is committed in `src-tauri/tauri.conf.json`.
 
-The app currently uses Tauri's `createUpdaterArtifacts: "v1Compatible"` mode so
-Windows builds emit signed `*.nsis.zip` and `*.msi.zip` updater bundles. The
-public installer download remains the NSIS `.exe`; the updater endpoint points
-to the signed NSIS zip.
+The app uses Tauri's `createUpdaterArtifacts: true` mode so Windows builds emit
+updater signatures for the NSIS and MSI installers. The public installer
+download and the updater artifact both use the NSIS `.exe`.
 
 ## GitHub Release
 
@@ -41,9 +40,9 @@ may warn until a trusted certificate or Azure Trusted Signing profile is wired
 into Tauri's Windows signing config.
 
 Tauri updater signatures are separate from Windows code signing. The updater
-verifies that update bundles match the public key embedded in the app. The
+verifies that update artifacts match the public key embedded in the app. The
 signature stored in `latest.json` is the content of
-`Wind-Speak_<version>_x64-setup.nsis.zip.sig`.
+`Wind-Speak_<version>_x64-setup.exe.sig`.
 
 ## Install/Uninstall Smoke
 

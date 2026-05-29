@@ -28,7 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": "v1Compatible",
+    "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/whisper-cli"
     ],

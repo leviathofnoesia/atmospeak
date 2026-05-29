@@ -69,6 +69,7 @@ function Invoke-UpdaterSigner([string]$Path) {
 }
 
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
+Get-ChildItem $ReleaseDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
 
 if ($null -eq $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
@@ -104,14 +105,14 @@ if (-not $MsiSource) { throw "MSI installer was not produced." }
 
 $NsisName = "Wind-Speak_$Version`_x64-setup.exe"
 $MsiName = "Wind-Speak_$Version`_x64_en-US.msi"
-$UpdaterName = "Wind-Speak_$Version`_x64-setup.nsis.zip"
+$UpdaterZipName = "Wind-Speak_$Version`_x64-setup.nsis.zip"
 $PortableName = "Wind-Speak_$Version`_x64-portable.zip"
 $LatestName = "latest.json"
 $ChecksumsName = "SHA256SUMS.txt"
 
 $NsisDest = Join-Path $ReleaseDir $NsisName
 $MsiDest = Join-Path $ReleaseDir $MsiName
-$UpdaterDest = Join-Path $ReleaseDir $UpdaterName
+$UpdaterZipDest = Join-Path $ReleaseDir $UpdaterZipName
 $PortableDest = Join-Path $ReleaseDir $PortableName
 $LatestDest = Join-Path $ReleaseDir $LatestName
 $ChecksumsDest = Join-Path $ReleaseDir $ChecksumsName
@@ -119,25 +120,28 @@ $ChecksumsDest = Join-Path $ReleaseDir $ChecksumsName
 Copy-Item $NsisSource.FullName $NsisDest -Force
 Copy-Item $MsiSource.FullName $MsiDest -Force
 
-$UpdaterSource = Get-ChildItem (Join-Path $BundleRoot "nsis") -Filter "*.nsis.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($UpdaterSource) {
-  Copy-Item $UpdaterSource.FullName $UpdaterDest -Force
+$UpdaterAssetName = $NsisName
+$UpdaterSignaturePath = "$NsisDest.sig"
+$NsisSigSource = "$($NsisSource.FullName).sig"
+if (Test-Path $NsisSigSource) {
+  Copy-Item $NsisSigSource $UpdaterSignaturePath -Force
+} else {
+  $UpdaterSource = Get-ChildItem (Join-Path $BundleRoot "nsis") -Filter "*.nsis.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $UpdaterAssetName = $UpdaterZipName
+  $UpdaterSignaturePath = "$UpdaterZipDest.sig"
+  if ($UpdaterSource) {
+  Copy-Item $UpdaterSource.FullName $UpdaterZipDest -Force
   $UpdaterSigSource = "$($UpdaterSource.FullName).sig"
   if (-not (Test-Path $UpdaterSigSource)) {
     throw "Updater artifact was produced without a signature: $UpdaterSigSource"
   }
-  Copy-Item $UpdaterSigSource "$UpdaterDest.sig" -Force
-} else {
-  if (Test-Path $UpdaterDest) {
-    Remove-Item $UpdaterDest -Force
-  }
-  if (Test-Path "$UpdaterDest.sig") {
-    Remove-Item "$UpdaterDest.sig" -Force
-  }
-  Compress-Archive -Path $NsisDest -DestinationPath $UpdaterDest -CompressionLevel Optimal
-  Invoke-UpdaterSigner $UpdaterDest
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to sign $UpdaterDest"
+  Copy-Item $UpdaterSigSource $UpdaterSignaturePath -Force
+  } else {
+    Compress-Archive -Path $NsisDest -DestinationPath $UpdaterZipDest -CompressionLevel Optimal
+    Invoke-UpdaterSigner $UpdaterZipDest
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to sign $UpdaterZipDest"
+    }
   }
 }
 
@@ -159,7 +163,7 @@ if (Test-Path $PortableDest) {
 }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $PortableDest -CompressionLevel Optimal
 
-$UpdaterSignature = (Get-Content "$UpdaterDest.sig" -Raw).Trim()
+$UpdaterSignature = (Get-Content $UpdaterSignaturePath -Raw).Trim()
 $Latest = [ordered]@{
   version = $Version
   notes = "Wind Speak $Version desktop release with bundled offline transcription runtime."
@@ -167,7 +171,7 @@ $Latest = [ordered]@{
   platforms = [ordered]@{
     "windows-x86_64" = [ordered]@{
       signature = $UpdaterSignature
-      url = "https://github.com/$ReleaseRepo/releases/latest/download/$UpdaterName"
+      url = "https://github.com/$ReleaseRepo/releases/latest/download/$UpdaterAssetName"
     }
   }
 }
