@@ -14,6 +14,7 @@ import type {
   ModelStatus,
   RecordingStarted,
   ReleaseArtifact,
+  ShortcutStatus,
   Snippet,
   UpdateCheckResult,
 } from "../types/dictation";
@@ -35,6 +36,7 @@ const defaultSettings: AppSettings = {
   cleanupEnabled: true,
   startAtLogin: false,
   onboardingComplete: false,
+  onboardingVersion: "",
   advancedRuntimeEnabled: false,
   advancedModelPath: "",
   advancedWhisperCliPath: "",
@@ -135,6 +137,14 @@ function recalculateStats(snapshot: AppSnapshot): AppSnapshot {
 
 export function getAppSnapshot(): Promise<AppSnapshot> {
   return command("get_app_snapshot", undefined, () => mockSnapshot);
+}
+
+export function getShortcutStatus(): Promise<ShortcutStatus> {
+  return command("get_shortcut_status", undefined, () => ({
+    registered: true,
+    hotkey: mockSnapshot.settings.hotkey,
+    message: `Global shortcut registered: ${mockSnapshot.settings.hotkey}`,
+  }));
 }
 
 export function listMicrophones(): Promise<MicrophoneInfo[]> {

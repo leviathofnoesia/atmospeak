@@ -1,11 +1,13 @@
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
+use std::sync::Arc;
 
-use crate::{db::Database, services::recorder::RecorderService};
+use crate::{db::Database, models::ShortcutStatus, services::recorder::RecorderService};
 
 pub struct AppState {
     pub database: Mutex<Database>,
     pub recorder: RecorderService,
+    pub shortcut_status: Arc<Mutex<ShortcutStatus>>,
 }
 
 impl AppState {
@@ -20,6 +22,7 @@ impl AppState {
         Ok(Self {
             database: Mutex::new(Database::open(app_dir.clone())?),
             recorder: RecorderService::new(recordings_dir),
+            shortcut_status: Arc::new(Mutex::new(ShortcutStatus::default())),
         })
     }
 }

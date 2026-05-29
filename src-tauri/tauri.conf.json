@@ -12,12 +12,29 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Wind Speak",
         "width": 1180,
         "height": 760,
         "minWidth": 980,
         "minHeight": 660,
         "resizable": true,
+        "center": true
+      },
+      {
+        "label": "overlay",
+        "title": "Wind Speak Overlay",
+        "url": "/?view=overlay",
+        "width": 520,
+        "height": 150,
+        "minWidth": 420,
+        "minHeight": 132,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
         "center": true
       }
     ],

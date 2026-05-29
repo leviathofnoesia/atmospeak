@@ -71,6 +71,13 @@ body {
     var(--c-porcelain);
 }
 
+body.is-overlay-window {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
 button,
 input,
 select {
@@ -420,7 +427,7 @@ h1 {
 
 .recorder__stripe {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   border-top: 2px solid var(--line);
 }
 
@@ -439,6 +446,47 @@ h1 {
   border-right: 0;
   background: var(--c-lilac);
   color: var(--c-onyx);
+}
+
+.recorder__notice {
+  max-width: 310px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-shell {
+  width: 100vw;
+  height: 100vh;
+  padding: 10px;
+  background: transparent;
+}
+
+.overlay-shell .recorder {
+  position: static;
+  width: 100%;
+  height: 100%;
+  box-shadow: 5px 5px 0 var(--c-onyx);
+}
+
+.overlay-shell .recorder__meter {
+  height: 28px;
+}
+
+.overlay-shell .recorder__main {
+  padding: 12px 14px;
+}
+
+.overlay-shell .recorder__main h2 {
+  font-size: 34px;
+}
+
+.overlay-shell .recorder__stripe span {
+  padding: 7px;
 }
 
 .notice-rail {

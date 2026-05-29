@@ -9,6 +9,7 @@ export interface AppSettings {
   cleanupEnabled: boolean;
   startAtLogin: boolean;
   onboardingComplete: boolean;
+  onboardingVersion: string;
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
   advancedWhisperCliPath: string;
@@ -54,6 +55,12 @@ export interface AppSnapshot {
   snippets: Snippet[];
   sessions: TranscriptSession[];
   stats: DictationStats;
+}
+
+export interface ShortcutStatus {
+  registered: boolean;
+  hotkey: string;
+  message: string;
 }
 
 export interface RecordingStarted {

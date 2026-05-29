@@ -7,6 +7,8 @@ interface RecorderOverlayProps {
   elapsedSeconds: number;
   busy: boolean;
   modelStatus: ModelStatus | null;
+  hotkeyLabel?: string;
+  notice?: string;
   onToggle: () => void;
   onCancel: () => void;
 }
@@ -16,6 +18,8 @@ export function RecorderOverlay({
   elapsedSeconds,
   busy,
   modelStatus,
+  hotkeyLabel = "CTRL WIN SPACE",
+  notice,
   onToggle,
   onCancel,
 }: RecorderOverlayProps) {
@@ -28,7 +32,7 @@ export function RecorderOverlay({
     .padStart(2, "0")}`;
 
   return (
-    <aside className="recorder" aria-label="Recorder controls">
+    <aside className="recorder" aria-label="Recorder controls" data-tauri-drag-region>
       <div className="recorder__meter" aria-hidden="true">
         {Array.from({ length: 18 }, (_, index) => (
           <span key={index} />
@@ -48,6 +52,7 @@ export function RecorderOverlay({
                   : "Runtime unavailable"
             }
           />
+          {notice ? <p className="recorder__notice">{notice}</p> : null}
         </div>
         <div className="recorder__actions">
           <button
@@ -73,9 +78,9 @@ export function RecorderOverlay({
         </div>
       </div>
       <div className="recorder__stripe">
-        <span>CTRL</span>
-        <span>WIN</span>
-        <span>SPACE</span>
+        {hotkeyLabel.split("+").map((part) => (
+          <span key={part}>{part.trim()}</span>
+        ))}
       </div>
     </aside>
   );

@@ -13,6 +13,7 @@ pub struct AppSettings {
     pub cleanup_enabled: bool,
     pub start_at_login: bool,
     pub onboarding_complete: bool,
+    pub onboarding_version: String,
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
     pub advanced_whisper_cli_path: String,
@@ -29,9 +30,28 @@ impl Default for AppSettings {
             cleanup_enabled: true,
             start_at_login: false,
             onboarding_complete: false,
+            onboarding_version: String::new(),
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
             advanced_whisper_cli_path: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutStatus {
+    pub registered: bool,
+    pub hotkey: String,
+    pub message: String,
+}
+
+impl Default for ShortcutStatus {
+    fn default() -> Self {
+        Self {
+            registered: false,
+            hotkey: String::new(),
+            message: "Global shortcut has not been registered yet.".to_string(),
         }
     }
 }

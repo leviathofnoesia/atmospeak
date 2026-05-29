@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
 import {
   BookOpen,
@@ -17,7 +17,7 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import { RecorderOverlay } from "./components/RecorderOverlay";
@@ -32,6 +32,7 @@ import {
   getModelInventory,
   hasTauriRuntime,
   getModelStatus,
+  getShortcutStatus,
   injectText,
   listMicrophones,
   saveSettings,
@@ -50,11 +51,14 @@ import type {
   ModelInventory,
   ModelStatus,
   RecordingStarted,
+  ShortcutStatus,
   Snippet,
   TranscriptSession,
   UpdateCheckResult,
   UpdateStatus,
 } from "./types/dictation";
+
+const onboardingVersion = "desktop-parity-v2";
 
 const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "home", label: "Home", icon: Radio },
@@ -66,8 +70,17 @@ const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
 ];
 
 function App() {
+  const isOverlayView =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("view") === "overlay";
+
+  if (isOverlayView) {
+    return <OverlayWindow />;
+  }
+
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
+  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null);
   const [microphones, setMicrophones] = useState<MicrophoneInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
@@ -83,20 +96,49 @@ function App() {
   });
   const [dictionaryDraft, setDictionaryDraft] = useState({ phrase: "", replacement: "" });
   const [snippetDraft, setSnippetDraft] = useState({ trigger: "", body: "" });
+  const recordingRef = useRef<RecordingStarted | null>(null);
+  const busyRef = useRef(false);
+  const settingsRef = useRef<AppSettings | null>(null);
 
   const refresh = useCallback(async () => {
-    const [nextSnapshot, nextMicrophones, nextModelStatus, nextModelInventory] = await Promise.all([
+    const [
+      nextSnapshot,
+      nextMicrophones,
+      nextModelStatus,
+      nextModelInventory,
+      nextShortcutStatus,
+    ] = await Promise.all([
       getAppSnapshot(),
       listMicrophones(),
       getModelStatus(),
       getModelInventory(),
+      getShortcutStatus(),
     ]);
     setSnapshot(nextSnapshot);
     setSettingsDraft(nextSnapshot.settings);
     setMicrophones(nextMicrophones);
     setModelStatus(nextModelStatus);
     setModelInventory(nextModelInventory);
+    setShortcutStatus(nextShortcutStatus);
   }, []);
+
+  const refreshSnapshotOnly = useCallback(async () => {
+    const nextSnapshot = await getAppSnapshot();
+    setSnapshot(nextSnapshot);
+    setSettingsDraft(nextSnapshot.settings);
+  }, []);
+
+  useEffect(() => {
+    recordingRef.current = recording;
+  }, [recording]);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  useEffect(() => {
+    settingsRef.current = settingsDraft;
+  }, [settingsDraft]);
 
   useEffect(() => {
     refresh().catch((error: unknown) => {
@@ -113,22 +155,27 @@ function App() {
     const startedAt = new Date(recording.startedAt).getTime();
     const interval = window.setInterval(() => {
       setElapsedSeconds(Math.max(0, (Date.now() - startedAt) / 1000));
-    }, 250);
+    }, 500);
 
     return () => window.clearInterval(interval);
   }, [recording]);
 
   const handleToggleRecording = useCallback(async () => {
+    if (busyRef.current) {
+      return;
+    }
+
     setBusy(true);
     try {
-      if (recording === null) {
+      if (recordingRef.current === null) {
         const started = await startRecording();
         setRecording(started);
         setNotice({ tone: "success", message: `Recording from ${started.microphoneName}.` });
       } else {
-        const result = await stopRecording();
         setRecording(null);
-        await refresh();
+        setNotice({ tone: "neutral", message: "Transcribing locally..." });
+        const result = await stopRecording();
+        await refreshSnapshotOnly();
         setNotice({
           tone: result.injection?.injected ? "success" : "neutral",
           message: result.injection?.message ?? "Transcript saved to history.",
@@ -142,22 +189,59 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }, [recording, refresh]);
+  }, [refresh, refreshSnapshotOnly]);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
       return undefined;
     }
 
-    let removeListener: (() => void) | undefined;
+    const payload = {
+      recording,
+      elapsedSeconds,
+      busy,
+      modelStatus,
+      shortcutStatus,
+      notice,
+    };
+    void emit("wind-speak://dictation-state", payload);
+    return undefined;
+  }, [busy, elapsedSeconds, modelStatus, notice, recording, shortcutStatus]);
+
+  const handleCancel = useCallback(async () => {
+    if (busyRef.current) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await cancelRecording();
+      setRecording(null);
+      setNotice({ tone: "neutral", message: "Recording cancelled." });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return undefined;
+    }
+
+    let removeShortcutListener: (() => void) | undefined;
+    let removeOverlayListener: (() => void) | undefined;
+    let removeShortcutStatusListener: (() => void) | undefined;
     listen<string>("wind-speak://shortcut", (event) => {
       const action = event.payload;
-      const mode = settingsDraft?.mode ?? "toggle";
+      const mode = settingsRef.current?.mode ?? "toggle";
+      const activeRecording = recordingRef.current;
       if (mode === "pushToTalk") {
-        if (action === "pressed" && recording === null) {
+        if (action === "pressed" && activeRecording === null) {
           void handleToggleRecording();
         }
-        if (action === "released" && recording !== null) {
+        if (action === "released" && activeRecording !== null) {
           void handleToggleRecording();
         }
         if (action === "toggle") {
@@ -171,27 +255,47 @@ function App() {
       }
     })
       .then((unlisten) => {
-        removeListener = unlisten;
+        removeShortcutListener = unlisten;
       })
       .catch((error: unknown) => {
         setNotice({ tone: "warning", message: stringifyError(error) });
       });
 
-    return () => removeListener?.();
-  }, [handleToggleRecording, recording, settingsDraft?.mode]);
+    listen<string>("wind-speak://overlay-command", (event) => {
+      if (event.payload === "toggle") {
+        void handleToggleRecording();
+      }
+      if (event.payload === "cancel") {
+        void handleCancel();
+      }
+    })
+      .then((unlisten) => {
+        removeOverlayListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
 
-  const handleCancel = async () => {
-    setBusy(true);
-    try {
-      await cancelRecording();
-      setRecording(null);
-      setNotice({ tone: "neutral", message: "Recording cancelled." });
-    } catch (error: unknown) {
-      setNotice({ tone: "error", message: stringifyError(error) });
-    } finally {
-      setBusy(false);
-    }
-  };
+    listen<ShortcutStatus>("wind-speak://shortcut-status", (event) => {
+      setShortcutStatus(event.payload);
+      setNotice({
+        tone: event.payload.registered ? "success" : "warning",
+        message: event.payload.message,
+      });
+    })
+      .then((unlisten) => {
+        removeShortcutStatusListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
+    return () => {
+      removeShortcutListener?.();
+      removeOverlayListener?.();
+      removeShortcutStatusListener?.();
+    };
+  }, [handleCancel, handleToggleRecording]);
 
   const handleSaveSettings = async () => {
     if (settingsDraft === null) {
@@ -274,15 +378,23 @@ function App() {
     );
   }
 
-  if (!settingsDraft.onboardingComplete) {
+  if (
+    !settingsDraft.onboardingComplete ||
+    settingsDraft.onboardingVersion !== onboardingVersion
+  ) {
     return (
       <Onboarding
         settings={settingsDraft}
         setSettings={setSettingsDraft}
         microphones={microphones}
         modelStatus={modelStatus}
+        shortcutStatus={shortcutStatus}
         onComplete={async () => {
-          const nextSettings = { ...settingsDraft, onboardingComplete: true };
+          const nextSettings = {
+            ...settingsDraft,
+            onboardingComplete: true,
+            onboardingVersion,
+          };
           const nextSnapshot = await saveSettings(nextSettings);
           setSnapshot(nextSnapshot);
           setSettingsDraft(nextSnapshot.settings);
@@ -305,7 +417,10 @@ function App() {
         <div className="status-row">
           <StatusLed tone={readiness.tone} label={readiness.label} />
           <StatusLed tone={recording ? "hot" : "idle"} label={recording ? "Recording" : "Idle"} />
-          <StatusLed tone="idle" label={snapshot.settings.hotkey} />
+          <StatusLed
+            tone={shortcutStatus?.registered ? "good" : "warn"}
+            label={shortcutStatus?.hotkey || "Shortcut unavailable"}
+          />
         </div>
       </section>
 
@@ -433,6 +548,63 @@ function App() {
           )}
         </div>
       </section>
+    </main>
+  );
+}
+
+interface OverlayStatePayload {
+  recording: RecordingStarted | null;
+  elapsedSeconds: number;
+  busy: boolean;
+  modelStatus: ModelStatus | null;
+  shortcutStatus: ShortcutStatus | null;
+  notice: AppNotice;
+}
+
+function OverlayWindow() {
+  const [state, setState] = useState<OverlayStatePayload>({
+    recording: null,
+    elapsedSeconds: 0,
+    busy: false,
+    modelStatus: null,
+    shortcutStatus: null,
+    notice: { tone: "neutral", message: "Wind Speak is standing by." },
+  });
+
+  useEffect(() => {
+    document.body.classList.add("is-overlay-window");
+    return () => document.body.classList.remove("is-overlay-window");
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return undefined;
+    }
+
+    let removeStateListener: (() => void) | undefined;
+    listen<OverlayStatePayload>("wind-speak://dictation-state", (event) => {
+      setState(event.payload);
+    })
+      .then((unlisten) => {
+        removeStateListener = unlisten;
+      })
+      .catch(() => undefined);
+
+    return () => removeStateListener?.();
+  }, []);
+
+  return (
+    <main className="overlay-shell" data-tauri-drag-region>
+      <RecorderOverlay
+        recording={state.recording}
+        elapsedSeconds={state.elapsedSeconds}
+        busy={state.busy}
+        modelStatus={state.modelStatus}
+        hotkeyLabel={state.shortcutStatus?.hotkey || "BUTTON"}
+        notice={state.notice.message}
+        onToggle={() => void emit("wind-speak://overlay-command", "toggle")}
+        onCancel={() => void emit("wind-speak://overlay-command", "cancel")}
+      />
     </main>
   );
 }
@@ -626,12 +798,14 @@ function Onboarding({
   setSettings,
   microphones,
   modelStatus,
+  shortcutStatus,
   onComplete,
 }: {
   settings: AppSettings;
   setSettings: (settings: AppSettings) => void;
   microphones: MicrophoneInfo[];
   modelStatus: ModelStatus | null;
+  shortcutStatus: ShortcutStatus | null;
   onComplete: () => Promise<void>;
 }) {
   return (
@@ -683,8 +857,15 @@ function Onboarding({
             </div>
           </article>
           <article className="onboarding-step">
-            <StatusLed tone="idle" label={settings.hotkey} />
+            <StatusLed
+              tone={shortcutStatus?.registered ? "good" : "warn"}
+              label={shortcutStatus?.hotkey || "Overlay fallback"}
+            />
             <h2>Hold the shortcut, talk, release.</h2>
+            <p>
+              {shortcutStatus?.message ??
+                "Wind Speak registers a global shortcut on launch and keeps the floating control available if a shortcut is taken."}
+            </p>
             <label>
               <span>Capture mode</span>
               <select

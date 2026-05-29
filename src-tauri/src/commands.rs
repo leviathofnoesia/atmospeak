@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     models::{
         AppSettings, AppSnapshot, DictationResult, DictionaryEntry, InjectionResult, MicrophoneInfo,
-        ModelInventory, ModelStatus, RecordingStarted, Snippet, TranscriptSession,
+        ModelInventory, ModelStatus, RecordingStarted, ShortcutStatus, Snippet, TranscriptSession,
     },
     services::{
         app_state::AppState, cleanup, injection, runtime, startup, transcriber,
@@ -18,6 +18,11 @@ type CommandResult<T> = std::result::Result<T, String>;
 #[tauri::command]
 pub fn get_app_snapshot(state: State<'_, AppState>) -> CommandResult<AppSnapshot> {
     to_command_result(state.database.lock().snapshot())
+}
+
+#[tauri::command]
+pub fn get_shortcut_status(state: State<'_, AppState>) -> CommandResult<ShortcutStatus> {
+    Ok(state.shortcut_status.lock().clone())
 }
 
 #[tauri::command]
