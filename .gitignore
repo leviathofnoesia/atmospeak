@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-site/
+release/
+src-tauri/target/
+.tmp/
+.vscode/
+test-results/
+playwright-report/
+.env
+.env.local
+*.key
+*.pfx
+*.p12
+*.log

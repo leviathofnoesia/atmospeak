@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Wind Speak",
+  "version": "0.1.0",
+  "identifier": "app.wind-speak.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Wind Speak",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 980,
+        "minHeight": 660,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data:; font-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": "v1Compatible",
+    "externalBin": [
+      "binaries/whisper-cli"
+    ],
+    "resources": [
+      "resources/whisper-runtime/whisper-cli.exe",
+      "resources/whisper-runtime/whisper.dll",
+      "resources/whisper-runtime/ggml.dll",
+      "resources/whisper-runtime/ggml-base.dll",
+      "resources/whisper-runtime/ggml-cpu.dll",
+      "resources/models/ggml-base.en.bin",
+      "resources/ACKNOWLEDGEMENTS.md"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4OUM5NkZCMzdGQTJBQTIKUldTaUt2bzMrNWFjbURYdEJoMEw2Tmc0eWNIQ3pYazBNUExud0lrajFSNzk0dG50UHVaRTlQR24K",
+      "endpoints": [
+        "https://github.com/leviathofnoesia/wind-speak/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

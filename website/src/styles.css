@@ -1,0 +1,324 @@
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Black.woff2") format("woff2");
+  font-weight: 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  --c-dusk: #485696;
+  --c-teal: #689689;
+  --c-lilac: #be95c4;
+  --c-porcelain: #f7f7f2;
+  --c-onyx: #121113;
+  --ink: #1b1a1d;
+  --muted: #68666e;
+  --line: #121113;
+  --shadow: 10px 10px 0 #121113;
+  font-family: "Geist", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--c-porcelain);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(18, 17, 19, 0.05) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(0deg, rgba(18, 17, 19, 0.04) 1px, transparent 1px) 0 0 / 40px 40px,
+    var(--c-porcelain);
+}
+
+a {
+  color: inherit;
+}
+
+.site-shell {
+  min-height: 100vh;
+}
+
+.plate {
+  position: relative;
+  min-height: 86vh;
+  overflow: hidden;
+  padding: 24px;
+  color: var(--c-porcelain);
+  background:
+    linear-gradient(rgba(18, 17, 19, 0.76), rgba(18, 17, 19, 0.82)),
+    url("/assets/brand/cloud-infinity.jpeg") center / cover,
+    var(--c-onyx);
+}
+
+.plate::before,
+.downloads::before {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  pointer-events: none;
+  border: 2px solid currentColor;
+}
+
+.top-nav {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 12px;
+  border: 2px solid var(--c-porcelain);
+  background: rgba(18, 17, 19, 0.72);
+}
+
+.brand-chip,
+.kicker,
+.spec-strip,
+.download-card a {
+  font-family: "Geist Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  width: min(840px, 100%);
+  margin-top: 96px;
+  margin-left: clamp(0px, 5vw, 72px);
+}
+
+.hero h1 {
+  max-width: 880px;
+  margin: 18px 0 22px;
+  font-size: 78px;
+  line-height: 0.98;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.hero h1 em {
+  display: block;
+  color: var(--c-lilac);
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.hero p,
+.section-head p,
+.feature-card p,
+.download-card p,
+.site-footer p {
+  max-width: 680px;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.65;
+}
+
+.halftone {
+  position: absolute;
+  right: 64px;
+  top: 120px;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  border: 2px solid var(--c-porcelain);
+  background-image: radial-gradient(var(--c-lilac) 1.6px, transparent 1.6px);
+  background-size: 9px 9px;
+  opacity: 0.48;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  border: 2px solid currentColor;
+  padding: 0 18px;
+  background: transparent;
+  color: inherit;
+  font-weight: 900;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.button-primary {
+  background: var(--c-lilac);
+  color: var(--c-onyx);
+}
+
+.button:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 5px 5px 0 currentColor;
+}
+
+.spec-strip {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 2px solid var(--c-porcelain);
+  background: var(--c-onyx);
+}
+
+.spec-strip span {
+  min-height: 44px;
+  padding: 13px 14px;
+  border-right: 2px solid var(--c-porcelain);
+}
+
+.spec-strip span:last-child {
+  border-right: 0;
+}
+
+.feature-band,
+.downloads,
+.site-footer {
+  position: relative;
+  width: min(1180px, calc(100vw - 40px));
+  margin: 28px auto;
+}
+
+.feature-band {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.feature-card,
+.download-card,
+.site-footer {
+  border: 2px solid var(--line);
+  background: #ffffff;
+  box-shadow: 6px 6px 0 var(--line);
+}
+
+.feature-card,
+.download-card {
+  min-height: 240px;
+  padding: 18px;
+}
+
+.feature-card h2,
+.downloads h2,
+.download-card h3 {
+  margin: 14px 0 12px;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.downloads {
+  overflow: hidden;
+  padding: 24px;
+  color: var(--c-porcelain);
+  background: var(--c-dusk);
+  box-shadow: var(--shadow);
+}
+
+.section-head {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 20px;
+}
+
+.download-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.download-card {
+  color: var(--ink);
+}
+
+.download-card.is-primary {
+  background: var(--c-lilac);
+}
+
+.download-card a {
+  display: inline-block;
+  margin-top: 18px;
+  overflow-wrap: anywhere;
+}
+
+.site-footer {
+  padding: 20px;
+}
+
+@media (max-width: 860px) {
+  .plate {
+    min-height: 780px;
+  }
+
+  .hero h1 {
+    font-size: 52px;
+  }
+
+  .halftone {
+    right: 24px;
+    top: 84px;
+    width: 180px;
+    height: 180px;
+  }
+
+  .feature-band,
+  .download-grid,
+  .spec-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .spec-strip span,
+  .spec-strip span:last-child {
+    border-right: 0;
+    border-bottom: 2px solid var(--c-porcelain);
+  }
+
+  .spec-strip span:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}

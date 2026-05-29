@@ -1,0 +1,4 @@
+src-tauri/resources/models/*.bin filter=lfs diff=lfs merge=lfs -text
+src-tauri/resources/whisper-runtime/*.dll filter=lfs diff=lfs merge=lfs -text
+src-tauri/resources/whisper-runtime/*.exe filter=lfs diff=lfs merge=lfs -text
+src-tauri/binaries/*.exe filter=lfs diff=lfs merge=lfs -text

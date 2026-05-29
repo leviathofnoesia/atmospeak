@@ -1,0 +1,163 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(default)]
+pub struct AppSettings {
+    pub hotkey: String,
+    pub mode: DictationMode,
+    pub microphone_name: Option<String>,
+    pub restore_clipboard: bool,
+    pub auto_inject: bool,
+    pub cleanup_enabled: bool,
+    pub start_at_login: bool,
+    pub onboarding_complete: bool,
+    pub advanced_runtime_enabled: bool,
+    pub advanced_model_path: String,
+    pub advanced_whisper_cli_path: String,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            hotkey: "Ctrl+Win+Space".to_string(),
+            mode: DictationMode::PushToTalk,
+            microphone_name: None,
+            restore_clipboard: true,
+            auto_inject: true,
+            cleanup_enabled: true,
+            start_at_login: false,
+            onboarding_complete: false,
+            advanced_runtime_enabled: false,
+            advanced_model_path: String::new(),
+            advanced_whisper_cli_path: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DictationMode {
+    Toggle,
+    PushToTalk,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictionaryEntry {
+    pub id: String,
+    pub phrase: String,
+    pub replacement: String,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snippet {
+    pub id: String,
+    pub trigger: String,
+    pub body: String,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSession {
+    pub id: String,
+    pub raw_text: String,
+    pub cleaned_text: String,
+    pub audio_path: String,
+    pub duration_ms: u64,
+    pub word_count: usize,
+    pub injected: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationStats {
+    pub total_sessions: usize,
+    pub total_words: usize,
+    pub total_duration_ms: u64,
+    pub average_words_per_minute: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSnapshot {
+    pub settings: AppSettings,
+    pub dictionary: Vec<DictionaryEntry>,
+    pub snippets: Vec<Snippet>,
+    pub sessions: Vec<TranscriptSession>,
+    pub stats: DictationStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingStarted {
+    pub id: String,
+    pub started_at: DateTime<Utc>,
+    pub microphone_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationResult {
+    pub session: TranscriptSession,
+    pub injection: Option<InjectionResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InjectionResult {
+    pub injected: bool,
+    pub restored_clipboard: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneInfo {
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatus {
+    pub whisper_cli_found: bool,
+    pub model_found: bool,
+    pub ready: bool,
+    pub message: String,
+    pub source: RuntimeSource,
+    pub whisper_cli_path: String,
+    pub model_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeSource {
+    Bundled,
+    AdvancedOverride,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInventory {
+    pub active_model_id: String,
+    pub models: Vec<ModelInventoryItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInventoryItem {
+    pub id: String,
+    pub label: String,
+    pub installed: bool,
+    pub bundled: bool,
+    pub path: Option<String>,
+    pub size_mb: Option<u64>,
+}
