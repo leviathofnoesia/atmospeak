@@ -9,8 +9,8 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
     cancel_recording, delete_dictionary_entry, delete_snippet, get_app_snapshot, get_model_inventory,
-    get_model_status, get_shortcut_status, inject_text, list_microphones, save_settings,
-    start_recording, stop_recording, upsert_dictionary_entry, upsert_snippet,
+    get_model_status, get_recording_level, get_shortcut_status, inject_text, list_microphones,
+    save_settings, start_recording, stop_recording, upsert_dictionary_entry, upsert_snippet,
 };
 use services::{app_state::AppState, shortcuts};
 
@@ -84,6 +84,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_snapshot,
             get_shortcut_status,
+            get_recording_level,
             list_microphones,
             save_settings,
             start_recording,

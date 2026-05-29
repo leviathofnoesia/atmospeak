@@ -9,6 +9,7 @@ interface RecorderOverlayProps {
   modelStatus: ModelStatus | null;
   hotkeyLabel?: string;
   notice?: string;
+  inputLevel?: number;
   onToggle: () => void;
   onCancel: () => void;
 }
@@ -20,6 +21,7 @@ export function RecorderOverlay({
   modelStatus,
   hotkeyLabel = "CTRL WIN SPACE",
   notice,
+  inputLevel = 0,
   onToggle,
   onCancel,
 }: RecorderOverlayProps) {
@@ -35,7 +37,12 @@ export function RecorderOverlay({
     <aside className="recorder" aria-label="Recorder controls" data-tauri-drag-region>
       <div className="recorder__meter" aria-hidden="true">
         {Array.from({ length: 18 }, (_, index) => (
-          <span key={index} />
+          <span
+            key={index}
+            style={{
+              transform: `scaleY(${meterScale(index, inputLevel, isRecording || busy)})`,
+            }}
+          />
         ))}
       </div>
       <div className="recorder__main">
@@ -84,4 +91,14 @@ export function RecorderOverlay({
       </div>
     </aside>
   );
+}
+
+function meterScale(index: number, level: number, active: boolean) {
+  if (!active) {
+    return 0.18 + ((index % 5) * 0.035);
+  }
+
+  const normalized = Math.max(0, Math.min(1, level));
+  const contour = 0.45 + Math.sin(index * 0.9) * 0.22 + Math.cos(index * 0.42) * 0.16;
+  return Math.max(0.12, Math.min(1, 0.14 + normalized * contour));
 }

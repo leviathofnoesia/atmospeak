@@ -32,6 +32,7 @@ import {
   getModelInventory,
   hasTauriRuntime,
   getModelStatus,
+  getRecordingLevel,
   getShortcutStatus,
   injectText,
   listMicrophones,
@@ -101,6 +102,7 @@ function App() {
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [recordingLevel, setRecordingLevel] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<AppNotice>({
     tone: "neutral",
@@ -171,6 +173,7 @@ function App() {
   useEffect(() => {
     if (recording === null) {
       setElapsedSeconds(0);
+      setRecordingLevel(0);
       return undefined;
     }
 
@@ -180,6 +183,34 @@ function App() {
     }, 500);
 
     return () => window.clearInterval(interval);
+  }, [recording]);
+
+  useEffect(() => {
+    if (recording === null) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const pollLevel = () => {
+      getRecordingLevel()
+        .then((level) => {
+          if (!cancelled) {
+            setRecordingLevel(level);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setRecordingLevel(0);
+          }
+        });
+    };
+
+    pollLevel();
+    const interval = window.setInterval(pollLevel, 120);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [recording]);
 
   const handleToggleRecording = useCallback(async () => {
@@ -225,10 +256,11 @@ function App() {
       modelStatus,
       shortcutStatus,
       notice,
+      recordingLevel,
     };
     void emit("wind-speak://dictation-state", payload);
     return undefined;
-  }, [busy, elapsedSeconds, modelStatus, notice, recording, shortcutStatus]);
+  }, [busy, elapsedSeconds, modelStatus, notice, recording, recordingLevel, shortcutStatus]);
 
   const handleCancel = useCallback(async () => {
     if (busyRef.current) {
@@ -504,6 +536,7 @@ function App() {
         modelStatus={modelStatus}
         hotkeyLabel={shortcutStatus?.hotkey || snapshot.settings.hotkey}
         notice={shortcutStatus?.registered ? undefined : shortcutStatus?.message}
+        inputLevel={recordingLevel}
         onToggle={handleToggleRecording}
         onCancel={handleCancel}
       />
@@ -637,6 +670,7 @@ interface OverlayStatePayload {
   modelStatus: ModelStatus | null;
   shortcutStatus: ShortcutStatus | null;
   notice: AppNotice;
+  recordingLevel: number;
 }
 
 function OverlayWindow() {
@@ -647,6 +681,7 @@ function OverlayWindow() {
     modelStatus: null,
     shortcutStatus: null,
     notice: { tone: "neutral", message: "Wind Speak is standing by." },
+    recordingLevel: 0,
   });
 
   useEffect(() => {
@@ -680,6 +715,7 @@ function OverlayWindow() {
         modelStatus={state.modelStatus}
         hotkeyLabel={state.shortcutStatus?.hotkey || "BUTTON"}
         notice={state.notice.message}
+        inputLevel={state.recordingLevel}
         onToggle={() => void emit("wind-speak://overlay-command", "toggle")}
         onCancel={() => void emit("wind-speak://overlay-command", "cancel")}
       />

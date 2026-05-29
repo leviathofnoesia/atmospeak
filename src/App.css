@@ -267,11 +267,12 @@ button {
   height: 20px;
   background: var(--c-teal);
   transform-origin: bottom;
-  animation: meter 1.1s var(--ease-breath) infinite alternate;
+  transition: transform 90ms linear;
 }
 
 .mic-meter span {
   height: 42px;
+  animation: meter 1.1s var(--ease-breath) infinite alternate;
 }
 
 .mic-meter span:nth-child(2),

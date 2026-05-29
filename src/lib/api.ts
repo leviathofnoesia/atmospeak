@@ -147,6 +147,10 @@ export function getShortcutStatus(): Promise<ShortcutStatus> {
   }));
 }
 
+export function getRecordingLevel(): Promise<number> {
+  return command("get_recording_level", undefined, () => 0.62);
+}
+
 export function listMicrophones(): Promise<MicrophoneInfo[]> {
   return command("list_microphones", undefined, () => [
     { name: "System default microphone", isDefault: true },

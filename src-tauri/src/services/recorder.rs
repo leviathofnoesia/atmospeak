@@ -173,6 +173,29 @@ impl RecorderService {
             Err(anyhow!("no active recording to cancel"))
         }
     }
+
+    pub fn level(&self) -> f32 {
+        let active = self.active.lock();
+        let Some(active) = active.as_ref() else {
+            return 0.0;
+        };
+        let samples = active.samples.lock();
+        if samples.is_empty() {
+            return 0.0;
+        }
+
+        let sample_count = ((active.sample_rate as usize) / 10).clamp(256, 4_800);
+        let start = samples.len().saturating_sub(sample_count);
+        let window = &samples[start..];
+        let rms = (window
+            .iter()
+            .map(|sample| sample * sample)
+            .sum::<f32>()
+            / window.len() as f32)
+            .sqrt();
+
+        (rms * 4.0).clamp(0.0, 1.0)
+    }
 }
 
 trait IntoF32 {
