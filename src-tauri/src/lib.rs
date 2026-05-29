@@ -4,7 +4,7 @@ mod models;
 mod services;
 mod tray;
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
@@ -58,6 +58,27 @@ pub fn run() {
             install_global_shortcut(app, shortcut_status.clone(), &initial_hotkey)?;
             tray::install(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                match window.label() {
+                    "main" => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    "overlay" => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        if let Some(main) = window.app_handle().get_webview_window("main") {
+                            let _ = main.emit(
+                                "wind-speak://overlay-visibility",
+                                "Floating control hidden. Reopen it from the tray menu.",
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
         })
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![

@@ -276,6 +276,7 @@ function App() {
     let removeShortcutListener: (() => void) | undefined;
     let removeOverlayListener: (() => void) | undefined;
     let removeShortcutStatusListener: (() => void) | undefined;
+    let removeOverlayVisibilityListener: (() => void) | undefined;
     listen<string>("wind-speak://shortcut", (event) => {
       const action = event.payload;
       if (shortcutTestRef.current.active) {
@@ -346,10 +347,21 @@ function App() {
         setNotice({ tone: "warning", message: stringifyError(error) });
       });
 
+    listen<string>("wind-speak://overlay-visibility", (event) => {
+      setNotice({ tone: "neutral", message: event.payload });
+    })
+      .then((unlisten) => {
+        removeOverlayVisibilityListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
     return () => {
       removeShortcutListener?.();
       removeOverlayListener?.();
       removeShortcutStatusListener?.();
+      removeOverlayVisibilityListener?.();
     };
   }, [handleCancel, handleToggleRecording, shortcutStatus?.hotkey]);
 

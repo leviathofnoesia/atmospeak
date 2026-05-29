@@ -6,10 +6,11 @@ use tauri::{
 
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Wind Speak").build(app)?;
+    let overlay = MenuItemBuilder::with_id("overlay", "Show / Hide Floating Control").build(app)?;
     let dictate = MenuItemBuilder::with_id("dictate", "Start / Stop Dictation").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &dictate, &quit])
+        .items(&[&open, &overlay, &dictate, &quit])
         .build()?;
 
     TrayIconBuilder::new()
@@ -17,6 +18,7 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
+            "overlay" => toggle_overlay_window(app),
             "dictate" => {
                 let _ = app.emit("wind-speak://shortcut", "toggle");
             }
@@ -43,5 +45,17 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+fn toggle_overlay_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("overlay") {
+        let is_visible = window.is_visible().unwrap_or(false);
+        if is_visible {
+            let _ = window.hide();
+        } else {
+            let _ = window.show();
+            let _ = window.set_always_on_top(true);
+        }
     }
 }
