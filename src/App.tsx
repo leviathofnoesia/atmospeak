@@ -38,6 +38,7 @@ import {
   listMicrophones,
   saveSettings,
   setShortcutsPaused,
+  showFloatingControl,
   startRecording,
   stopRecording,
   upsertDictionaryEntry,
@@ -344,6 +345,18 @@ function App() {
       const message = stringifyError(error);
       setPasteTest({ running: false, passed: false, message });
       setNotice({ tone: "error", message });
+    }
+  }, []);
+
+  const handleShowFloatingControl = useCallback(async () => {
+    try {
+      await showFloatingControl();
+      setNotice({
+        tone: "success",
+        message: "Floating control shown and reset above other windows.",
+      });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
     }
   }, []);
 
@@ -731,6 +744,7 @@ function App() {
                   message: nextStatus.message,
                 });
               }}
+              onShowFloatingControl={handleShowFloatingControl}
               onRerunOnboarding={rerunOnboarding}
               onSave={handleSaveSettings}
               updateStatus={updateStatus}
@@ -1234,6 +1248,7 @@ function SettingsPanel({
   shortcutTest,
   onTestShortcut,
   onToggleShortcutsPaused,
+  onShowFloatingControl,
   onRerunOnboarding,
   onSave,
   updateStatus,
@@ -1248,6 +1263,7 @@ function SettingsPanel({
   shortcutTest: ShortcutTestState;
   onTestShortcut: () => void;
   onToggleShortcutsPaused: () => Promise<void>;
+  onShowFloatingControl: () => Promise<void>;
   onRerunOnboarding: () => Promise<void>;
   onSave: () => Promise<void>;
   updateStatus: UpdateStatus;
@@ -1312,6 +1328,21 @@ function SettingsPanel({
           </button>
           <p>{shortcutTest.message}</p>
         </div>
+      </div>
+      <div className="instruction-card update-card">
+        <div>
+          <p className="eyebrow">Always-on-top recorder</p>
+          <h3>Floating control</h3>
+          <p>Show and reset the desktop recorder pill if it was hidden or moved off screen.</p>
+        </div>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={() => void onShowFloatingControl()}
+        >
+          <Radio size={18} />
+          Show floating control
+        </button>
       </div>
       <label>
         <span>Mode</span>

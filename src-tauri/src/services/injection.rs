@@ -64,7 +64,10 @@ fn send_paste_shortcut() -> Result<()> {
     if sent == inputs.len() as u32 {
         Ok(())
     } else {
-        Err(anyhow!("Windows SendInput sent {sent} of {} events", inputs.len()))
+        Err(anyhow!(
+            "Windows SendInput sent {sent} of {} events",
+            inputs.len()
+        ))
     }
 }
 

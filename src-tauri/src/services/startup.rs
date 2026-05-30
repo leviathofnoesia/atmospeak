@@ -12,7 +12,9 @@ pub fn set_start_at_login(enabled: bool) -> Result<()> {
             let exe = std::env::current_exe().context("failed to resolve current executable")?;
             let command = format!("\"{}\"", exe.display());
             Command::new("reg.exe")
-                .args(["add", RUN_KEY, "/v", APP_VALUE, "/t", "REG_SZ", "/d", &command, "/f"])
+                .args([
+                    "add", RUN_KEY, "/v", APP_VALUE, "/t", "REG_SZ", "/d", &command, "/f",
+                ])
                 .status()
                 .context("failed to configure Windows startup entry")?
         } else {

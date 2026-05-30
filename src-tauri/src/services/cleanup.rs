@@ -32,11 +32,13 @@ fn normalize_spoken_punctuation(value: &str) -> String {
         ("new paragraph", "\n\n"),
     ];
 
-    replacements.iter().fold(value.to_string(), |acc, (from, to)| {
-        let regex = Regex::new(&format!(r"(?i)\b{}\b", regex::escape(from)))
-            .expect("spoken punctuation regex");
-        regex.replace_all(&acc, *to).to_string()
-    })
+    replacements
+        .iter()
+        .fold(value.to_string(), |acc, (from, to)| {
+            let regex = Regex::new(&format!(r"(?i)\b{}\b", regex::escape(from)))
+                .expect("spoken punctuation regex");
+            regex.replace_all(&acc, *to).to_string()
+        })
 }
 
 fn remove_fillers(value: &str) -> String {
@@ -62,8 +64,11 @@ fn apply_snippets(value: &str, snippets: &[Snippet]) -> String {
         .iter()
         .filter(|snippet| snippet.enabled && !snippet.trigger.trim().is_empty())
         .fold(value.to_string(), |acc, snippet| {
-            let regex = Regex::new(&format!(r"(?i)\b{}\b", regex::escape(snippet.trigger.trim())))
-                .expect("snippet regex");
+            let regex = Regex::new(&format!(
+                r"(?i)\b{}\b",
+                regex::escape(snippet.trigger.trim())
+            ))
+            .expect("snippet regex");
             regex.replace_all(&acc, snippet.body.as_str()).to_string()
         })
 }

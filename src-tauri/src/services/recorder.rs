@@ -52,8 +52,13 @@ impl RecorderService {
             .and_then(|device| device.name().ok());
         let mut microphones = Vec::new();
 
-        for device in host.input_devices().context("failed to enumerate input devices")? {
-            let name = device.name().unwrap_or_else(|_| "Unknown microphone".to_string());
+        for device in host
+            .input_devices()
+            .context("failed to enumerate input devices")?
+        {
+            let name = device
+                .name()
+                .unwrap_or_else(|_| "Unknown microphone".to_string());
             microphones.push(MicrophoneInfo {
                 is_default: default_name.as_ref() == Some(&name),
                 name,
@@ -187,12 +192,8 @@ impl RecorderService {
         let sample_count = ((active.sample_rate as usize) / 10).clamp(256, 4_800);
         let start = samples.len().saturating_sub(sample_count);
         let window = &samples[start..];
-        let rms = (window
-            .iter()
-            .map(|sample| sample * sample)
-            .sum::<f32>()
-            / window.len() as f32)
-            .sqrt();
+        let rms =
+            (window.iter().map(|sample| sample * sample).sum::<f32>() / window.len() as f32).sqrt();
 
         (rms * 4.0).clamp(0.0, 1.0)
     }
@@ -223,10 +224,7 @@ impl IntoF32 for u16 {
 fn capture_input<T: Copy + IntoF32>(data: &[T], channels: usize, samples: &Arc<Mutex<Vec<f32>>>) {
     let mut output = samples.lock();
     for frame in data.chunks(channels.max(1)) {
-        let sum = frame
-            .iter()
-            .map(|sample| (*sample).into_f32())
-            .sum::<f32>();
+        let sum = frame.iter().map(|sample| (*sample).into_f32()).sum::<f32>();
         output.push(sum / frame.len() as f32);
     }
 }

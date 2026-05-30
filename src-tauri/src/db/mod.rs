@@ -248,7 +248,10 @@ fn parse_datetime(value: String) -> DateTime<Utc> {
 }
 
 fn calculate_stats(sessions: &[TranscriptSession]) -> DictationStats {
-    let total_words = sessions.iter().map(|session| session.word_count).sum::<usize>();
+    let total_words = sessions
+        .iter()
+        .map(|session| session.word_count)
+        .sum::<usize>();
     let total_duration_ms = sessions
         .iter()
         .map(|session| session.duration_ms)

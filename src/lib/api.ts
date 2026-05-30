@@ -159,6 +159,10 @@ export function setShortcutsPaused(paused: boolean): Promise<ShortcutStatus> {
   }));
 }
 
+export function showFloatingControl(): Promise<void> {
+  return command("show_overlay_window", undefined, () => undefined);
+}
+
 export function getRecordingLevel(): Promise<number> {
   return command("get_recording_level", undefined, () => 0.62);
 }

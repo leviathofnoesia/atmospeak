@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, State};
 use uuid::Uuid;
 
 use crate::{
     models::{
-        AppSettings, AppSnapshot, DictationResult, DictionaryEntry, InjectionResult, MicrophoneInfo,
-        ModelInventory, ModelStatus, RecordingStarted, ShortcutStatus, Snippet, TranscriptSession,
+        AppSettings, AppSnapshot, DictationResult, DictionaryEntry, InjectionResult,
+        MicrophoneInfo, ModelInventory, ModelStatus, RecordingStarted, ShortcutStatus, Snippet,
+        TranscriptSession,
     },
     services::{
         app_state::AppState, cleanup, injection, recorder::FinishedRecording, runtime, shortcuts,
@@ -71,6 +72,24 @@ pub fn set_shortcuts_paused(
         state.shortcuts_paused.clone(),
         paused,
     )
+}
+
+#[tauri::command]
+pub fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "Floating control window is not available.".to_string())?;
+
+    let _ = window.unminimize();
+    let _ = window.set_size(Size::Logical(LogicalSize::new(420.0, 128.0)));
+    let _ = window.center();
+    let _ = window.set_always_on_top(true);
+    let _ = window.show();
+    let _ = app.emit(
+        "wind-speak://overlay-visibility",
+        "Floating control shown and reset above other windows.",
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -146,7 +165,10 @@ pub fn delete_dictionary_entry(
 }
 
 #[tauri::command]
-pub fn upsert_snippet(state: State<'_, AppState>, mut snippet: Snippet) -> CommandResult<AppSnapshot> {
+pub fn upsert_snippet(
+    state: State<'_, AppState>,
+    mut snippet: Snippet,
+) -> CommandResult<AppSnapshot> {
     if snippet.id.trim().is_empty() {
         snippet.id = Uuid::new_v4().to_string();
     }
@@ -162,7 +184,11 @@ pub fn upsert_snippet(state: State<'_, AppState>, mut snippet: Snippet) -> Comma
 #[tauri::command]
 pub fn delete_snippet(state: State<'_, AppState>, id: String) -> CommandResult<AppSnapshot> {
     let database = state.database.lock();
-    to_command_result(database.delete_snippet(&id).and_then(|_| database.snapshot()))
+    to_command_result(
+        database
+            .delete_snippet(&id)
+            .and_then(|_| database.snapshot()),
+    )
 }
 
 #[tauri::command]

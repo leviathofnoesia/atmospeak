@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
 use std::{collections::HashSet, sync::Arc};
 use tauri::{AppHandle, Emitter, Runtime};
@@ -36,7 +36,10 @@ pub fn register_shortcut<R: Runtime>(
                         registered: true,
                         hotkey: candidate.label.clone(),
                         paused,
-                        message: format!("Global shortcut registered: {}.{}", candidate.label, fallback_note),
+                        message: format!(
+                            "Global shortcut registered: {}.{}",
+                            candidate.label, fallback_note
+                        ),
                     };
                     *shortcut_status.lock() = status.clone();
                     let _ = app.emit("wind-speak://shortcut-status", status.clone());
@@ -116,7 +119,10 @@ fn shortcut_candidates(requested_hotkey: &str) -> Vec<ShortcutCandidate> {
             }
             parse_shortcut(&normalized)
                 .ok()
-                .map(|shortcut| ShortcutCandidate { label: normalized, shortcut })
+                .map(|shortcut| ShortcutCandidate {
+                    label: normalized,
+                    shortcut,
+                })
         })
         .collect()
 }
@@ -128,7 +134,9 @@ fn normalize_label(label: &str) -> Result<String> {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     if parts.len() < 2 {
-        return Err(anyhow!("shortcut must include at least one modifier and one key"));
+        return Err(anyhow!(
+            "shortcut must include at least one modifier and one key"
+        ));
     }
 
     let mut has_ctrl = false;

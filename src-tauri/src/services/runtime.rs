@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use tauri::{AppHandle, Manager, path::BaseDirectory};
 
-use crate::models::{
-    AppSettings, ModelInventory, ModelInventoryItem, ModelStatus, RuntimeSource,
-};
+use crate::models::{AppSettings, ModelInventory, ModelInventoryItem, ModelStatus, RuntimeSource};
 
 const BUNDLED_MODEL_ID: &str = "base.en";
 const BUNDLED_MODEL_SIZE_MB: u64 = 142;
@@ -37,7 +35,10 @@ pub fn resolve_runtime(app: &AppHandle, settings: &AppSettings) -> Result<Resolv
         )?,
         model_path: resolve_first_existing(
             app,
-            &["resources/models/ggml-base.en.bin", "models/ggml-base.en.bin"],
+            &[
+                "resources/models/ggml-base.en.bin",
+                "models/ggml-base.en.bin",
+            ],
         )?,
     })
 }
