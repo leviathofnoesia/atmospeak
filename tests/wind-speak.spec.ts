@@ -22,4 +22,6 @@ test("loads the Wind Speak hub in browser mock mode", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Resume shortcuts" })).toBeVisible();
   await page.getByRole("button", { name: "Test active shortcut" }).click();
   await expect(page.getByText("Shortcuts are paused. Resume shortcuts and test again.")).toBeVisible();
+  await page.getByRole("button", { name: "Run onboarding" }).click();
+  await expect(page.getByRole("heading", { name: "Desktop dictation instrument" })).toBeVisible();
 });

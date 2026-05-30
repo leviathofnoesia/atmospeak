@@ -474,6 +474,39 @@ function App() {
     }
   };
 
+  const rerunOnboarding = async () => {
+    if (settingsDraft === null) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const nextSettings = {
+        ...settingsDraft,
+        onboardingComplete: false,
+        onboardingVersion: "",
+      };
+      const nextSnapshot = await saveSettings(nextSettings);
+      setSnapshot(nextSnapshot);
+      setSettingsDraft(nextSnapshot.settings);
+      setPasteTest({
+        running: false,
+        passed: false,
+        message: "Paste test has not run yet.",
+      });
+      setShortcutTest({
+        active: false,
+        detected: false,
+        message: "Shortcut test is idle.",
+      });
+      setNotice({ tone: "neutral", message: "Onboarding restarted." });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const addDictionaryEntry = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const phrase = dictionaryDraft.phrase.trim();
@@ -698,6 +731,7 @@ function App() {
                   message: nextStatus.message,
                 });
               }}
+              onRerunOnboarding={rerunOnboarding}
               onSave={handleSaveSettings}
               updateStatus={updateStatus}
               updateResult={updateResult}
@@ -1200,6 +1234,7 @@ function SettingsPanel({
   shortcutTest,
   onTestShortcut,
   onToggleShortcutsPaused,
+  onRerunOnboarding,
   onSave,
   updateStatus,
   updateResult,
@@ -1213,6 +1248,7 @@ function SettingsPanel({
   shortcutTest: ShortcutTestState;
   onTestShortcut: () => void;
   onToggleShortcutsPaused: () => Promise<void>;
+  onRerunOnboarding: () => Promise<void>;
   onSave: () => Promise<void>;
   updateStatus: UpdateStatus;
   updateResult: UpdateCheckResult | null;
@@ -1347,6 +1383,17 @@ function SettingsPanel({
             {updateStatus === "downloading" ? "Installing" : "Install"}
           </button>
         </div>
+      </div>
+      <div className="instruction-card update-card">
+        <div>
+          <p className="eyebrow">First-run checklist</p>
+          <h3>Onboarding</h3>
+          <p>Run the microphone, shortcut, and paste checks again without clearing history.</p>
+        </div>
+        <button className="button button--ghost" type="button" onClick={() => void onRerunOnboarding()}>
+          <RotateCw size={18} />
+          Run onboarding
+        </button>
       </div>
       <button className="button button--primary" type="button" onClick={() => void onSave()}>
         <CheckCircle2 size={18} />
