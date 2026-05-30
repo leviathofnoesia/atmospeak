@@ -1,4 +1,5 @@
 import { Mic, Square, X } from "lucide-react";
+import { memo } from "react";
 import type { ModelStatus, RecordingStarted } from "../types/dictation";
 import { StatusLed } from "./StatusLed";
 
@@ -14,7 +15,9 @@ interface RecorderOverlayProps {
   onCancel: () => void;
 }
 
-export function RecorderOverlay({
+const meterBars = Array.from({ length: 18 }, (_, index) => index);
+
+function RecorderOverlayComponent({
   recording,
   elapsedSeconds,
   busy,
@@ -36,7 +39,7 @@ export function RecorderOverlay({
   return (
     <aside className="recorder" aria-label="Recorder controls" data-tauri-drag-region>
       <div className="recorder__meter" aria-hidden="true">
-        {Array.from({ length: 18 }, (_, index) => (
+        {meterBars.map((index) => (
           <span
             key={index}
             style={{
@@ -92,6 +95,8 @@ export function RecorderOverlay({
     </aside>
   );
 }
+
+export const RecorderOverlay = memo(RecorderOverlayComponent);
 
 function meterScale(index: number, level: number, active: boolean) {
   if (!active) {

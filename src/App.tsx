@@ -62,6 +62,9 @@ import type {
 } from "./types/dictation";
 
 const onboardingVersion = "desktop-parity-v2";
+const recordingLevelPollMs = 120;
+const recordingLevelCommitMs = 260;
+const recordingLevelDelta = 0.015;
 const shortcutOptions = [
   "Ctrl+Win+Space",
   "Ctrl+Alt+Space",
@@ -129,6 +132,8 @@ function App() {
   const [dictionaryDraft, setDictionaryDraft] = useState({ phrase: "", replacement: "" });
   const [snippetDraft, setSnippetDraft] = useState({ trigger: "", body: "" });
   const recordingRef = useRef<RecordingStarted | null>(null);
+  const recordingLevelRef = useRef(0);
+  const lastRecordingLevelCommitRef = useRef(0);
   const busyRef = useRef(false);
   const settingsRef = useRef<AppSettings | null>(null);
   const shortcutTestRef = useRef(shortcutTest);
@@ -187,6 +192,8 @@ function App() {
     if (recording === null) {
       setElapsedSeconds(0);
       setRecordingLevel(0);
+      recordingLevelRef.current = 0;
+      lastRecordingLevelCommitRef.current = 0;
       return undefined;
     }
 
@@ -204,22 +211,40 @@ function App() {
     }
 
     let cancelled = false;
+    lastRecordingLevelCommitRef.current = window.performance.now() - recordingLevelCommitMs;
+    const commitLevel = (level: number) => {
+      const normalized = Math.max(0, Math.min(1, level));
+      const now = window.performance.now();
+      const previous = recordingLevelRef.current;
+      if (
+        now - lastRecordingLevelCommitRef.current < recordingLevelCommitMs ||
+        Math.abs(normalized - previous) < recordingLevelDelta
+      ) {
+        return;
+      }
+      recordingLevelRef.current = normalized;
+      lastRecordingLevelCommitRef.current = now;
+      setRecordingLevel(normalized);
+    };
+
     const pollLevel = () => {
       getRecordingLevel()
         .then((level) => {
           if (!cancelled) {
-            setRecordingLevel(level);
+            commitLevel(level);
           }
         })
         .catch(() => {
-          if (!cancelled) {
+          if (!cancelled && recordingLevelRef.current !== 0) {
+            recordingLevelRef.current = 0;
+            lastRecordingLevelCommitRef.current = window.performance.now();
             setRecordingLevel(0);
           }
         });
     };
 
     pollLevel();
-    const interval = window.setInterval(pollLevel, 120);
+    const interval = window.setInterval(pollLevel, recordingLevelPollMs);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
