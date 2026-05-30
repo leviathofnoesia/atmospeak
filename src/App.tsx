@@ -82,6 +82,12 @@ interface ShortcutTestState {
   message: string;
 }
 
+interface PasteTestState {
+  running: boolean;
+  passed: boolean;
+  message: string;
+}
+
 function App() {
   const isOverlayView =
     typeof window !== "undefined" &&
@@ -112,6 +118,11 @@ function App() {
     active: false,
     detected: false,
     message: "Shortcut test is idle.",
+  });
+  const [pasteTest, setPasteTest] = useState<PasteTestState>({
+    running: false,
+    passed: false,
+    message: "Paste test has not run yet.",
   });
   const [dictionaryDraft, setDictionaryDraft] = useState({ phrase: "", replacement: "" });
   const [snippetDraft, setSnippetDraft] = useState({ trigger: "", body: "" });
@@ -299,6 +310,31 @@ function App() {
       );
     }, 8000);
   }, [shortcutStatus?.hotkey]);
+
+  const runPasteTest = useCallback(async () => {
+    setPasteTest({
+      running: true,
+      passed: false,
+      message: "Pasting a Wind Speak test phrase into the focused app...",
+    });
+    setNotice({ tone: "neutral", message: "Running native paste test." });
+    try {
+      const result = await injectText("Wind Speak paste test");
+      setPasteTest({
+        running: false,
+        passed: result.injected,
+        message: result.message,
+      });
+      setNotice({
+        tone: result.injected ? "success" : "warning",
+        message: result.message,
+      });
+    } catch (error: unknown) {
+      const message = stringifyError(error);
+      setPasteTest({ running: false, passed: false, message });
+      setNotice({ tone: "error", message });
+    }
+  }, []);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
@@ -492,6 +528,8 @@ function App() {
         shortcutStatus={shortcutStatus}
         shortcutTest={shortcutTest}
         onTestShortcut={armShortcutTest}
+        pasteTest={pasteTest}
+        onPasteTest={runPasteTest}
         onComplete={async () => {
           const nextSettings = {
             ...settingsDraft,
@@ -915,6 +953,8 @@ function Onboarding({
   shortcutStatus,
   shortcutTest,
   onTestShortcut,
+  pasteTest,
+  onPasteTest,
   onComplete,
 }: {
   settings: AppSettings;
@@ -924,6 +964,8 @@ function Onboarding({
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
   onTestShortcut: () => void;
+  pasteTest: PasteTestState;
+  onPasteTest: () => Promise<void>;
   onComplete: () => Promise<void>;
 }) {
   return (
@@ -1018,12 +1060,24 @@ function Onboarding({
             </label>
           </article>
           <article className="onboarding-step onboarding-step--accent">
-            <StatusLed tone="good" label="Private by default" />
+            <StatusLed tone={pasteTest.passed ? "good" : "idle"} label="Private by default" />
             <h2>First paste test</h2>
             <p>
-              Open Notepad or any text field, press the shortcut, and Wind Speak will paste through
-              the system clipboard after transcription.
+              Focus Notepad or any text field, then run the same native paste path Wind Speak uses
+              after transcription.
             </p>
+            <div className="shortcut-test">
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => void onPasteTest()}
+                disabled={pasteTest.running}
+              >
+                <Clipboard size={18} />
+                {pasteTest.running ? "Testing paste" : "Test paste"}
+              </button>
+              <p>{pasteTest.message}</p>
+            </div>
             <button
               className="button button--primary"
               type="button"
