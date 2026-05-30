@@ -296,6 +296,7 @@ mod windows_keyboard_hook {
         shortcuts_paused: Option<Arc<ParkingMutex<bool>>>,
         hotkey: ParsedShortcut,
         active: bool,
+        capturing: bool,
     }
 
     impl Default for HookContext {
@@ -311,6 +312,7 @@ mod windows_keyboard_hook {
                     key: ShortcutKey::Space,
                 },
                 active: false,
+                capturing: false,
             }
         }
     }
@@ -401,6 +403,7 @@ mod windows_keyboard_hook {
                 shortcuts_paused: Some(shortcuts_paused),
                 hotkey,
                 active: false,
+                capturing: false,
             };
         }
 
@@ -488,12 +491,18 @@ mod windows_keyboard_hook {
         {
             if context.active {
                 context.active = false;
+                context.capturing = false;
                 let _ = app.emit("wind-speak://shortcut", "released");
             }
             return false;
         }
 
         let relevant = context.hotkey.is_relevant(event_vk);
+        let modifiers_down = context.hotkey.required_modifiers_down(event_vk, key_down);
+        if relevant && modifiers_down {
+            context.capturing = true;
+        }
+
         let combo_down = context.hotkey.is_down(event_vk, key_down);
         if combo_down && !context.active {
             context.active = true;
@@ -503,10 +512,15 @@ mod windows_keyboard_hook {
         if context.active && !combo_down {
             context.active = false;
             let _ = app.emit("wind-speak://shortcut", "released");
-            return relevant;
+            return relevant || context.capturing;
         }
 
-        relevant && (combo_down || context.active)
+        if context.capturing && key_up && relevant && !modifiers_down {
+            context.capturing = false;
+            return true;
+        }
+
+        relevant && (combo_down || context.active || context.capturing)
     }
 
     impl ParsedShortcut {
@@ -520,15 +534,18 @@ mod windows_keyboard_hook {
 
         fn is_down(self, event_vk: u32, event_is_down: bool) -> bool {
             let target_down = key_down_considering_event(self.key_vk(), event_vk, event_is_down);
-            target_down
-                && (!self.ctrl
-                    || modifier_down(
-                        VK_CONTROL,
-                        VK_LCONTROL,
-                        VK_RCONTROL,
-                        event_vk,
-                        event_is_down,
-                    ))
+            target_down && self.required_modifiers_down(event_vk, event_is_down)
+        }
+
+        fn required_modifiers_down(self, event_vk: u32, event_is_down: bool) -> bool {
+            (!self.ctrl
+                || modifier_down(
+                    VK_CONTROL,
+                    VK_LCONTROL,
+                    VK_RCONTROL,
+                    event_vk,
+                    event_is_down,
+                ))
                 && (!self.alt
                     || modifier_down(VK_MENU, VK_LMENU, VK_RMENU, event_vk, event_is_down))
                 && (!self.shift
