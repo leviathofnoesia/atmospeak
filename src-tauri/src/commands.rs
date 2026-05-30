@@ -52,6 +52,7 @@ pub fn save_settings(
                 shortcuts::register_shortcut(
                     &app,
                     state.shortcut_status.clone(),
+                    state.shortcuts_paused.clone(),
                     &settings.hotkey,
                     *state.shortcuts_paused.lock(),
                 );

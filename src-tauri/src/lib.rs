@@ -5,6 +5,7 @@ mod services;
 mod tray;
 
 use tauri::{Emitter, Manager, WindowEvent};
+#[cfg(not(target_os = "windows"))]
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
@@ -21,8 +22,20 @@ fn install_global_shortcut(
     shortcuts_paused: std::sync::Arc<parking_lot::Mutex<bool>>,
     initial_hotkey: &str,
 ) -> anyhow::Result<()> {
-    #[cfg(desktop)]
+    #[cfg(target_os = "windows")]
     {
+        shortcuts::register_shortcut(
+            app.handle(),
+            shortcut_status,
+            shortcuts_paused,
+            initial_hotkey,
+            false,
+        );
+    }
+
+    #[cfg(all(desktop, not(target_os = "windows")))]
+    {
+        let shortcuts_paused_for_registration = shortcuts_paused.clone();
         app.handle().plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, _shortcut, event| {
@@ -37,7 +50,13 @@ fn install_global_shortcut(
                 })
                 .build(),
         )?;
-        shortcuts::register_shortcut(app.handle(), shortcut_status, initial_hotkey, false);
+        shortcuts::register_shortcut(
+            app.handle(),
+            shortcut_status,
+            shortcuts_paused_for_registration,
+            initial_hotkey,
+            false,
+        );
     }
 
     Ok(())
