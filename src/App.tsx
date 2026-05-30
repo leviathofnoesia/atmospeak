@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import { RecorderOverlay } from "./components/RecorderOverlay";
+import type { RecorderPhase } from "./components/RecorderOverlay";
 import { StatusLed } from "./components/StatusLed";
 import {
   cancelRecording,
@@ -114,6 +115,7 @@ function App() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [recordingLevel, setRecordingLevel] = useState(0);
+  const [recorderPhase, setRecorderPhase] = useState<RecorderPhase>("idle");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<AppNotice>({
     tone: "neutral",
@@ -262,12 +264,15 @@ function App() {
       if (recordingRef.current === null) {
         const started = await startRecording();
         setRecording(started);
+        setRecorderPhase("listening");
         setNotice({ tone: "success", message: `Recording from ${started.microphoneName}.` });
       } else {
         setRecording(null);
+        setRecorderPhase("processing");
         setNotice({ tone: "neutral", message: "Transcribing locally..." });
         const result = await stopRecording();
         await refreshSnapshotOnly();
+        setRecorderPhase(result.injection?.injected ? "pasted" : "idle");
         setNotice({
           tone: result.injection?.injected ? "success" : "neutral",
           message: result.injection?.message ?? "Transcript saved to history.",
@@ -276,6 +281,7 @@ function App() {
       }
     } catch (error: unknown) {
       setRecording(null);
+      setRecorderPhase("error");
       await refresh().catch(() => undefined);
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
@@ -292,6 +298,7 @@ function App() {
       recording,
       elapsedSeconds,
       busy,
+      recorderPhase,
       modelStatus,
       shortcutStatus,
       notice,
@@ -299,7 +306,16 @@ function App() {
     };
     void emit("wind-speak://dictation-state", payload);
     return undefined;
-  }, [busy, elapsedSeconds, modelStatus, notice, recording, recordingLevel, shortcutStatus]);
+  }, [
+    busy,
+    elapsedSeconds,
+    modelStatus,
+    notice,
+    recorderPhase,
+    recording,
+    recordingLevel,
+    shortcutStatus,
+  ]);
 
   const handleCancel = useCallback(async () => {
     if (busyRef.current) {
@@ -310,6 +326,7 @@ function App() {
     try {
       await cancelRecording();
       setRecording(null);
+      setRecorderPhase("idle");
       setNotice({ tone: "neutral", message: "Recording cancelled." });
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
@@ -680,6 +697,7 @@ function App() {
         recording={recording}
         elapsedSeconds={elapsedSeconds}
         busy={busy}
+        phase={recorderPhase}
         modelStatus={modelStatus}
         hotkeyLabel={shortcutStatus?.hotkey || snapshot.settings.hotkey}
         notice={shortcutStatus?.registered ? undefined : shortcutStatus?.message}
@@ -726,6 +744,7 @@ function App() {
               sessions={snapshot.sessions}
               onInject={async (session) => {
                 const result = await injectText(session.cleanedText);
+                setRecorderPhase(result.injected ? "pasted" : "idle");
                 setNotice({ tone: "success", message: result.message });
               }}
             />
@@ -824,6 +843,7 @@ interface OverlayStatePayload {
   recording: RecordingStarted | null;
   elapsedSeconds: number;
   busy: boolean;
+  recorderPhase: RecorderPhase;
   modelStatus: ModelStatus | null;
   shortcutStatus: ShortcutStatus | null;
   notice: AppNotice;
@@ -835,6 +855,7 @@ function OverlayWindow() {
     recording: null,
     elapsedSeconds: 0,
     busy: false,
+    recorderPhase: "idle",
     modelStatus: null,
     shortcutStatus: null,
     notice: { tone: "neutral", message: "Wind Speak is standing by." },
@@ -869,6 +890,7 @@ function OverlayWindow() {
         recording={state.recording}
         elapsedSeconds={state.elapsedSeconds}
         busy={state.busy}
+        phase={state.recorderPhase}
         modelStatus={state.modelStatus}
         hotkeyLabel={state.shortcutStatus?.hotkey || "BUTTON"}
         notice={state.notice.message}
