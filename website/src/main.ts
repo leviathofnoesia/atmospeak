@@ -6,19 +6,19 @@ const downloads = [
   {
     label: "Windows installer",
     detail: "Recommended NSIS setup",
-    file: "Wind-Speak_0.1.2_x64-setup.exe",
+    file: "Wind-Speak_0.1.3_x64-setup.exe",
     primary: true,
   },
   {
     label: "Windows MSI",
     detail: "Enterprise-friendly fallback",
-    file: "Wind-Speak_0.1.2_x64_en-US.msi",
+    file: "Wind-Speak_0.1.3_x64_en-US.msi",
     primary: false,
   },
   {
     label: "Portable zip",
     detail: "Unzip and run from a folder",
-    file: "Wind-Speak_0.1.2_x64-portable.zip",
+    file: "Wind-Speak_0.1.3_x64-portable.zip",
     primary: false,
   },
   {
@@ -89,7 +89,7 @@ function hero() {
   content.append(actions);
 
   section.append(content);
-  section.append(specStrip("v0.1.2", "Windows x64", "Offline base.en model bundled"));
+  section.append(specStrip("v0.1.3", "Windows x64", "Offline base.en model bundled"));
   return section;
 }
 

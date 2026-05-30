@@ -138,6 +138,8 @@ function App() {
   const lastRecordingLevelCommitRef = useRef(0);
   const onboardingOverlayShownRef = useRef(false);
   const busyRef = useRef(false);
+  const startingRecordingRef = useRef(false);
+  const queuedPushToTalkReleaseRef = useRef(false);
   const settingsRef = useRef<AppSettings | null>(null);
   const shortcutTestRef = useRef(shortcutTest);
 
@@ -254,40 +256,59 @@ function App() {
     };
   }, [recording]);
 
+  const finishRecording = useCallback(async () => {
+    setRecording(null);
+    setRecorderPhase("processing");
+    setNotice({ tone: "neutral", message: "Transcribing locally..." });
+    const result = await stopRecording();
+    await refreshSnapshotOnly();
+    setRecorderPhase(result.injection?.injected ? "pasted" : "idle");
+    setNotice({
+      tone: result.injection?.injected ? "success" : "neutral",
+      message: result.injection?.message ?? "Transcript saved to history.",
+    });
+    setActiveTab("history");
+  }, [refreshSnapshotOnly]);
+
+  const setBusyState = useCallback((nextBusy: boolean) => {
+    busyRef.current = nextBusy;
+    setBusy(nextBusy);
+  }, []);
+
   const handleToggleRecording = useCallback(async () => {
     if (busyRef.current) {
       return;
     }
 
-    setBusy(true);
+    setBusyState(true);
     try {
       if (recordingRef.current === null) {
+        queuedPushToTalkReleaseRef.current = false;
+        startingRecordingRef.current = true;
         const started = await startRecording();
+        startingRecordingRef.current = false;
         setRecording(started);
         setRecorderPhase("listening");
         setNotice({ tone: "success", message: `Recording from ${started.microphoneName}.` });
+        if (queuedPushToTalkReleaseRef.current) {
+          queuedPushToTalkReleaseRef.current = false;
+          await finishRecording();
+        }
       } else {
-        setRecording(null);
-        setRecorderPhase("processing");
-        setNotice({ tone: "neutral", message: "Transcribing locally..." });
-        const result = await stopRecording();
-        await refreshSnapshotOnly();
-        setRecorderPhase(result.injection?.injected ? "pasted" : "idle");
-        setNotice({
-          tone: result.injection?.injected ? "success" : "neutral",
-          message: result.injection?.message ?? "Transcript saved to history.",
-        });
-        setActiveTab("history");
+        await finishRecording();
       }
     } catch (error: unknown) {
       setRecording(null);
       setRecorderPhase("error");
+      startingRecordingRef.current = false;
+      queuedPushToTalkReleaseRef.current = false;
       await refresh().catch(() => undefined);
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
-      setBusy(false);
+      startingRecordingRef.current = false;
+      setBusyState(false);
     }
-  }, [refresh, refreshSnapshotOnly]);
+  }, [finishRecording, refresh, setBusyState]);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
@@ -322,8 +343,9 @@ function App() {
       return;
     }
 
-    setBusy(true);
+    setBusyState(true);
     try {
+      queuedPushToTalkReleaseRef.current = false;
       await cancelRecording();
       setRecording(null);
       setRecorderPhase("idle");
@@ -331,9 +353,9 @@ function App() {
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
-  }, []);
+  }, [setBusyState]);
 
   const armShortcutTest = useCallback(() => {
     if (shortcutStatus?.paused) {
@@ -439,8 +461,13 @@ function App() {
       const mode = settingsRef.current?.mode ?? "toggle";
       const activeRecording = recordingRef.current;
       if (mode === "pushToTalk") {
-        if (action === "pressed" && activeRecording === null) {
+        if (action === "pressed" && activeRecording === null && !busyRef.current) {
           void handleToggleRecording();
+        }
+        if (action === "released" && startingRecordingRef.current) {
+          queuedPushToTalkReleaseRef.current = true;
+          setNotice({ tone: "neutral", message: "Shortcut release captured. Finishing dictation..." });
+          return;
         }
         if (action === "released" && activeRecording !== null) {
           void handleToggleRecording();
@@ -514,7 +541,7 @@ function App() {
       return;
     }
 
-    setBusy(true);
+    setBusyState(true);
     try {
       const nextSnapshot = await saveSettings(settingsDraft);
       setSnapshot(nextSnapshot);
@@ -526,7 +553,7 @@ function App() {
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   };
 
@@ -535,7 +562,7 @@ function App() {
       return;
     }
 
-    setBusy(true);
+    setBusyState(true);
     try {
       const nextSettings = {
         ...settingsDraft,
@@ -559,7 +586,7 @@ function App() {
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   };
 
