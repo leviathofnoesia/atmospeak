@@ -61,7 +61,7 @@ import type {
   UpdateStatus,
 } from "./types/dictation";
 
-const onboardingVersion = "desktop-parity-v2";
+const onboardingVersion = "desktop-parity-v3";
 const recordingLevelPollMs = 120;
 const recordingLevelCommitMs = 260;
 const recordingLevelDelta = 0.015;
@@ -134,6 +134,7 @@ function App() {
   const recordingRef = useRef<RecordingStarted | null>(null);
   const recordingLevelRef = useRef(0);
   const lastRecordingLevelCommitRef = useRef(0);
+  const onboardingOverlayShownRef = useRef(false);
   const busyRef = useRef(false);
   const settingsRef = useRef<AppSettings | null>(null);
   const shortcutTestRef = useRef(shortcutTest);
@@ -596,6 +597,21 @@ function App() {
     }
     return { tone: "warn" as const, label: "Runtime incomplete" };
   }, [modelStatus]);
+  const needsOnboarding =
+    snapshot !== null &&
+    settingsDraft !== null &&
+    (!settingsDraft.onboardingComplete || settingsDraft.onboardingVersion !== onboardingVersion);
+
+  useEffect(() => {
+    if (!needsOnboarding || !hasTauriRuntime() || onboardingOverlayShownRef.current) {
+      return;
+    }
+
+    onboardingOverlayShownRef.current = true;
+    showFloatingControl().catch((error: unknown) => {
+      setNotice({ tone: "warning", message: stringifyError(error) });
+    });
+  }, [needsOnboarding]);
 
   if (snapshot === null || settingsDraft === null) {
     return (
@@ -606,10 +622,7 @@ function App() {
     );
   }
 
-  if (
-    !settingsDraft.onboardingComplete ||
-    settingsDraft.onboardingVersion !== onboardingVersion
-  ) {
+  if (needsOnboarding) {
     return (
       <Onboarding
         settings={settingsDraft}
@@ -621,6 +634,7 @@ function App() {
         onTestShortcut={armShortcutTest}
         pasteTest={pasteTest}
         onPasteTest={runPasteTest}
+        onShowFloatingControl={handleShowFloatingControl}
         onComplete={async () => {
           const nextSettings = {
             ...settingsDraft,
@@ -1060,6 +1074,7 @@ function Onboarding({
   onTestShortcut,
   pasteTest,
   onPasteTest,
+  onShowFloatingControl,
   onComplete,
 }: {
   settings: AppSettings;
@@ -1071,6 +1086,7 @@ function Onboarding({
   onTestShortcut: () => void;
   pasteTest: PasteTestState;
   onPasteTest: () => Promise<void>;
+  onShowFloatingControl: () => Promise<void>;
   onComplete: () => Promise<void>;
 }) {
   return (
@@ -1163,6 +1179,25 @@ function Onboarding({
                 <option value="toggle">Toggle</option>
               </select>
             </label>
+          </article>
+          <article className="onboarding-step">
+            <StatusLed tone="good" label="Floating control" />
+            <h2>Recorder pill stays above your apps.</h2>
+            <p>
+              Wind Speak opens the always-on-top control during onboarding. Use this recovery action
+              if Windows moved or hid it.
+            </p>
+            <div className="shortcut-test">
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => void onShowFloatingControl()}
+              >
+                <Radio size={18} />
+                Show floating control
+              </button>
+              <p>Use the pill, tray, or shortcut to start and stop dictation.</p>
+            </div>
           </article>
           <article className="onboarding-step onboarding-step--accent">
             <StatusLed tone={pasteTest.passed ? "good" : "idle"} label="Private by default" />
