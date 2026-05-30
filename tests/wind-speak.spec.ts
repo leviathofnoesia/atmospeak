@@ -18,6 +18,8 @@ test("loads the Wind Speak hub in browser mock mode", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Shortcut")).toHaveValue("Ctrl+Alt+Space");
   await expect(page.getByLabel("Mode")).toHaveValue("toggle");
+  await page.getByRole("button", { name: "Pause shortcuts" }).click();
+  await expect(page.getByRole("button", { name: "Resume shortcuts" })).toBeVisible();
   await page.getByRole("button", { name: "Test active shortcut" }).click();
-  await expect(page.getByText("Press Ctrl+Alt+Space now.")).toBeVisible();
+  await expect(page.getByText("Shortcuts are paused. Resume shortcuts and test again.")).toBeVisible();
 });

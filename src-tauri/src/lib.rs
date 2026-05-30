@@ -10,13 +10,15 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use commands::{
     cancel_recording, delete_dictionary_entry, delete_snippet, get_app_snapshot, get_model_inventory,
     get_model_status, get_recording_level, get_shortcut_status, inject_text, list_microphones,
-    save_settings, start_recording, stop_recording, upsert_dictionary_entry, upsert_snippet,
+    save_settings, set_shortcuts_paused, start_recording, stop_recording, upsert_dictionary_entry,
+    upsert_snippet,
 };
 use services::{app_state::AppState, shortcuts};
 
 fn install_global_shortcut(
     app: &mut tauri::App,
     shortcut_status: std::sync::Arc<parking_lot::Mutex<models::ShortcutStatus>>,
+    shortcuts_paused: std::sync::Arc<parking_lot::Mutex<bool>>,
     initial_hotkey: &str,
 ) -> anyhow::Result<()> {
     #[cfg(desktop)]
@@ -24,6 +26,9 @@ fn install_global_shortcut(
         app.handle().plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, _shortcut, event| {
+                    if *shortcuts_paused.lock() {
+                        return;
+                    }
                     let payload = match event.state() {
                         ShortcutState::Pressed => "pressed",
                         ShortcutState::Released => "released",
@@ -32,7 +37,7 @@ fn install_global_shortcut(
                 })
                 .build(),
         )?;
-        shortcuts::register_shortcut(app.handle(), shortcut_status, initial_hotkey);
+        shortcuts::register_shortcut(app.handle(), shortcut_status, initial_hotkey, false);
     }
 
     Ok(())
@@ -42,6 +47,7 @@ fn install_global_shortcut(
 pub fn run() {
     let app_state = AppState::new().expect("failed to initialize application state");
     let shortcut_status = app_state.shortcut_status.clone();
+    let shortcuts_paused = app_state.shortcuts_paused.clone();
     let initial_hotkey = app_state
         .database
         .lock()
@@ -55,7 +61,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
-            install_global_shortcut(app, shortcut_status.clone(), &initial_hotkey)?;
+            install_global_shortcut(
+                app,
+                shortcut_status.clone(),
+                shortcuts_paused.clone(),
+                &initial_hotkey,
+            )?;
             tray::install(app)?;
             Ok(())
         })
@@ -87,6 +98,7 @@ pub fn run() {
             get_recording_level,
             list_microphones,
             save_settings,
+            set_shortcuts_paused,
             start_recording,
             stop_recording,
             cancel_recording,

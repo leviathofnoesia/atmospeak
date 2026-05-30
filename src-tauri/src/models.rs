@@ -43,6 +43,7 @@ impl Default for AppSettings {
 pub struct ShortcutStatus {
     pub registered: bool,
     pub hotkey: String,
+    pub paused: bool,
     pub message: String,
 }
 
@@ -51,6 +52,7 @@ impl Default for ShortcutStatus {
         Self {
             registered: false,
             hotkey: String::new(),
+            paused: false,
             message: "Global shortcut has not been registered yet.".to_string(),
         }
     }

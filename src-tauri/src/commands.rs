@@ -48,9 +48,28 @@ pub fn save_settings(
             .and_then(|_| database.save_settings(&settings))
             .and_then(|_| {
                 let _ = runtime::model_status(&app, &settings);
-                shortcuts::register_shortcut(&app, state.shortcut_status.clone(), &settings.hotkey);
+                shortcuts::register_shortcut(
+                    &app,
+                    state.shortcut_status.clone(),
+                    &settings.hotkey,
+                    *state.shortcuts_paused.lock(),
+                );
                 database.snapshot()
             }),
+    )
+}
+
+#[tauri::command]
+pub fn set_shortcuts_paused(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paused: bool,
+) -> ShortcutStatus {
+    shortcuts::set_paused(
+        &app,
+        state.shortcut_status.clone(),
+        state.shortcuts_paused.clone(),
+        paused,
     )
 }
 

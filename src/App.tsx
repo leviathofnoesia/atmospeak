@@ -37,6 +37,7 @@ import {
   injectText,
   listMicrophones,
   saveSettings,
+  setShortcutsPaused,
   startRecording,
   stopRecording,
   upsertDictionaryEntry,
@@ -291,6 +292,16 @@ function App() {
   }, []);
 
   const armShortcutTest = useCallback(() => {
+    if (shortcutStatus?.paused) {
+      setShortcutTest({
+        active: false,
+        detected: false,
+        message: "Shortcuts are paused. Resume shortcuts and test again.",
+      });
+      setNotice({ tone: "warning", message: "Shortcuts are paused." });
+      return;
+    }
+
     const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "the active shortcut";
     setShortcutTest({
       active: true,
@@ -309,7 +320,7 @@ function App() {
           : current,
       );
     }, 8000);
-  }, [shortcutStatus?.hotkey]);
+  }, [shortcutStatus?.hotkey, shortcutStatus?.paused]);
 
   const runPasteTest = useCallback(async () => {
     setPasteTest({
@@ -348,6 +359,15 @@ function App() {
     listen<string>("wind-speak://shortcut", (event) => {
       const action = event.payload;
       if (shortcutTestRef.current.active) {
+        if (shortcutStatus?.paused) {
+          setShortcutTest({
+            active: false,
+            detected: false,
+            message: "Shortcuts are paused. Resume shortcuts and test again.",
+          });
+          setNotice({ tone: "warning", message: "Shortcuts are paused." });
+          return;
+        }
         if (action === "pressed" || action === "toggle") {
           const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "shortcut";
           setShortcutTest({
@@ -561,8 +581,12 @@ function App() {
           <StatusLed tone={readiness.tone} label={readiness.label} />
           <StatusLed tone={recording ? "hot" : "idle"} label={recording ? "Recording" : "Idle"} />
           <StatusLed
-            tone={shortcutStatus?.registered ? "good" : "warn"}
-            label={shortcutStatus?.hotkey || "Shortcut unavailable"}
+            tone={shortcutStatus?.paused ? "warn" : shortcutStatus?.registered ? "good" : "warn"}
+            label={
+              shortcutStatus?.paused
+                ? "Shortcuts paused"
+                : shortcutStatus?.hotkey || "Shortcut unavailable"
+            }
           />
         </div>
       </section>
@@ -666,6 +690,14 @@ function App() {
               shortcutStatus={shortcutStatus}
               shortcutTest={shortcutTest}
               onTestShortcut={armShortcutTest}
+              onToggleShortcutsPaused={async () => {
+                const nextStatus = await setShortcutsPaused(!shortcutStatus?.paused);
+                setShortcutStatus(nextStatus);
+                setNotice({
+                  tone: nextStatus.paused ? "warning" : "success",
+                  message: nextStatus.message,
+                });
+              }}
               onSave={handleSaveSettings}
               updateStatus={updateStatus}
               updateResult={updateResult}
@@ -1167,6 +1199,7 @@ function SettingsPanel({
   shortcutStatus,
   shortcutTest,
   onTestShortcut,
+  onToggleShortcutsPaused,
   onSave,
   updateStatus,
   updateResult,
@@ -1179,6 +1212,7 @@ function SettingsPanel({
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
   onTestShortcut: () => void;
+  onToggleShortcutsPaused: () => Promise<void>;
   onSave: () => Promise<void>;
   updateStatus: UpdateStatus;
   updateResult: UpdateCheckResult | null;
@@ -1228,6 +1262,14 @@ function SettingsPanel({
             "Wind Speak registers your saved shortcut when the desktop app starts."}
         </p>
         <div className="shortcut-test">
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => void onToggleShortcutsPaused()}
+          >
+            <Zap size={18} />
+            {shortcutStatus?.paused ? "Resume shortcuts" : "Pause shortcuts"}
+          </button>
           <button className="button button--ghost" type="button" onClick={onTestShortcut}>
             <Keyboard size={18} />
             Test active shortcut

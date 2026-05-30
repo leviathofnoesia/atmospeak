@@ -4,13 +4,16 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
+use crate::services::{app_state::AppState, shortcuts};
+
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Wind Speak").build(app)?;
     let overlay = MenuItemBuilder::with_id("overlay", "Show / Hide Floating Control").build(app)?;
+    let pause = MenuItemBuilder::with_id("pause", "Pause / Resume Shortcuts").build(app)?;
     let dictate = MenuItemBuilder::with_id("dictate", "Start / Stop Dictation").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &overlay, &dictate, &quit])
+        .items(&[&open, &overlay, &pause, &dictate, &quit])
         .build()?;
 
     TrayIconBuilder::new()
@@ -19,6 +22,7 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
             "overlay" => toggle_overlay_window(app),
+            "pause" => toggle_shortcuts(app),
             "dictate" => {
                 let _ = app.emit("wind-speak://shortcut", "toggle");
             }
@@ -38,6 +42,17 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+fn toggle_shortcuts(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let paused = !*state.shortcuts_paused.lock();
+    shortcuts::set_paused(
+        app,
+        state.shortcut_status.clone(),
+        state.shortcuts_paused.clone(),
+        paused,
+    );
 }
 
 fn show_main_window(app: &tauri::AppHandle) {

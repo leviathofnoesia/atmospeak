@@ -143,7 +143,19 @@ export function getShortcutStatus(): Promise<ShortcutStatus> {
   return command("get_shortcut_status", undefined, () => ({
     registered: true,
     hotkey: mockSnapshot.settings.hotkey,
+    paused: false,
     message: `Global shortcut registered: ${mockSnapshot.settings.hotkey}`,
+  }));
+}
+
+export function setShortcutsPaused(paused: boolean): Promise<ShortcutStatus> {
+  return command("set_shortcuts_paused", { paused }, () => ({
+    registered: true,
+    hotkey: mockSnapshot.settings.hotkey,
+    paused,
+    message: paused
+      ? "Global shortcuts paused. Use the floating control, tray, or resume shortcuts."
+      : `Global shortcut registered: ${mockSnapshot.settings.hotkey}.`,
   }));
 }
 

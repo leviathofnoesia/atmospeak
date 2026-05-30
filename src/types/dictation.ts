@@ -60,6 +60,7 @@ export interface AppSnapshot {
 export interface ShortcutStatus {
   registered: boolean;
   hotkey: string;
+  paused: boolean;
   message: string;
 }
 

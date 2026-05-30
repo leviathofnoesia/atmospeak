@@ -8,6 +8,7 @@ pub struct AppState {
     pub database: Mutex<Database>,
     pub recorder: RecorderService,
     pub shortcut_status: Arc<Mutex<ShortcutStatus>>,
+    pub shortcuts_paused: Arc<Mutex<bool>>,
 }
 
 impl AppState {
@@ -23,6 +24,7 @@ impl AppState {
             database: Mutex::new(Database::open(app_dir.clone())?),
             recorder: RecorderService::new(recordings_dir),
             shortcut_status: Arc::new(Mutex::new(ShortcutStatus::default())),
+            shortcuts_paused: Arc::new(Mutex::new(false)),
         })
     }
 }

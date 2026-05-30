@@ -16,6 +16,7 @@ pub fn register_shortcut<R: Runtime>(
     app: &AppHandle<R>,
     shortcut_status: Arc<Mutex<ShortcutStatus>>,
     requested_hotkey: &str,
+    paused: bool,
 ) -> ShortcutStatus {
     #[cfg(desktop)]
     {
@@ -34,6 +35,7 @@ pub fn register_shortcut<R: Runtime>(
                     let status = ShortcutStatus {
                         registered: true,
                         hotkey: candidate.label.clone(),
+                        paused,
                         message: format!("Global shortcut registered: {}.{}", candidate.label, fallback_note),
                     };
                     *shortcut_status.lock() = status.clone();
@@ -47,6 +49,7 @@ pub fn register_shortcut<R: Runtime>(
         let status = ShortcutStatus {
             registered: false,
             hotkey: String::new(),
+            paused,
             message: format!(
                 "Global shortcut unavailable. Use the floating control or choose a different shortcut. {}",
                 failures.join(" / ")
@@ -63,11 +66,35 @@ pub fn register_shortcut<R: Runtime>(
         let status = ShortcutStatus {
             registered: false,
             hotkey: String::new(),
+            paused,
             message: "Global shortcuts are unavailable on this platform build.".to_string(),
         };
         *shortcut_status.lock() = status.clone();
         status
     }
+}
+
+pub fn set_paused<R: Runtime>(
+    app: &AppHandle<R>,
+    shortcut_status: Arc<Mutex<ShortcutStatus>>,
+    shortcuts_paused: Arc<Mutex<bool>>,
+    paused: bool,
+) -> ShortcutStatus {
+    *shortcuts_paused.lock() = paused;
+    let mut status = shortcut_status.lock();
+    status.paused = paused;
+    status.message = if paused {
+        "Global shortcuts paused. Use the floating control, tray, or resume shortcuts.".to_string()
+    } else if status.registered {
+        format!("Global shortcut registered: {}.", status.hotkey)
+    } else {
+        "Global shortcut is unavailable. Use the floating control or choose another shortcut."
+            .to_string()
+    };
+    let next_status = status.clone();
+    drop(status);
+    let _ = app.emit("wind-speak://shortcut-status", next_status.clone());
+    next_status
 }
 
 fn shortcut_candidates(requested_hotkey: &str) -> Vec<ShortcutCandidate> {
