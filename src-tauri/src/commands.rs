@@ -10,7 +10,9 @@ use crate::{
         TranscriptSession,
     },
     services::{
-        app_state::AppState, cleanup, injection, overlay_window, recorder::FinishedRecording,
+        app_state::AppState,
+        cleanup, injection, overlay_window,
+        recorder::{self, FinishedRecording},
         runtime, shortcuts, startup, transcriber,
     },
 };
@@ -91,9 +93,10 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<DictationResult> {
-    let finished = to_command_result(state.recorder.stop())?;
+    let captured = to_command_result(state.recorder.stop())?;
     let snapshot = to_command_result(state.database.lock().snapshot())?;
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let finished = recorder::finish_recording(captured)?;
         complete_recording_inner(&app, &snapshot, finished)
     })
     .await

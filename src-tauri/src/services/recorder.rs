@@ -37,6 +37,14 @@ pub struct FinishedRecording {
     pub duration_ms: u64,
 }
 
+pub struct CapturedRecording {
+    pub id: String,
+    pub path: PathBuf,
+    pub duration_ms: u64,
+    pub sample_rate: u32,
+    pub samples: Vec<f32>,
+}
+
 impl RecorderService {
     pub fn new(recordings_dir: PathBuf) -> Self {
         Self {
@@ -143,7 +151,7 @@ impl RecorderService {
         })
     }
 
-    pub fn stop(&self) -> Result<FinishedRecording> {
+    pub fn stop(&self) -> Result<CapturedRecording> {
         let active = self
             .active
             .lock()
@@ -154,19 +162,29 @@ impl RecorderService {
             return Err(anyhow!("recording was too short to transcribe"));
         }
 
-        let samples = active.samples.lock().clone();
+        let ActiveRecording {
+            id,
+            sample_rate,
+            samples,
+            _stream,
+            ..
+        } = active;
+        drop(_stream);
+
+        let samples = match Arc::try_unwrap(samples) {
+            Ok(samples) => samples.into_inner(),
+            Err(samples) => samples.lock().clone(),
+        };
         if samples.is_empty() {
             return Err(anyhow!("microphone did not capture any samples"));
         }
 
-        let resampled = resample_linear(&samples, active.sample_rate, TARGET_SAMPLE_RATE);
-        let path = self.recordings_dir.join(format!("{}.wav", active.id));
-        write_wav(&path, &resampled).context("failed to write recording wav")?;
-
-        Ok(FinishedRecording {
-            id: active.id,
-            path,
+        Ok(CapturedRecording {
+            path: self.recordings_dir.join(format!("{id}.wav")),
+            id,
             duration_ms,
+            sample_rate,
+            samples,
         })
     }
 
@@ -197,6 +215,17 @@ impl RecorderService {
 
         (rms * 4.0).clamp(0.0, 1.0)
     }
+}
+
+pub fn finish_recording(captured: CapturedRecording) -> Result<FinishedRecording> {
+    let resampled = resample_linear(&captured.samples, captured.sample_rate, TARGET_SAMPLE_RATE);
+    write_wav(&captured.path, &resampled).context("failed to write recording wav")?;
+
+    Ok(FinishedRecording {
+        id: captured.id,
+        path: captured.path,
+        duration_ms: captured.duration_ms,
+    })
 }
 
 trait IntoF32 {
@@ -266,4 +295,37 @@ fn write_wav(path: &PathBuf, samples: &[f32]) -> Result<()> {
 
     writer.finalize()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CapturedRecording, TARGET_SAMPLE_RATE, finish_recording};
+    use tempfile::tempdir;
+
+    #[test]
+    fn finish_recording_writes_mono_sixteen_kilohertz_wav() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("sample.wav");
+        let samples = (0..48_000)
+            .map(|index| ((index as f32 / 24.0).sin() * 0.2).clamp(-1.0, 1.0))
+            .collect::<Vec<_>>();
+
+        let finished = finish_recording(CapturedRecording {
+            id: "sample".to_string(),
+            path: path.clone(),
+            duration_ms: 1_000,
+            sample_rate: 48_000,
+            samples,
+        })
+        .expect("finish recording");
+
+        let reader = hound::WavReader::open(&path).expect("wav reader");
+        let spec = reader.spec();
+        assert_eq!(finished.id, "sample");
+        assert_eq!(finished.path, path);
+        assert_eq!(finished.duration_ms, 1_000);
+        assert_eq!(spec.channels, 1);
+        assert_eq!(spec.sample_rate, TARGET_SAMPLE_RATE);
+        assert_eq!(spec.bits_per_sample, 16);
+    }
 }

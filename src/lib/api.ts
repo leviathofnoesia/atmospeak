@@ -80,25 +80,25 @@ function releaseArtifacts(): ReleaseArtifact[] {
     {
       id: "nsis",
       label: "Windows installer",
-      fileName: "Wind-Speak_0.1.5_x64-setup.exe",
+      fileName: "Wind-Speak_0.1.6_x64-setup.exe",
       kind: "installer",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.5_x64-setup.exe`,
+      url: `${releaseBaseUrl}/Wind-Speak_0.1.6_x64-setup.exe`,
       recommended: true,
     },
     {
       id: "msi",
       label: "Windows MSI",
-      fileName: "Wind-Speak_0.1.5_x64_en-US.msi",
+      fileName: "Wind-Speak_0.1.6_x64_en-US.msi",
       kind: "msi",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.5_x64_en-US.msi`,
+      url: `${releaseBaseUrl}/Wind-Speak_0.1.6_x64_en-US.msi`,
       recommended: false,
     },
     {
       id: "portable",
       label: "Portable zip",
-      fileName: "Wind-Speak_0.1.5_x64-portable.zip",
+      fileName: "Wind-Speak_0.1.6_x64-portable.zip",
       kind: "portable",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.5_x64-portable.zip`,
+      url: `${releaseBaseUrl}/Wind-Speak_0.1.6_x64-portable.zip`,
       recommended: false,
     },
     {
@@ -347,7 +347,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   if (!hasTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.1.5",
+      currentVersion: "0.1.6",
       version: null,
       date: null,
       body: null,
@@ -384,7 +384,7 @@ export async function downloadAndInstallUpdate(): Promise<UpdateCheckResult> {
   if (!hasTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.1.5",
+      currentVersion: "0.1.6",
       version: null,
       date: null,
       body: null,
