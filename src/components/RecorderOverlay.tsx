@@ -26,7 +26,7 @@ function RecorderOverlayComponent({
   busy,
   phase,
   modelStatus,
-  hotkeyLabel = "CTRL WIN SPACE",
+  hotkeyLabel = "CTRL WIN",
   notice,
   inputLevel = 0,
   onToggle,

@@ -62,11 +62,12 @@ import type {
   UpdateStatus,
 } from "./types/dictation";
 
-const onboardingVersion = "desktop-parity-v4";
+const onboardingVersion = "desktop-parity-v5";
 const recordingLevelPollMs = 120;
 const recordingLevelCommitMs = 260;
 const recordingLevelDelta = 0.015;
 const shortcutOptions = [
+  "Ctrl+Win",
   "Ctrl+Win+Space",
   "Ctrl+Alt+Space",
   "Ctrl+Shift+Space",

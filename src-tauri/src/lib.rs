@@ -16,7 +16,7 @@ use commands::{
 };
 use services::{app_state::AppState, overlay_window, shortcuts};
 
-const ONBOARDING_VERSION: &str = "desktop-parity-v4";
+const ONBOARDING_VERSION: &str = "desktop-parity-v5";
 
 fn install_global_shortcut(
     app: &mut tauri::App,
@@ -74,7 +74,7 @@ pub fn run() {
         .lock()
         .load_settings()
         .map(|settings| settings.hotkey)
-        .unwrap_or_else(|_| "Ctrl+Win+Space".to_string());
+        .unwrap_or_else(|_| "Ctrl+Win".to_string());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

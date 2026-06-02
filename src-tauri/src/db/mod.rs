@@ -86,9 +86,9 @@ impl Database {
             .optional()?;
 
         match serialized {
-            Some(value) => {
-                serde_json::from_str(&value).context("failed to deserialize application settings")
-            }
+            Some(value) => serde_json::from_str(&value)
+                .map(migrate_settings)
+                .context("failed to deserialize application settings"),
             None => Ok(AppSettings::default()),
         }
     }
@@ -270,6 +270,17 @@ fn calculate_stats(sessions: &[TranscriptSession]) -> DictationStats {
     }
 }
 
+fn migrate_settings(mut settings: AppSettings) -> AppSettings {
+    if settings
+        .hotkey
+        .trim()
+        .eq_ignore_ascii_case("Ctrl+Win+Space")
+    {
+        settings.hotkey = "Ctrl+Win".to_string();
+    }
+    settings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +300,18 @@ mod tests {
         let loaded = database.load_settings().expect("load settings");
         assert_eq!(loaded.mode, DictationMode::PushToTalk);
         assert!(!loaded.restore_clipboard);
+    }
+
+    #[test]
+    fn migrates_legacy_default_hotkey_to_modifier_chord() {
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        let mut settings = AppSettings::default();
+        settings.hotkey = "Ctrl+Win+Space".to_string();
+
+        database.save_settings(&settings).expect("save settings");
+
+        let loaded = database.load_settings().expect("load settings");
+        assert_eq!(loaded.hotkey, "Ctrl+Win");
     }
 }

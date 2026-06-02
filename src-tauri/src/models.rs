@@ -22,7 +22,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            hotkey: "Ctrl+Win+Space".to_string(),
+            hotkey: "Ctrl+Win".to_string(),
             mode: DictationMode::PushToTalk,
             microphone_name: None,
             restore_clipboard: true,

@@ -27,7 +27,7 @@ download and the updater artifact both use the NSIS `.exe`.
 ## GitHub Release
 
 Create or reuse `leviathofnoesia/wind-speak`, then upload every file from
-`release/` to a release tag such as `v0.1.4`. The updater endpoint is:
+`release/` to a release tag such as `v0.1.5`. The updater endpoint is:
 
 ```text
 https://github.com/leviathofnoesia/wind-speak/releases/latest/download/latest.json

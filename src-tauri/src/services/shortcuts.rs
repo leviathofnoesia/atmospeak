@@ -19,7 +19,7 @@ struct ParsedShortcut {
     win: bool,
     alt: bool,
     shift: bool,
-    key: ShortcutKey,
+    key: Option<ShortcutKey>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +54,7 @@ pub fn register_shortcut(
         let mut failures = Vec::new();
 
         for candidate in candidates {
-            let shortcut = match parse_shortcut(&candidate.label).map(to_tauri_shortcut) {
+            let shortcut = match parse_shortcut(&candidate.label).and_then(to_tauri_shortcut) {
                 Ok(shortcut) => shortcut,
                 Err(error) => {
                     failures.push(format!("{}: {error}", candidate.label));
@@ -128,6 +128,7 @@ pub fn set_paused(
 fn shortcut_candidates(requested_hotkey: &str) -> Vec<ShortcutCandidate> {
     let mut labels = vec![requested_hotkey.trim().to_string()];
     labels.extend([
+        "Ctrl+Win".to_string(),
         "Ctrl+Win+Space".to_string(),
         "Ctrl+Alt+Space".to_string(),
         "Ctrl+Shift+Space".to_string(),
@@ -155,7 +156,7 @@ fn normalize_label(label: &str) -> Result<String> {
         .collect::<Vec<_>>();
     if parts.len() < 2 {
         return Err(anyhow!(
-            "shortcut must include at least one modifier and one key"
+            "shortcut must include at least one modifier and one key, or two modifiers"
         ));
     }
 
@@ -189,13 +190,16 @@ fn normalize_label(label: &str) -> Result<String> {
     if has_shift {
         modifiers.push("Shift");
     }
-    let Some(key) = key else {
-        return Err(anyhow!("shortcut must include Space or D"));
-    };
     if modifiers.is_empty() {
         return Err(anyhow!("shortcut must include a modifier"));
     }
-    modifiers.push(key);
+    if let Some(key) = key {
+        modifiers.push(key);
+    } else if modifiers.len() < 2 {
+        return Err(anyhow!(
+            "modifier-only shortcuts must include at least two modifiers"
+        ));
+    }
     Ok(modifiers.join("+"))
 }
 
@@ -205,9 +209,8 @@ fn parse_shortcut(label: &str) -> Result<ParsedShortcut> {
         win: false,
         alt: false,
         shift: false,
-        key: ShortcutKey::Space,
+        key: None,
     };
-    let mut has_key = false;
 
     for part in label.split('+') {
         match part {
@@ -216,28 +219,34 @@ fn parse_shortcut(label: &str) -> Result<ParsedShortcut> {
             "Shift" => parsed.shift = true,
             "Win" => parsed.win = true,
             "Space" => {
-                parsed.key = ShortcutKey::Space;
-                has_key = true;
+                parsed.key = Some(ShortcutKey::Space);
             }
             "D" => {
-                parsed.key = ShortcutKey::D;
-                has_key = true;
+                parsed.key = Some(ShortcutKey::D);
             }
             _ => return Err(anyhow!("unsupported shortcut part: {part}")),
         }
     }
 
-    if !has_key {
-        return Err(anyhow!("shortcut must include a key"));
-    }
     if !(parsed.ctrl || parsed.win || parsed.alt || parsed.shift) {
         return Err(anyhow!("shortcut must include a modifier"));
+    }
+    if parsed.key.is_none()
+        && [parsed.ctrl, parsed.win, parsed.alt, parsed.shift]
+            .into_iter()
+            .filter(|active| *active)
+            .count()
+            < 2
+    {
+        return Err(anyhow!(
+            "modifier-only shortcuts must include at least two modifiers"
+        ));
     }
     Ok(parsed)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn to_tauri_shortcut(parsed: ParsedShortcut) -> Shortcut {
+fn to_tauri_shortcut(parsed: ParsedShortcut) -> Result<Shortcut> {
     let mut modifiers = Modifiers::empty();
     if parsed.alt {
         modifiers |= Modifiers::ALT;
@@ -251,11 +260,16 @@ fn to_tauri_shortcut(parsed: ParsedShortcut) -> Shortcut {
     if parsed.win {
         modifiers |= Modifiers::SUPER;
     }
-    let code = match parsed.key {
+    let Some(key) = parsed.key else {
+        return Err(anyhow!(
+            "modifier-only shortcuts are available on Windows only"
+        ));
+    };
+    let code = match key {
         ShortcutKey::Space => Code::Space,
         ShortcutKey::D => Code::KeyD,
     };
-    Shortcut::new(Some(modifiers), code)
+    Ok(Shortcut::new(Some(modifiers), code))
 }
 
 #[cfg(target_os = "windows")]
@@ -309,7 +323,7 @@ mod windows_keyboard_hook {
                     win: true,
                     alt: false,
                     shift: false,
-                    key: ShortcutKey::Space,
+                    key: None,
                 },
                 active: false,
                 capturing: false,
@@ -336,7 +350,7 @@ mod windows_keyboard_hook {
                 registered: false,
                 hotkey: String::new(),
                 paused,
-                message: "Global shortcut unavailable. Choose Ctrl+Win+Space, Ctrl+Alt+Space, Ctrl+Shift+Space, or Ctrl+Alt+D.".to_string(),
+                message: "Global shortcut unavailable. Choose Ctrl+Win, Ctrl+Win+Space, Ctrl+Alt+Space, Ctrl+Shift+Space, or Ctrl+Alt+D.".to_string(),
             };
             *shortcut_status.lock() = status.clone();
             let _ = app.emit("wind-speak://shortcut-status", status.clone());
@@ -525,7 +539,9 @@ mod windows_keyboard_hook {
 
     impl ParsedShortcut {
         fn is_relevant(self, event_vk: u32) -> bool {
-            event_vk == self.key_vk()
+            self.key_vk()
+                .map(|key_vk| event_vk == key_vk)
+                .unwrap_or(false)
                 || matches!(
                     event_vk,
                     16 | 17 | 18 | 91 | 92 | 160 | 161 | 162 | 163 | 164 | 165
@@ -533,7 +549,10 @@ mod windows_keyboard_hook {
         }
 
         fn is_down(self, event_vk: u32, event_is_down: bool) -> bool {
-            let target_down = key_down_considering_event(self.key_vk(), event_vk, event_is_down);
+            let target_down = self
+                .key_vk()
+                .map(|key_vk| key_down_considering_event(key_vk, event_vk, event_is_down))
+                .unwrap_or(true);
             target_down && self.required_modifiers_down(event_vk, event_is_down)
         }
 
@@ -554,11 +573,11 @@ mod windows_keyboard_hook {
                     || either_down_considering_event(VK_LWIN, VK_RWIN, event_vk, event_is_down))
         }
 
-        fn key_vk(self) -> u32 {
-            match self.key {
+        fn key_vk(self) -> Option<u32> {
+            self.key.map(|key| match key {
                 ShortcutKey::Space => vk_value(VK_SPACE),
                 ShortcutKey::D => vk_value(VK_D),
-            }
+            })
         }
     }
 
@@ -622,6 +641,7 @@ mod tests {
             labels,
             vec![
                 "Ctrl+Alt+Space",
+                "Ctrl+Win",
                 "Ctrl+Win+Space",
                 "Ctrl+Shift+Space",
                 "Ctrl+Alt+D"
@@ -631,10 +651,18 @@ mod tests {
 
     #[test]
     fn parses_default_push_to_talk_hotkey() {
-        let parsed = parse_shortcut("Ctrl+Win+Space").expect("parse shortcut");
+        let parsed = parse_shortcut("Ctrl+Win").expect("parse shortcut");
         assert!(parsed.ctrl);
         assert!(parsed.win);
         assert!(!parsed.alt);
-        assert_eq!(parsed.key, ShortcutKey::Space);
+        assert_eq!(parsed.key, None);
+    }
+
+    #[test]
+    fn parses_keyed_fallback_hotkey() {
+        let parsed = parse_shortcut("Ctrl+Win+Space").expect("parse shortcut");
+        assert!(parsed.ctrl);
+        assert!(parsed.win);
+        assert_eq!(parsed.key, Some(ShortcutKey::Space));
     }
 }
