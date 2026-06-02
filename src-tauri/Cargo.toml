@@ -1,6 +1,6 @@
 [package]
 name = "wind-speak"
-version = "0.1.8"
+version = "0.1.9"
 description = "Local-first desktop dictation prototype"
 authors = ["Wind Speak"]
 edition = "2024"

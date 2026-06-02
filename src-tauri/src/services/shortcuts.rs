@@ -288,8 +288,9 @@ mod windows_keyboard_hook {
         System::Threading::GetCurrentThreadId,
         UI::{
             Input::KeyboardAndMouse::{
-                GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
-                VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
+                GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_ESCAPE, VK_LCONTROL, VK_LMENU,
+                VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+                VK_SPACE,
             },
             WindowsAndMessaging::{
                 CallNextHookEx, GetMessageW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
@@ -339,6 +340,7 @@ mod windows_keyboard_hook {
     enum ShortcutSignal {
         Pressed,
         Released,
+        Cancel,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -533,6 +535,7 @@ mod windows_keyboard_hook {
             let payload = match signal {
                 ShortcutSignal::Pressed => "pressed",
                 ShortcutSignal::Released => "released",
+                ShortcutSignal::Cancel => "cancel",
             };
             let _ = app.emit("wind-speak://shortcut", payload);
         }
@@ -548,6 +551,15 @@ mod windows_keyboard_hook {
             key_up: bool,
             key_is_down: impl Fn(u32) -> bool,
         ) -> ShortcutEventOutcome {
+            if self.active && key_down && event_vk == vk_value(VK_ESCAPE) {
+                self.active = false;
+                self.capturing = false;
+                return ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Cancel),
+                };
+            }
+
             let relevant = hotkey.is_relevant(event_vk);
             let modifiers_down = hotkey.required_modifiers_down(event_vk, key_down, &key_is_down);
             if relevant && modifiers_down {
@@ -721,7 +733,9 @@ mod windows_keyboard_hook {
             ShortcutEventOutcome, ShortcutRuntimeState, ShortcutSignal, parse_shortcut, vk_value,
         };
         use std::collections::HashSet;
-        use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LCONTROL, VK_LWIN, VK_SPACE};
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            VK_ESCAPE, VK_LCONTROL, VK_LWIN, VK_SPACE,
+        };
 
         #[test]
         fn modifier_only_ctrl_win_emits_press_and_release() {
@@ -815,6 +829,48 @@ mod windows_keyboard_hook {
                 ShortcutEventOutcome {
                     consume: true,
                     signal: Some(ShortcutSignal::Released)
+                }
+            );
+        }
+
+        #[test]
+        fn escape_cancels_active_modifier_shortcut() {
+            let hotkey = parse_shortcut("Ctrl+Win").expect("parse shortcut");
+            let mut runtime = ShortcutRuntimeState::default();
+            let mut pressed = HashSet::new();
+
+            let _ = send_key(
+                &mut runtime,
+                hotkey,
+                &mut pressed,
+                vk_value(VK_LCONTROL),
+                true,
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), true),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Pressed)
+                }
+            );
+            assert_eq!(
+                send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_ESCAPE),
+                    true
+                ),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Cancel)
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), false),
+                ShortcutEventOutcome {
+                    consume: false,
+                    signal: None
                 }
             );
         }

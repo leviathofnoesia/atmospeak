@@ -84,6 +84,23 @@ function Wait-ForInstalledWindow {
   throw "Timed out waiting for visible '$Title' window. Observed: $($observed -join ', ')"
 }
 
+function Wait-ForPathRemoval {
+  param(
+    [string]$Path,
+    [int]$TimeoutSeconds = 15
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    if (-not (Test-Path $Path)) {
+      return
+    }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $deadline)
+
+  throw "Path still exists after waiting for uninstall cleanup: $Path"
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
   $InstallerPath = Get-ChildItem (Join-Path $Root "release") -Filter "*_x64-setup.exe" -File |
@@ -146,9 +163,6 @@ if ($uninstall.ExitCode -ne 0) {
   throw "Uninstaller exited with code $($uninstall.ExitCode)"
 }
 
-Start-Sleep -Seconds 2
-if (Test-Path $AppExe) {
-  throw "App executable still exists after uninstall: $AppExe"
-}
+Wait-ForPathRemoval -Path $AppExe
 
 Write-Host "Install/uninstall smoke passed."

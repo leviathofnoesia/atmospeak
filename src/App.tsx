@@ -461,6 +461,11 @@ function App() {
         return;
       }
 
+      if (action === "cancel") {
+        void handleCancel();
+        return;
+      }
+
       const mode = settingsRef.current?.mode ?? "toggle";
       const activeRecording = recordingRef.current;
       if (mode === "pushToTalk") {
