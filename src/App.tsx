@@ -4,6 +4,7 @@ import {
   BookOpen,
   CheckCircle2,
   Clipboard,
+  Copy,
   Cpu,
   Database,
   Download,
@@ -25,6 +26,7 @@ import type { RecorderPhase } from "./components/RecorderOverlay";
 import { StatusLed } from "./components/StatusLed";
 import {
   cancelRecording,
+  copyText,
   deleteDictionaryEntry,
   deleteSnippet,
   getAppSnapshot,
@@ -770,6 +772,10 @@ function App() {
           {activeTab === "history" && (
             <HistoryPanel
               sessions={snapshot.sessions}
+              onCopy={async (session) => {
+                const message = await copyText(session.cleanedText);
+                setNotice({ tone: "success", message });
+              }}
               onInject={async (session) => {
                 const result = await injectText(session.cleanedText);
                 setRecorderPhase(result.injected ? "pasted" : "idle");
@@ -984,9 +990,11 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function HistoryPanel({
   sessions,
+  onCopy,
   onInject,
 }: {
   sessions: TranscriptSession[];
+  onCopy: (session: TranscriptSession) => Promise<void>;
   onInject: (session: TranscriptSession) => Promise<void>;
 }) {
   return (
@@ -1004,15 +1012,26 @@ function HistoryPanel({
                 {session.wordCount} words / {formatDuration(session.durationMs)}
               </small>
             </div>
-            <button
-              className="button button--ghost button--square"
-              type="button"
-              onClick={() => void onInject(session)}
-              aria-label="Paste transcript again"
-              title="Paste transcript again"
-            >
-              <Clipboard size={18} />
-            </button>
+            <div className="history-item__actions">
+              <button
+                className="button button--ghost button--square"
+                type="button"
+                onClick={() => void onCopy(session)}
+                aria-label="Copy transcript"
+                title="Copy transcript"
+              >
+                <Copy size={18} />
+              </button>
+              <button
+                className="button button--ghost button--square"
+                type="button"
+                onClick={() => void onInject(session)}
+                aria-label="Paste transcript again"
+                title="Paste transcript again"
+              >
+                <Clipboard size={18} />
+              </button>
+            </div>
           </article>
         ))
       )}

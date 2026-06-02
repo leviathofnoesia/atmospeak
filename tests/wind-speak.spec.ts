@@ -15,6 +15,14 @@ test("loads the Wind Speak hub in browser mock mode", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Local dictation console" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start dictation" })).toBeVisible();
+  await page.getByRole("button", { name: "Dictate" }).click();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop" }).click();
+  await expect(page.getByRole("heading", { name: "Transcript history" })).toBeVisible();
+  await page.getByRole("button", { name: "Copy transcript" }).click();
+  await expect(page.getByText("Transcript copied to clipboard.")).toBeVisible();
+  await page.getByRole("button", { name: "Paste transcript again" }).click();
+  await expect(page.getByText("Mock transcript copied to the focused application.")).toBeVisible();
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByLabel("Shortcut")).toHaveValue("Ctrl+Alt+Space");
   await expect(page.getByLabel("Mode")).toHaveValue("toggle");

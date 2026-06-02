@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type {
@@ -80,25 +81,25 @@ function releaseArtifacts(): ReleaseArtifact[] {
     {
       id: "nsis",
       label: "Windows installer",
-      fileName: "Wind-Speak_0.1.6_x64-setup.exe",
+      fileName: "Wind-Speak_0.1.7_x64-setup.exe",
       kind: "installer",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.6_x64-setup.exe`,
+      url: `${releaseBaseUrl}/Wind-Speak_0.1.7_x64-setup.exe`,
       recommended: true,
     },
     {
       id: "msi",
       label: "Windows MSI",
-      fileName: "Wind-Speak_0.1.6_x64_en-US.msi",
+      fileName: "Wind-Speak_0.1.7_x64_en-US.msi",
       kind: "msi",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.6_x64_en-US.msi`,
+      url: `${releaseBaseUrl}/Wind-Speak_0.1.7_x64_en-US.msi`,
       recommended: false,
     },
     {
       id: "portable",
       label: "Portable zip",
-      fileName: "Wind-Speak_0.1.6_x64-portable.zip",
+      fileName: "Wind-Speak_0.1.7_x64-portable.zip",
       kind: "portable",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.6_x64-portable.zip`,
+      url: `${releaseBaseUrl}/Wind-Speak_0.1.7_x64-portable.zip`,
       recommended: false,
     },
     {
@@ -232,6 +233,19 @@ export function injectText(text: string): Promise<InjectionResult> {
   }));
 }
 
+export async function copyText(text: string): Promise<string> {
+  if (text.trim().length === 0) {
+    throw new Error("cannot copy an empty transcript");
+  }
+
+  if (hasTauriRuntime()) {
+    await writeText(text);
+    return "Transcript copied to clipboard.";
+  }
+
+  return "Transcript copied to clipboard.";
+}
+
 export function upsertDictionaryEntry(entry: DictionaryEntry): Promise<AppSnapshot> {
   return command("upsert_dictionary_entry", { entry }, () => {
     const saved = { ...entry, id: entry.id || crypto.randomUUID() };
@@ -347,7 +361,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   if (!hasTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.1.6",
+      currentVersion: "0.1.7",
       version: null,
       date: null,
       body: null,
@@ -384,7 +398,7 @@ export async function downloadAndInstallUpdate(): Promise<UpdateCheckResult> {
   if (!hasTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.1.6",
+      currentVersion: "0.1.7",
       version: null,
       date: null,
       body: null,

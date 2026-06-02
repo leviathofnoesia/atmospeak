@@ -652,6 +652,13 @@ h1 {
   padding: 14px;
 }
 
+.history-item__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .history-item p,
 .editable-row p,
 .machine-card p,
