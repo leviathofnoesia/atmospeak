@@ -1499,7 +1499,7 @@ function SettingsPanel({
       />
       <ToggleRow
         icon={<RotateCw size={18} />}
-        label="Cleanup spoken punctuation and dictionary terms"
+        label="Cleanup punctuation, corrections, and dictionary terms"
         checked={settings.cleanupEnabled}
         onChange={(cleanupEnabled) => setSettings({ ...settings, cleanupEnabled })}
       />
