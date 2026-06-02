@@ -309,8 +309,7 @@ mod windows_keyboard_hook {
         app: Option<AppHandle>,
         shortcuts_paused: Option<Arc<ParkingMutex<bool>>>,
         hotkey: ParsedShortcut,
-        active: bool,
-        capturing: bool,
+        runtime: ShortcutRuntimeState,
     }
 
     impl Default for HookContext {
@@ -325,10 +324,27 @@ mod windows_keyboard_hook {
                     shift: false,
                     key: None,
                 },
-                active: false,
-                capturing: false,
+                runtime: ShortcutRuntimeState::default(),
             }
         }
+    }
+
+    #[derive(Clone, Copy, Default)]
+    struct ShortcutRuntimeState {
+        active: bool,
+        capturing: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ShortcutSignal {
+        Pressed,
+        Released,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ShortcutEventOutcome {
+        consume: bool,
+        signal: Option<ShortcutSignal>,
     }
 
     #[derive(Clone, Copy)]
@@ -416,8 +432,7 @@ mod windows_keyboard_hook {
                 app: Some(app),
                 shortcuts_paused: Some(shortcuts_paused),
                 hotkey,
-                active: false,
-                capturing: false,
+                runtime: ShortcutRuntimeState::default(),
             };
         }
 
@@ -503,38 +518,73 @@ mod windows_keyboard_hook {
             .map(|paused| *paused.lock())
             .unwrap_or(false)
         {
-            if context.active {
-                context.active = false;
-                context.capturing = false;
+            if context.runtime.active {
+                context.runtime = ShortcutRuntimeState::default();
                 let _ = app.emit("wind-speak://shortcut", "released");
             }
             return false;
         }
 
-        let relevant = context.hotkey.is_relevant(event_vk);
-        let modifiers_down = context.hotkey.required_modifiers_down(event_vk, key_down);
-        if relevant && modifiers_down {
-            context.capturing = true;
+        let hotkey = context.hotkey;
+        let outcome = context
+            .runtime
+            .handle_event(hotkey, event_vk, key_down, key_up, |vk| key_is_down(vk));
+        if let Some(signal) = outcome.signal {
+            let payload = match signal {
+                ShortcutSignal::Pressed => "pressed",
+                ShortcutSignal::Released => "released",
+            };
+            let _ = app.emit("wind-speak://shortcut", payload);
         }
+        outcome.consume
+    }
 
-        let combo_down = context.hotkey.is_down(event_vk, key_down);
-        if combo_down && !context.active {
-            context.active = true;
-            let _ = app.emit("wind-speak://shortcut", "pressed");
-            return relevant;
-        }
-        if context.active && !combo_down {
-            context.active = false;
-            let _ = app.emit("wind-speak://shortcut", "released");
-            return relevant || context.capturing;
-        }
+    impl ShortcutRuntimeState {
+        fn handle_event(
+            &mut self,
+            hotkey: ParsedShortcut,
+            event_vk: u32,
+            key_down: bool,
+            key_up: bool,
+            key_is_down: impl Fn(u32) -> bool,
+        ) -> ShortcutEventOutcome {
+            let relevant = hotkey.is_relevant(event_vk);
+            let modifiers_down = hotkey.required_modifiers_down(event_vk, key_down, &key_is_down);
+            if relevant && modifiers_down {
+                self.capturing = true;
+            }
 
-        if context.capturing && key_up && relevant && !modifiers_down {
-            context.capturing = false;
-            return true;
-        }
+            let combo_down = hotkey.is_down(event_vk, key_down, &key_is_down);
+            if combo_down && !self.active {
+                self.active = true;
+                return ShortcutEventOutcome {
+                    consume: relevant,
+                    signal: Some(ShortcutSignal::Pressed),
+                };
+            }
+            if self.active && !combo_down {
+                self.active = false;
+                let consume = relevant || self.capturing;
+                self.capturing = false;
+                return ShortcutEventOutcome {
+                    consume,
+                    signal: Some(ShortcutSignal::Released),
+                };
+            }
 
-        relevant && (combo_down || context.active || context.capturing)
+            if self.capturing && key_up && relevant && !modifiers_down {
+                self.capturing = false;
+                return ShortcutEventOutcome {
+                    consume: true,
+                    signal: None,
+                };
+            }
+
+            ShortcutEventOutcome {
+                consume: relevant && (combo_down || self.active || self.capturing),
+                signal: None,
+            }
+        }
     }
 
     impl ParsedShortcut {
@@ -548,15 +598,27 @@ mod windows_keyboard_hook {
                 )
         }
 
-        fn is_down(self, event_vk: u32, event_is_down: bool) -> bool {
+        fn is_down(
+            self,
+            event_vk: u32,
+            event_is_down: bool,
+            key_is_down: &impl Fn(u32) -> bool,
+        ) -> bool {
             let target_down = self
                 .key_vk()
-                .map(|key_vk| key_down_considering_event(key_vk, event_vk, event_is_down))
+                .map(|key_vk| {
+                    key_down_considering_event(key_vk, event_vk, event_is_down, key_is_down)
+                })
                 .unwrap_or(true);
-            target_down && self.required_modifiers_down(event_vk, event_is_down)
+            target_down && self.required_modifiers_down(event_vk, event_is_down, key_is_down)
         }
 
-        fn required_modifiers_down(self, event_vk: u32, event_is_down: bool) -> bool {
+        fn required_modifiers_down(
+            self,
+            event_vk: u32,
+            event_is_down: bool,
+            key_is_down: &impl Fn(u32) -> bool,
+        ) -> bool {
             (!self.ctrl
                 || modifier_down(
                     VK_CONTROL,
@@ -564,13 +626,34 @@ mod windows_keyboard_hook {
                     VK_RCONTROL,
                     event_vk,
                     event_is_down,
+                    key_is_down,
                 ))
                 && (!self.alt
-                    || modifier_down(VK_MENU, VK_LMENU, VK_RMENU, event_vk, event_is_down))
+                    || modifier_down(
+                        VK_MENU,
+                        VK_LMENU,
+                        VK_RMENU,
+                        event_vk,
+                        event_is_down,
+                        key_is_down,
+                    ))
                 && (!self.shift
-                    || modifier_down(VK_SHIFT, VK_LSHIFT, VK_RSHIFT, event_vk, event_is_down))
+                    || modifier_down(
+                        VK_SHIFT,
+                        VK_LSHIFT,
+                        VK_RSHIFT,
+                        event_vk,
+                        event_is_down,
+                        key_is_down,
+                    ))
                 && (!self.win
-                    || either_down_considering_event(VK_LWIN, VK_RWIN, event_vk, event_is_down))
+                    || either_down_considering_event(
+                        VK_LWIN,
+                        VK_RWIN,
+                        event_vk,
+                        event_is_down,
+                        key_is_down,
+                    ))
         }
 
         fn key_vk(self) -> Option<u32> {
@@ -587,9 +670,10 @@ mod windows_keyboard_hook {
         right: VIRTUAL_KEY,
         event_vk: u32,
         event_is_down: bool,
+        key_is_down: &impl Fn(u32) -> bool,
     ) -> bool {
-        key_down_considering_event(vk_value(generic), event_vk, event_is_down)
-            || either_down_considering_event(left, right, event_vk, event_is_down)
+        key_down_considering_event(vk_value(generic), event_vk, event_is_down, key_is_down)
+            || either_down_considering_event(left, right, event_vk, event_is_down, key_is_down)
     }
 
     fn either_down_considering_event(
@@ -597,6 +681,7 @@ mod windows_keyboard_hook {
         right: VIRTUAL_KEY,
         event_vk: u32,
         event_is_down: bool,
+        key_is_down: &impl Fn(u32) -> bool,
     ) -> bool {
         let left_vk = vk_value(left);
         let right_vk = vk_value(right);
@@ -609,7 +694,12 @@ mod windows_keyboard_hook {
         key_is_down(left_vk) || key_is_down(right_vk)
     }
 
-    fn key_down_considering_event(key: u32, event_vk: u32, event_is_down: bool) -> bool {
+    fn key_down_considering_event(
+        key: u32,
+        event_vk: u32,
+        event_is_down: bool,
+        key_is_down: &impl Fn(u32) -> bool,
+    ) -> bool {
         if event_vk == key {
             event_is_down
         } else {
@@ -623,6 +713,128 @@ mod windows_keyboard_hook {
 
     fn vk_value(key: VIRTUAL_KEY) -> u32 {
         key.0 as u32
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{
+            ShortcutEventOutcome, ShortcutRuntimeState, ShortcutSignal, parse_shortcut, vk_value,
+        };
+        use std::collections::HashSet;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LCONTROL, VK_LWIN, VK_SPACE};
+
+        #[test]
+        fn modifier_only_ctrl_win_emits_press_and_release() {
+            let hotkey = parse_shortcut("Ctrl+Win").expect("parse shortcut");
+            let mut runtime = ShortcutRuntimeState::default();
+            let mut pressed = HashSet::new();
+
+            assert_eq!(
+                send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_LCONTROL),
+                    true
+                ),
+                ShortcutEventOutcome {
+                    consume: false,
+                    signal: None
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), true),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Pressed)
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), false),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Released)
+                }
+            );
+            assert_eq!(
+                send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_LCONTROL),
+                    false
+                ),
+                ShortcutEventOutcome {
+                    consume: false,
+                    signal: None
+                }
+            );
+        }
+
+        #[test]
+        fn keyed_ctrl_win_space_waits_for_space_before_pressing() {
+            let hotkey = parse_shortcut("Ctrl+Win+Space").expect("parse shortcut");
+            let mut runtime = ShortcutRuntimeState::default();
+            let mut pressed = HashSet::new();
+
+            assert_eq!(
+                send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_LCONTROL),
+                    true
+                ),
+                ShortcutEventOutcome {
+                    consume: false,
+                    signal: None
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), true),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: None
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_SPACE), true),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Pressed)
+                }
+            );
+            assert_eq!(
+                send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_SPACE),
+                    false
+                ),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Released)
+                }
+            );
+        }
+
+        fn send_key(
+            runtime: &mut ShortcutRuntimeState,
+            hotkey: super::ParsedShortcut,
+            pressed: &mut HashSet<u32>,
+            vk: u32,
+            is_down: bool,
+        ) -> ShortcutEventOutcome {
+            if is_down {
+                pressed.insert(vk);
+            } else {
+                pressed.remove(&vk);
+            }
+            runtime.handle_event(hotkey, vk, is_down, !is_down, |candidate| {
+                pressed.contains(&candidate)
+            })
+        }
     }
 }
 
