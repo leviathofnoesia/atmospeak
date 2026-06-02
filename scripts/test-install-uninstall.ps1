@@ -5,6 +5,85 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class WindSpeakWindowProbe {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+}
+"@
+
+function Get-VisibleWindowTitlesForProcess {
+  param([int]$ProcessId)
+
+  $titles = New-Object System.Collections.Generic.List[string]
+  $callback = [WindSpeakWindowProbe+EnumWindowsProc]{
+    param([IntPtr]$Handle, [IntPtr]$Param)
+
+    if (-not [WindSpeakWindowProbe]::IsWindowVisible($Handle)) {
+      return $true
+    }
+
+    [uint32]$windowProcessId = 0
+    [void][WindSpeakWindowProbe]::GetWindowThreadProcessId($Handle, [ref]$windowProcessId)
+    if ($windowProcessId -ne $ProcessId) {
+      return $true
+    }
+
+    $builder = New-Object System.Text.StringBuilder 256
+    [void][WindSpeakWindowProbe]::GetWindowText($Handle, $builder, $builder.Capacity)
+    $title = $builder.ToString()
+    if (-not [string]::IsNullOrWhiteSpace($title)) {
+      $titles.Add($title)
+    }
+
+    return $true
+  }
+
+  [void][WindSpeakWindowProbe]::EnumWindows($callback, [IntPtr]::Zero)
+  return $titles.ToArray()
+}
+
+function Wait-ForInstalledWindow {
+  param(
+    [int]$ProcessId,
+    [string]$Title,
+    [int]$TimeoutSeconds = 15
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $process) {
+      throw "App process exited before '$Title' appeared."
+    }
+
+    $titles = Get-VisibleWindowTitlesForProcess -ProcessId $ProcessId
+    if ($titles -contains $Title) {
+      return
+    }
+
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $deadline)
+
+  $observed = Get-VisibleWindowTitlesForProcess -ProcessId $ProcessId
+  throw "Timed out waiting for visible '$Title' window. Observed: $($observed -join ', ')"
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
   $InstallerPath = Get-ChildItem (Join-Path $Root "release") -Filter "*_x64-setup.exe" -File |
@@ -41,11 +120,16 @@ if (-not (Test-Path (Join-Path $InstallDir "resources\whisper-runtime\whisper-cl
 }
 
 $process = Start-Process -FilePath $AppExe -PassThru
-Start-Sleep -Seconds 5
-if ($process.HasExited) {
-  throw "App exited during launch smoke with code $($process.ExitCode)"
+try {
+  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Wind Speak"
+  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Wind Speak Overlay"
+  if ($process.HasExited) {
+    throw "App exited during launch smoke with code $($process.ExitCode)"
+  }
 }
-Stop-Process -Id $process.Id -Force
+finally {
+  Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+}
 
 $Uninstaller = Get-ChildItem $InstallDir -Filter "*uninst*.exe" -File -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty FullName -First 1
