@@ -4,7 +4,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-use crate::services::{app_state::AppState, shortcuts};
+use crate::services::{app_state::AppState, overlay_window, shortcuts};
 
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Wind Speak").build(app)?;
@@ -69,8 +69,7 @@ fn toggle_overlay_window(app: &tauri::AppHandle) {
         if is_visible {
             let _ = window.hide();
         } else {
-            let _ = window.show();
-            let _ = window.set_always_on_top(true);
+            let _ = overlay_window::show_and_reset(app);
         }
     }
 }

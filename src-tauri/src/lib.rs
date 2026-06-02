@@ -14,7 +14,9 @@ use commands::{
     list_microphones, save_settings, set_shortcuts_paused, show_overlay_window, start_recording,
     stop_recording, upsert_dictionary_entry, upsert_snippet,
 };
-use services::{app_state::AppState, shortcuts};
+use services::{app_state::AppState, overlay_window, shortcuts};
+
+const ONBOARDING_VERSION: &str = "desktop-parity-v4";
 
 fn install_global_shortcut(
     app: &mut tauri::App,
@@ -87,6 +89,24 @@ pub fn run() {
                 &initial_hotkey,
             )?;
             tray::install(app)?;
+            let needs_onboarding = app
+                .state::<AppState>()
+                .database
+                .lock()
+                .load_settings()
+                .map(|settings| {
+                    !settings.onboarding_complete
+                        || settings.onboarding_version != ONBOARDING_VERSION
+                })
+                .unwrap_or(true);
+            if needs_onboarding {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.unminimize();
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
+            }
+            let _ = overlay_window::show_and_reset(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

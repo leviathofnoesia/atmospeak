@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, State};
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::{
@@ -10,8 +10,8 @@ use crate::{
         TranscriptSession,
     },
     services::{
-        app_state::AppState, cleanup, injection, recorder::FinishedRecording, runtime, shortcuts,
-        startup, transcriber,
+        app_state::AppState, cleanup, injection, overlay_window, recorder::FinishedRecording,
+        runtime, shortcuts, startup, transcriber,
     },
 };
 
@@ -77,20 +77,7 @@ pub fn set_shortcuts_paused(
 
 #[tauri::command]
 pub fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
-    let window = app
-        .get_webview_window("overlay")
-        .ok_or_else(|| "Floating control window is not available.".to_string())?;
-
-    let _ = window.unminimize();
-    let _ = window.set_size(Size::Logical(LogicalSize::new(420.0, 128.0)));
-    let _ = window.center();
-    let _ = window.set_always_on_top(true);
-    let _ = window.show();
-    let _ = app.emit(
-        "wind-speak://overlay-visibility",
-        "Floating control shown and reset above other windows.",
-    );
-    Ok(())
+    to_command_result(overlay_window::show_and_reset(&app))
 }
 
 #[tauri::command]

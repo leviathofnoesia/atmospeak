@@ -62,7 +62,7 @@ import type {
   UpdateStatus,
 } from "./types/dictation";
 
-const onboardingVersion = "desktop-parity-v3";
+const onboardingVersion = "desktop-parity-v4";
 const recordingLevelPollMs = 120;
 const recordingLevelCommitMs = 260;
 const recordingLevelDelta = 0.015;

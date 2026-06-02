@@ -1,6 +1,7 @@
 pub mod app_state;
 pub mod cleanup;
 pub mod injection;
+pub mod overlay_window;
 pub mod recorder;
 pub mod runtime;
 pub mod shortcuts;

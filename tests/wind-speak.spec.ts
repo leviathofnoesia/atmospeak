@@ -27,3 +27,12 @@ test("loads the Wind Speak hub in browser mock mode", async ({ page }) => {
   await page.getByRole("button", { name: "Run onboarding" }).click();
   await expect(page.getByRole("heading", { name: "Desktop dictation instrument" })).toBeVisible();
 });
+
+test("loads the floating recorder overlay in browser mock mode", async ({ page }) => {
+  await page.goto("/?view=overlay");
+
+  await expect(page.getByLabel("Recorder controls")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ready" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dictate" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeDisabled();
+});
