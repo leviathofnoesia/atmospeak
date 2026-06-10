@@ -1,4 +1,5 @@
 import { emit, listen } from "@tauri-apps/api/event";
+import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
 import {
   BookOpen,
@@ -15,35 +16,52 @@ import {
   RotateCw,
   Scissors,
   Settings,
+  Sparkles,
   Trash2,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RecorderOverlay } from "./components/RecorderOverlay";
-import type { RecorderPhase } from "./components/RecorderOverlay";
+import type {
+  RecorderOverlaySize,
+  RecorderPhase,
+  RecorderResizeDirection,
+} from "./components/RecorderOverlay";
 import { StatusLed } from "./components/StatusLed";
 import {
   cancelRecording,
   copyText,
   deleteDictionaryEntry,
   deleteSnippet,
+  exportSession,
   getAppSnapshot,
   checkForUpdates,
   downloadAndInstallUpdate,
   getModelInventory,
   hasTauriRuntime,
   getModelStatus,
+  getRecordingFftBands,
   getRecordingLevel,
+  getRuntimeEvents,
   getShortcutStatus,
+  handleDictationAction,
   injectText,
   listMicrophones,
+  listRecentApps,
+  polishSession,
   saveSettings,
+  searchSessions,
+  showMainWindow,
+  setShortcutTestActive,
   setShortcutsPaused,
   showFloatingControl,
   startRecording,
   stopRecording,
+  submitFeedback,
+  updateSessionNotes,
   upsertDictionaryEntry,
   upsertSnippet,
 } from "./lib/api";
@@ -52,28 +70,63 @@ import type {
   AppSettings,
   AppSnapshot,
   DictionaryEntry,
+  ExportFormat,
+  HistorySearchFilters,
   HubTab,
   MicrophoneInfo,
+  RecentAppUsage,
   ModelInventory,
   ModelStatus,
+  NativeDictationEvent,
+  PolishStyle,
   RecordingStarted,
+  RuntimeEvent,
   ShortcutStatus,
   Snippet,
+  TranscriptStreamEvent,
   TranscriptSession,
   UpdateCheckResult,
   UpdateStatus,
 } from "./types/dictation";
 
-const onboardingVersion = "desktop-parity-v5";
-const recordingLevelPollMs = 120;
-const recordingLevelCommitMs = 260;
-const recordingLevelDelta = 0.015;
+const onboardingVersion = "desktop-runtime-parity-v1";
+const recordingLevelPollMs = 250;
+const recordingFftPollMs = 60;
+const recordingLevelCommitMs = 400;
+const recordingLevelDelta = 0.03;
+const overlaySizeOrder: RecorderOverlaySize[] = ["compact", "standard", "expanded"];
+const overlaySizeDimensions: Record<RecorderOverlaySize, { width: number; height: number }> = {
+  compact: { width: 360, height: 92 },
+  standard: { width: 560, height: 220 },
+  expanded: { width: 680, height: 300 },
+};
 const shortcutOptions = [
-  "Ctrl+Win",
-  "Ctrl+Win+Space",
+  "Ctrl+Alt+D",
   "Ctrl+Alt+Space",
   "Ctrl+Shift+Space",
-  "Ctrl+Alt+D",
+  "Ctrl+Win",
+  "Ctrl+Win+Space",
+];
+const languageOptions = [
+  { value: "auto", label: "Auto-detect" },
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "it", label: "Italian" },
+  { value: "pt", label: "Portuguese" },
+  { value: "nl", label: "Dutch" },
+  { value: "pl", label: "Polish" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "zh", label: "Chinese" },
+];
+const polishStyleOptions: Array<{ value: PolishStyle; label: string }> = [
+  { value: "concise", label: "Concise" },
+  { value: "formal", label: "Formal" },
+  { value: "casual", label: "Casual" },
+  { value: "excited", label: "Excited" },
+  { value: "summarize", label: "Summarize" },
 ];
 
 const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
@@ -97,6 +150,27 @@ interface PasteTestState {
   message: string;
 }
 
+interface MicCheckState {
+  active: boolean;
+  passed: boolean;
+  level: number;
+  message: string;
+}
+
+interface LiveTranscriptState {
+  sessionId: string | null;
+  phase: "idle" | "partial" | "stable" | "final" | "error";
+  text: string;
+  latencyMs: number | null;
+}
+
+const emptyLiveTranscript: LiveTranscriptState = {
+  sessionId: null,
+  phase: "idle",
+  text: "",
+  latencyMs: null,
+};
+
 function App() {
   const isOverlayView =
     typeof window !== "undefined" &&
@@ -112,18 +186,20 @@ function App() {
   const [microphones, setMicrophones] = useState<MicrophoneInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
+  const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
+  const [recentApps, setRecentApps] = useState<RecentAppUsage[]>([]);
   const [activeTab, setActiveTab] = useState<HubTab>("home");
   const [recording, setRecording] = useState<RecordingStarted | null>(null);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [recordingLevel, setRecordingLevel] = useState(0);
   const [recorderPhase, setRecorderPhase] = useState<RecorderPhase>("idle");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<AppNotice>({
     tone: "neutral",
     message: "Wind Speak is standing by.",
   });
+  const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptState>(emptyLiveTranscript);
   const [shortcutTest, setShortcutTest] = useState<ShortcutTestState>({
     active: false,
     detected: false,
@@ -134,17 +210,26 @@ function App() {
     passed: false,
     message: "Paste test has not run yet.",
   });
+  const [micCheck, setMicCheck] = useState<MicCheckState>({
+    active: false,
+    passed: false,
+    level: 0,
+    message: "Microphone check has not run yet.",
+  });
   const [dictionaryDraft, setDictionaryDraft] = useState({ phrase: "", replacement: "" });
   const [snippetDraft, setSnippetDraft] = useState({ trigger: "", body: "" });
+  const [feedbackDraft, setFeedbackDraft] = useState("");
+  const [polishingSessionId, setPolishingSessionId] = useState<string | null>(null);
   const recordingRef = useRef<RecordingStarted | null>(null);
-  const recordingLevelRef = useRef(0);
-  const lastRecordingLevelCommitRef = useRef(0);
   const onboardingOverlayShownRef = useRef(false);
   const busyRef = useRef(false);
   const startingRecordingRef = useRef(false);
   const queuedPushToTalkReleaseRef = useRef(false);
   const settingsRef = useRef<AppSettings | null>(null);
   const shortcutTestRef = useRef(shortcutTest);
+  const micCheckLevelRef = useRef(0);
+  const micCheckPassedRef = useRef(false);
+  const lastMicCheckLevelCommitRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const [
@@ -153,12 +238,14 @@ function App() {
       nextModelStatus,
       nextModelInventory,
       nextShortcutStatus,
+      nextRuntimeEvents,
     ] = await Promise.all([
       getAppSnapshot(),
       listMicrophones(),
       getModelStatus(),
       getModelInventory(),
       getShortcutStatus(),
+      getRuntimeEvents(),
     ]);
     setSnapshot(nextSnapshot);
     setSettingsDraft(nextSnapshot.settings);
@@ -166,12 +253,20 @@ function App() {
     setModelStatus(nextModelStatus);
     setModelInventory(nextModelInventory);
     setShortcutStatus(nextShortcutStatus);
+    setRuntimeEvents(nextRuntimeEvents);
+    if (hasTauriRuntime() || nextSnapshot.sessions.length > 0) {
+      setRecentApps(await listRecentApps(8));
+    }
   }, []);
 
   const refreshSnapshotOnly = useCallback(async () => {
     const nextSnapshot = await getAppSnapshot();
     setSnapshot(nextSnapshot);
     setSettingsDraft(nextSnapshot.settings);
+    if (hasTauriRuntime() || nextSnapshot.sessions.length > 0) {
+      const nextApps = await listRecentApps(8);
+      setRecentApps(nextApps);
+    }
   }, []);
 
   useEffect(() => {
@@ -191,6 +286,11 @@ function App() {
   }, [shortcutTest]);
 
   useEffect(() => {
+    micCheckLevelRef.current = micCheck.level;
+    micCheckPassedRef.current = micCheck.passed;
+  }, [micCheck.level, micCheck.passed]);
+
+  useEffect(() => {
     refresh().catch((error: unknown) => {
       setNotice({ tone: "error", message: stringifyError(error) });
     });
@@ -199,64 +299,15 @@ function App() {
   useEffect(() => {
     if (recording === null) {
       setElapsedSeconds(0);
-      setRecordingLevel(0);
-      recordingLevelRef.current = 0;
-      lastRecordingLevelCommitRef.current = 0;
       return undefined;
     }
 
     const startedAt = new Date(recording.startedAt).getTime();
     const interval = window.setInterval(() => {
       setElapsedSeconds(Math.max(0, (Date.now() - startedAt) / 1000));
-    }, 500);
+    }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [recording]);
-
-  useEffect(() => {
-    if (recording === null) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    lastRecordingLevelCommitRef.current = window.performance.now() - recordingLevelCommitMs;
-    const commitLevel = (level: number) => {
-      const normalized = Math.max(0, Math.min(1, level));
-      const now = window.performance.now();
-      const previous = recordingLevelRef.current;
-      if (
-        now - lastRecordingLevelCommitRef.current < recordingLevelCommitMs ||
-        Math.abs(normalized - previous) < recordingLevelDelta
-      ) {
-        return;
-      }
-      recordingLevelRef.current = normalized;
-      lastRecordingLevelCommitRef.current = now;
-      setRecordingLevel(normalized);
-    };
-
-    const pollLevel = () => {
-      getRecordingLevel()
-        .then((level) => {
-          if (!cancelled) {
-            commitLevel(level);
-          }
-        })
-        .catch(() => {
-          if (!cancelled && recordingLevelRef.current !== 0) {
-            recordingLevelRef.current = 0;
-            lastRecordingLevelCommitRef.current = window.performance.now();
-            setRecordingLevel(0);
-          }
-        });
-    };
-
-    pollLevel();
-    const interval = window.setInterval(pollLevel, recordingLevelPollMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
   }, [recording]);
 
   const finishRecording = useCallback(async () => {
@@ -326,18 +377,20 @@ function App() {
       modelStatus,
       shortcutStatus,
       notice,
-      recordingLevel,
+      recordingLevel: 0,
+      recordingBands: [],
+      liveTranscript,
     };
     void emit("wind-speak://dictation-state", payload);
     return undefined;
   }, [
     busy,
     elapsedSeconds,
+    liveTranscript,
     modelStatus,
     notice,
     recorderPhase,
     recording,
-    recordingLevel,
     shortcutStatus,
   ]);
 
@@ -360,6 +413,130 @@ function App() {
     }
   }, [setBusyState]);
 
+  useEffect(() => {
+    if (!micCheck.active) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const pollLevel = () => {
+      getRecordingLevel()
+        .then((level) => {
+          if (cancelled) {
+            return;
+          }
+          const normalized = Math.max(0, Math.min(1, level));
+          const previous = micCheckLevelRef.current;
+          const now = window.performance.now();
+          const justPassed = normalized > 0.06 && !micCheckPassedRef.current;
+          if (
+            !justPassed &&
+            now - lastMicCheckLevelCommitRef.current < recordingLevelCommitMs &&
+            Math.abs(normalized - previous) < recordingLevelDelta
+          ) {
+            return;
+          }
+
+          micCheckLevelRef.current = normalized;
+          if (normalized > 0.06) {
+            micCheckPassedRef.current = true;
+          }
+          lastMicCheckLevelCommitRef.current = now;
+          setMicCheck((current) => ({
+            ...current,
+            level: normalized,
+            passed: current.passed || normalized > 0.06,
+            message:
+              normalized > 0.06
+                ? "Microphone signal detected."
+                : "Listening for microphone signal...",
+          }));
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setMicCheck((current) => ({
+              ...current,
+              message: stringifyError(error),
+            }));
+          }
+        });
+    };
+
+    pollLevel();
+    const interval = window.setInterval(pollLevel, 250);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [micCheck.active]);
+
+  const startMicCheck = useCallback(async () => {
+    if (busyRef.current || recordingRef.current !== null) {
+      setMicCheck((current) => ({
+        ...current,
+        message: "Stop the current recording before checking the microphone.",
+      }));
+      return;
+    }
+
+    setBusyState(true);
+    try {
+      const started = await startRecording();
+      micCheckLevelRef.current = 0;
+      setRecording(started);
+      setRecorderPhase("listening");
+      setMicCheck({
+        active: true,
+        passed: false,
+        level: 0,
+        message: `Listening through ${started.microphoneName}.`,
+      });
+      micCheckPassedRef.current = false;
+      lastMicCheckLevelCommitRef.current = window.performance.now() - recordingLevelCommitMs;
+      setNotice({ tone: "neutral", message: "Microphone check is listening." });
+    } catch (error: unknown) {
+      setMicCheck({
+        active: false,
+        passed: false,
+        level: 0,
+        message: stringifyError(error),
+      });
+      setNotice({ tone: "error", message: stringifyError(error) });
+    } finally {
+      setBusyState(false);
+    }
+  }, [setBusyState]);
+
+  const stopMicCheck = useCallback(async () => {
+    setBusyState(true);
+    try {
+      await cancelRecording();
+      const passed = micCheckLevelRef.current > 0.06 || micCheck.passed;
+      setRecording(null);
+      setRecorderPhase("idle");
+      setMicCheck((current) => ({
+        ...current,
+        active: false,
+        passed,
+        level: passed ? Math.max(current.level, 0.16) : 0,
+        message: passed ? "Microphone check passed." : "No microphone signal detected.",
+      }));
+      setNotice({
+        tone: passed ? "success" : "warning",
+        message: passed ? "Microphone check passed." : "No microphone signal detected.",
+      });
+    } catch (error: unknown) {
+      setMicCheck((current) => ({
+        ...current,
+        active: false,
+        message: stringifyError(error),
+      }));
+      setNotice({ tone: "error", message: stringifyError(error) });
+    } finally {
+      setBusyState(false);
+    }
+  }, [micCheck.passed, setBusyState]);
+
   const armShortcutTest = useCallback(() => {
     if (shortcutStatus?.paused) {
       setShortcutTest({
@@ -372,6 +549,7 @@ function App() {
     }
 
     const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "the active shortcut";
+    void setShortcutTestActive(true);
     setShortcutTest({
       active: true,
       detected: false,
@@ -388,6 +566,7 @@ function App() {
             }
           : current,
       );
+      void setShortcutTestActive(false);
     }, 8000);
   }, [shortcutStatus?.hotkey, shortcutStatus?.paused]);
 
@@ -395,10 +574,19 @@ function App() {
     setPasteTest({
       running: true,
       passed: false,
-      message: "Pasting a Wind Speak test phrase into the focused app...",
+      message: "Focus the target text field. Pasting in 3...",
     });
-    setNotice({ tone: "neutral", message: "Running native paste test." });
+    setNotice({ tone: "neutral", message: "Focus the target app. Wind Speak will paste in 3 seconds." });
     try {
+      for (const seconds of [2, 1]) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        setPasteTest({
+          running: true,
+          passed: false,
+          message: `Focus the target text field. Pasting in ${seconds}...`,
+        });
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
       const result = await injectText("Wind Speak paste test");
       setPasteTest({
         running: false,
@@ -428,6 +616,56 @@ function App() {
     }
   }, []);
 
+  const handleNativeDictationEvent = useCallback(
+    (payload: NativeDictationEvent) => {
+      queuedPushToTalkReleaseRef.current = false;
+      startingRecordingRef.current = false;
+      setRecording(payload.recording);
+      setRecorderPhase(payload.phase);
+      setBusyState(payload.phase === "processing");
+      if (payload.phase === "listening" && payload.recording !== null) {
+        setLiveTranscript({
+          sessionId: payload.recording.id,
+          phase: "partial",
+          text: "",
+          latencyMs: null,
+        });
+      }
+      if (payload.phase === "idle" || payload.phase === "error") {
+        setLiveTranscript(emptyLiveTranscript);
+      }
+      setNotice({
+        tone:
+          payload.phase === "error"
+            ? "error"
+            : payload.phase === "pasted"
+              ? "success"
+              : "neutral",
+        message: payload.message,
+      });
+      if (payload.result !== null) {
+        void refreshSnapshotOnly();
+        setActiveTab("history");
+      }
+    },
+    [refreshSnapshotOnly, setBusyState],
+  );
+
+  const handleTranscriptStreamEvent = useCallback((payload: TranscriptStreamEvent) => {
+    setLiveTranscript((current) => {
+      if (current.sessionId !== null && current.sessionId !== payload.sessionId) {
+        return current;
+      }
+      const text = payload.stableText || payload.provisionalText || payload.message || "";
+      return {
+        sessionId: payload.sessionId,
+        phase: payload.phase,
+        text,
+        latencyMs: payload.latencyMs,
+      };
+    });
+  }, []);
+
   useEffect(() => {
     if (!hasTauriRuntime()) {
       return undefined;
@@ -437,6 +675,11 @@ function App() {
     let removeOverlayListener: (() => void) | undefined;
     let removeShortcutStatusListener: (() => void) | undefined;
     let removeOverlayVisibilityListener: (() => void) | undefined;
+    let removeNativeDictationListener: (() => void) | undefined;
+    let removeRuntimeEventListener: (() => void) | undefined;
+    let removeTranscriptPartialListener: (() => void) | undefined;
+    let removeTranscriptStableListener: (() => void) | undefined;
+    let removeTranscriptFinalListener: (() => void) | undefined;
     listen<string>("wind-speak://shortcut", (event) => {
       const action = event.payload;
       if (shortcutTestRef.current.active) {
@@ -451,6 +694,7 @@ function App() {
         }
         if (action === "pressed" || action === "toggle") {
           const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "shortcut";
+          void setShortcutTestActive(false);
           setShortcutTest({
             active: false,
             detected: true,
@@ -459,35 +703,6 @@ function App() {
           setNotice({ tone: "success", message: `${label} detected.` });
         }
         return;
-      }
-
-      if (action === "cancel") {
-        void handleCancel();
-        return;
-      }
-
-      const mode = settingsRef.current?.mode ?? "toggle";
-      const activeRecording = recordingRef.current;
-      if (mode === "pushToTalk") {
-        if (action === "pressed" && activeRecording === null && !busyRef.current) {
-          void handleToggleRecording();
-        }
-        if (action === "released" && startingRecordingRef.current) {
-          queuedPushToTalkReleaseRef.current = true;
-          setNotice({ tone: "neutral", message: "Shortcut release captured. Finishing dictation..." });
-          return;
-        }
-        if (action === "released" && activeRecording !== null) {
-          void handleToggleRecording();
-        }
-        if (action === "toggle") {
-          void handleToggleRecording();
-        }
-        return;
-      }
-
-      if (action === "pressed" || action === "toggle") {
-        void handleToggleRecording();
       }
     })
       .then((unlisten) => {
@@ -499,10 +714,10 @@ function App() {
 
     listen<string>("wind-speak://overlay-command", (event) => {
       if (event.payload === "toggle") {
-        void handleToggleRecording();
+        void handleDictationAction("toggle");
       }
       if (event.payload === "cancel") {
-        void handleCancel();
+        void handleDictationAction("cancel");
       }
     })
       .then((unlisten) => {
@@ -526,6 +741,56 @@ function App() {
         setNotice({ tone: "warning", message: stringifyError(error) });
       });
 
+    listen<NativeDictationEvent>("wind-speak://native-dictation", (event) => {
+      handleNativeDictationEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeNativeDictationListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
+    listen<RuntimeEvent>("wind-speak://runtime-event", (event) => {
+      setRuntimeEvents((current) => [event.payload, ...current].slice(0, 30));
+    })
+      .then((unlisten) => {
+        removeRuntimeEventListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
+    listen<TranscriptStreamEvent>("wind-speak://transcript-partial", (event) => {
+      handleTranscriptStreamEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeTranscriptPartialListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
+    listen<TranscriptStreamEvent>("wind-speak://transcript-stable", (event) => {
+      handleTranscriptStreamEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeTranscriptStableListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
+    listen<TranscriptStreamEvent>("wind-speak://transcript-final", (event) => {
+      handleTranscriptStreamEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeTranscriptFinalListener = unlisten;
+      })
+      .catch((error: unknown) => {
+        setNotice({ tone: "warning", message: stringifyError(error) });
+      });
+
     listen<string>("wind-speak://overlay-visibility", (event) => {
       setNotice({ tone: "neutral", message: event.payload });
     })
@@ -541,8 +806,13 @@ function App() {
       removeOverlayListener?.();
       removeShortcutStatusListener?.();
       removeOverlayVisibilityListener?.();
+      removeNativeDictationListener?.();
+      removeRuntimeEventListener?.();
+      removeTranscriptPartialListener?.();
+      removeTranscriptStableListener?.();
+      removeTranscriptFinalListener?.();
     };
-  }, [handleCancel, handleToggleRecording, shortcutStatus?.hotkey]);
+  }, [handleNativeDictationEvent, handleTranscriptStreamEvent, shortcutStatus?.hotkey]);
 
   const handleSaveSettings = async () => {
     if (settingsDraft === null) {
@@ -642,6 +912,25 @@ function App() {
     setNotice({ tone: "success", message: "Snippet added." });
   };
 
+  const handlePolishSession = async (session: TranscriptSession) => {
+    setPolishingSessionId(session.id);
+    try {
+      const result = await polishSession(session.id);
+      setSnapshot(result.snapshot);
+      setSettingsDraft(result.snapshot.settings);
+      setNotice({
+        tone: result.polish.changed ? "success" : "neutral",
+        message: result.polish.changed
+          ? `AI edit applied with ${result.polish.style} style.`
+          : "AI edit completed with no changes.",
+      });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+    } finally {
+      setPolishingSessionId(null);
+    }
+  };
+
   const recentSession = snapshot?.sessions[0] ?? null;
   const readiness = useMemo(() => {
     if (modelStatus?.ready) {
@@ -683,6 +972,9 @@ function App() {
         modelStatus={modelStatus}
         shortcutStatus={shortcutStatus}
         shortcutTest={shortcutTest}
+        micCheck={micCheck}
+        onStartMicCheck={startMicCheck}
+        onStopMicCheck={stopMicCheck}
         onTestShortcut={armShortcutTest}
         pasteTest={pasteTest}
         onPasteTest={runPasteTest}
@@ -705,6 +997,7 @@ function App() {
   }
 
   return (
+    <ErrorBoundary>
     <main className="app-shell">
       <section className="top-strip" aria-label="Application status">
         <div className="brand-block">
@@ -736,7 +1029,10 @@ function App() {
         modelStatus={modelStatus}
         hotkeyLabel={shortcutStatus?.hotkey || snapshot.settings.hotkey}
         notice={shortcutStatus?.registered ? undefined : shortcutStatus?.message}
-        inputLevel={recordingLevel}
+        liveTranscript={liveTranscript}
+        inputLevel={0}
+        bubbleOpacity={snapshot.settings.bubbleOpacity}
+        bubbleSize={snapshot.settings.bubbleSize}
         onToggle={handleToggleRecording}
         onCancel={handleCancel}
       />
@@ -771,12 +1067,31 @@ function App() {
               modelStatus={modelStatus}
               recentSession={recentSession}
               onStart={handleToggleRecording}
+              onPolishLatest={handlePolishSession}
+              polishingSessionId={polishingSessionId}
+              onUpdatePrivacy={async (privacyMode, autoDeleteTranscriptsAfterMinutes) => {
+                const nextSettings = {
+                  ...snapshot.settings,
+                  privacyMode,
+                  autoDeleteTranscriptsAfterMinutes,
+                };
+                const nextSnapshot = await saveSettings(nextSettings);
+                setSnapshot(nextSnapshot);
+                setSettingsDraft(nextSnapshot.settings);
+                setNotice({
+                  tone: "success",
+                  message: privacyMode
+                    ? "Privacy mode enabled."
+                    : "Privacy mode disabled.",
+                });
+              }}
               busy={busy}
             />
           )}
           {activeTab === "history" && (
             <HistoryPanel
               sessions={snapshot.sessions}
+              recentApps={recentApps}
               onCopy={async (session) => {
                 const message = await copyText(session.cleanedText);
                 setNotice({ tone: "success", message });
@@ -785,6 +1100,32 @@ function App() {
                 const result = await injectText(session.cleanedText);
                 setRecorderPhase(result.injected ? "pasted" : "idle");
                 setNotice({ tone: "success", message: result.message });
+              }}
+              onPolish={handlePolishSession}
+              polishingSessionId={polishingSessionId}
+              onExport={async (session, format) => {
+                try {
+                  const content = await exportSession(session.id, format);
+                  const blob = new Blob([content], { type: "text/plain" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `wind-speak-${session.id}.${format}`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                  setNotice({
+                    tone: "success",
+                    message: `Exported transcript as ${format.toUpperCase()}.`,
+                  });
+                } catch (error) {
+                  setNotice({
+                    tone: "error",
+                    message: `Export failed: ${(error as Error).message}`,
+                  });
+                }
+              }}
+              onUpdateNotes={async (session, notes) => {
+                setSnapshot(await updateSessionNotes(session.id, notes));
               }}
             />
           )}
@@ -832,6 +1173,7 @@ function App() {
               microphones={microphones}
               shortcutStatus={shortcutStatus}
               shortcutTest={shortcutTest}
+              runtimeEvents={runtimeEvents}
               onTestShortcut={armShortcutTest}
               onToggleShortcutsPaused={async () => {
                 const nextStatus = await setShortcutsPaused(!shortcutStatus?.paused);
@@ -870,11 +1212,27 @@ function App() {
                   setNotice({ tone: "error", message: stringifyError(error) });
                 }
               }}
+              feedbackDraft={feedbackDraft}
+              setFeedbackDraft={setFeedbackDraft}
+              onSubmitFeedback={async () => {
+                try {
+                  const result = await submitFeedback(feedbackDraft);
+                  setFeedbackDraft("");
+                  setNotice({
+                    tone: result.delivered ? "success" : "neutral",
+                    message: result.message,
+                  });
+                  setRuntimeEvents(await getRuntimeEvents());
+                } catch (error: unknown) {
+                  setNotice({ tone: "error", message: stringifyError(error) });
+                }
+              }}
             />
           )}
         </div>
       </section>
     </main>
+    </ErrorBoundary>
   );
 }
 
@@ -887,9 +1245,20 @@ interface OverlayStatePayload {
   shortcutStatus: ShortcutStatus | null;
   notice: AppNotice;
   recordingLevel: number;
+  recordingBands: number[];
+  liveTranscript: LiveTranscriptState;
 }
 
 function OverlayWindow() {
+  const [overlaySize, setOverlaySize] = useState<RecorderOverlaySize>(() => {
+    if (typeof window === "undefined") {
+      return "standard";
+    }
+    const saved = window.localStorage.getItem("wind-speak-overlay-size");
+    return overlaySizeOrder.includes(saved as RecorderOverlaySize)
+      ? (saved as RecorderOverlaySize)
+      : "standard";
+  });
   const [state, setState] = useState<OverlayStatePayload>({
     recording: null,
     elapsedSeconds: 0,
@@ -899,7 +1268,11 @@ function OverlayWindow() {
     shortcutStatus: null,
     notice: { tone: "neutral", message: "Wind Speak is standing by." },
     recordingLevel: 0,
+    recordingBands: [],
+    liveTranscript: emptyLiveTranscript,
   });
+  const recordingLevelRef = useRef(0);
+  const lastRecordingLevelCommitRef = useRef(0);
 
   useEffect(() => {
     document.body.classList.add("is-overlay-window");
@@ -908,22 +1281,270 @@ function OverlayWindow() {
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
+      return;
+    }
+    const size = overlaySizeDimensions[overlaySize];
+    window.localStorage.setItem("wind-speak-overlay-size", overlaySize);
+    getCurrentWindow()
+      .setSize(new LogicalSize(size.width, size.height))
+      .catch(() => undefined);
+  }, [overlaySize]);
+
+  const handleMoveStart = useCallback(() => {
+    if (!hasTauriRuntime()) {
+      return;
+    }
+    getCurrentWindow().startDragging().catch(() => undefined);
+  }, []);
+
+  const handleResizeStart = useCallback((direction: RecorderResizeDirection) => {
+    if (!hasTauriRuntime()) {
+      return;
+    }
+    getCurrentWindow().startResizeDragging(direction).catch(() => undefined);
+  }, []);
+
+  const handleCycleOverlaySize = useCallback(() => {
+    setOverlaySize((current) => {
+      const currentIndex = overlaySizeOrder.indexOf(current);
+      return overlaySizeOrder[(currentIndex + 1) % overlaySizeOrder.length];
+    });
+  }, []);
+
+  const handleOpenHub = useCallback(() => {
+    showMainWindow().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
       return undefined;
     }
 
     let removeStateListener: (() => void) | undefined;
+    let removeNativeDictationListener: (() => void) | undefined;
+    let removeTranscriptPartialListener: (() => void) | undefined;
+    let removeTranscriptStableListener: (() => void) | undefined;
+    let removeTranscriptFinalListener: (() => void) | undefined;
     listen<OverlayStatePayload>("wind-speak://dictation-state", (event) => {
-      setState(event.payload);
+      setState((current) => ({
+        ...event.payload,
+        elapsedSeconds: event.payload.recording === null ? 0 : current.elapsedSeconds,
+        recordingLevel: event.payload.recording === null ? 0 : current.recordingLevel,
+        recordingBands: event.payload.recording === null ? [] : current.recordingBands,
+        liveTranscript:
+          event.payload.recording === null ? emptyLiveTranscript : current.liveTranscript,
+      }));
     })
       .then((unlisten) => {
         removeStateListener = unlisten;
       })
       .catch(() => undefined);
 
-    return () => removeStateListener?.();
+    listen<NativeDictationEvent>("wind-speak://native-dictation", (event) => {
+      const payload = event.payload;
+      setState((current) => ({
+        ...current,
+        recording: payload.recording,
+        busy: payload.phase === "processing",
+        recorderPhase: payload.phase,
+        liveTranscript:
+          payload.phase === "listening" && payload.recording !== null
+            ? {
+                sessionId: payload.recording.id,
+                phase: "partial",
+                text: "",
+                latencyMs: null,
+              }
+            : payload.phase === "idle" || payload.phase === "error"
+              ? emptyLiveTranscript
+              : current.liveTranscript,
+        notice: {
+          tone: payload.phase === "error" ? "error" : payload.phase === "pasted" ? "success" : "neutral",
+          message: payload.message,
+        },
+      }));
+    })
+      .then((unlisten) => {
+        removeNativeDictationListener = unlisten;
+      })
+      .catch(() => undefined);
+
+    const handleTranscriptEvent = (payload: TranscriptStreamEvent) => {
+      setState((current) => {
+        if (
+          current.liveTranscript.sessionId !== null &&
+          current.liveTranscript.sessionId !== payload.sessionId
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          liveTranscript: {
+            sessionId: payload.sessionId,
+            phase: payload.phase,
+            text: payload.stableText || payload.provisionalText || payload.message || "",
+            latencyMs: payload.latencyMs,
+          },
+        };
+      });
+    };
+
+    listen<TranscriptStreamEvent>("wind-speak://transcript-partial", (event) => {
+      handleTranscriptEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeTranscriptPartialListener = unlisten;
+      })
+      .catch(() => undefined);
+
+    listen<TranscriptStreamEvent>("wind-speak://transcript-stable", (event) => {
+      handleTranscriptEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeTranscriptStableListener = unlisten;
+      })
+      .catch(() => undefined);
+
+    listen<TranscriptStreamEvent>("wind-speak://transcript-final", (event) => {
+      handleTranscriptEvent(event.payload);
+    })
+      .then((unlisten) => {
+        removeTranscriptFinalListener = unlisten;
+      })
+      .catch(() => undefined);
+
+    return () => {
+      removeStateListener?.();
+      removeNativeDictationListener?.();
+      removeTranscriptPartialListener?.();
+      removeTranscriptStableListener?.();
+      removeTranscriptFinalListener?.();
+    };
   }, []);
 
+  useEffect(() => {
+    if (state.recording === null) {
+      setState((current) =>
+        current.elapsedSeconds === 0 &&
+          current.recordingLevel === 0 &&
+          current.recordingBands.length === 0
+          ? current
+          : { ...current, elapsedSeconds: 0, recordingLevel: 0, recordingBands: [] },
+      );
+      recordingLevelRef.current = 0;
+      lastRecordingLevelCommitRef.current = 0;
+      return undefined;
+    }
+
+    const startedAt = new Date(state.recording.startedAt).getTime();
+    const interval = window.setInterval(() => {
+      setState((current) => ({
+        ...current,
+        elapsedSeconds: Math.max(0, (Date.now() - startedAt) / 1000),
+      }));
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [state.recording]);
+
+  useEffect(() => {
+    if (state.recording === null) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const pollBands = () => {
+      getRecordingFftBands()
+        .then((bands) => {
+          if (!cancelled) {
+            setState((current) => ({
+              ...current,
+              recordingBands: bands.slice(0, 7).map((band) => Math.max(0, Math.min(1, band))),
+            }));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setState((current) =>
+              current.recordingBands.length === 0 ? current : { ...current, recordingBands: [] },
+            );
+          }
+        });
+    };
+
+    pollBands();
+    const interval = window.setInterval(pollBands, recordingFftPollMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [state.recording]);
+
+  useEffect(() => {
+    if (state.recording === null) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    lastRecordingLevelCommitRef.current = window.performance.now() - recordingLevelCommitMs;
+    const commitLevel = (level: number) => {
+      const normalized = Math.max(0, Math.min(1, level));
+      const now = window.performance.now();
+      const previous = recordingLevelRef.current;
+      if (
+        now - lastRecordingLevelCommitRef.current < recordingLevelCommitMs ||
+        Math.abs(normalized - previous) < recordingLevelDelta
+      ) {
+        return;
+      }
+
+      recordingLevelRef.current = normalized;
+      lastRecordingLevelCommitRef.current = now;
+      setState((current) => ({ ...current, recordingLevel: normalized }));
+    };
+
+    const pollLevel = () => {
+      getRecordingLevel()
+        .then((level) => {
+          if (!cancelled) {
+            commitLevel(level);
+          }
+        })
+        .catch(() => {
+          if (!cancelled && recordingLevelRef.current !== 0) {
+            recordingLevelRef.current = 0;
+            lastRecordingLevelCommitRef.current = window.performance.now();
+            setState((current) => ({ ...current, recordingLevel: 0 }));
+          }
+        });
+    };
+
+    pollLevel();
+    const interval = window.setInterval(pollLevel, recordingLevelPollMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [state.recording]);
+
   return (
+    <ErrorBoundary
+      fallback={
+        <div role="alert" className="error-boundary error-boundary--overlay">
+          <p>Wind Speak encountered an error. Tap to reload.</p>
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.location.reload();
+              }
+            }}
+          >
+            Reload
+          </button>
+        </div>
+      }
+    >
     <main className="overlay-shell" data-tauri-drag-region>
       <RecorderOverlay
         recording={state.recording}
@@ -933,11 +1554,21 @@ function OverlayWindow() {
         modelStatus={state.modelStatus}
         hotkeyLabel={state.shortcutStatus?.hotkey || "BUTTON"}
         notice={state.notice.message}
+        liveTranscript={state.liveTranscript}
         inputLevel={state.recordingLevel}
-        onToggle={() => void emit("wind-speak://overlay-command", "toggle")}
-        onCancel={() => void emit("wind-speak://overlay-command", "cancel")}
+        inputBands={state.recordingBands}
+        overlaySize={overlaySize}
+        onMoveStart={handleMoveStart}
+        onResizeStart={handleResizeStart}
+        onCycleSize={handleCycleOverlaySize}
+        onOpenHub={handleOpenHub}
+        onToggle={() => void handleDictationAction("toggle")}
+        onPressStart={() => void handleDictationAction("pressed")}
+        onPressEnd={() => void handleDictationAction("released")}
+        onCancel={() => void handleDictationAction("cancel")}
       />
     </main>
+    </ErrorBoundary>
   );
 }
 
@@ -946,10 +1577,25 @@ interface HomePanelProps {
   modelStatus: ModelStatus | null;
   recentSession: TranscriptSession | null;
   onStart: () => void;
+  onPolishLatest: (session: TranscriptSession) => Promise<void>;
+  polishingSessionId: string | null;
+  onUpdatePrivacy: (
+    privacyMode: boolean,
+    autoDeleteTranscriptsAfterMinutes: number | null,
+  ) => Promise<void>;
   busy: boolean;
 }
 
-function HomePanel({ snapshot, modelStatus, recentSession, onStart, busy }: HomePanelProps) {
+function HomePanel({
+  snapshot,
+  modelStatus,
+  recentSession,
+  onStart,
+  onPolishLatest,
+  polishingSessionId,
+  onUpdatePrivacy,
+  busy,
+}: HomePanelProps) {
   return (
     <section className="panel-grid">
       <div className="hero-panel">
@@ -968,6 +1614,43 @@ function HomePanel({ snapshot, modelStatus, recentSession, onStart, busy }: Home
       />
       <div className="machine-card">
         <div className="machine-card__header">
+          <Database size={20} />
+          <h3>Privacy</h3>
+        </div>
+        <ToggleRow
+          icon={<Database size={18} />}
+          label="Privacy mode"
+          checked={snapshot.settings.privacyMode}
+          onChange={(privacyMode) =>
+            void onUpdatePrivacy(
+              privacyMode,
+              privacyMode
+                ? (snapshot.settings.autoDeleteTranscriptsAfterMinutes ?? 1440)
+                : snapshot.settings.autoDeleteTranscriptsAfterMinutes,
+            )
+          }
+        />
+        <label>
+          <span>Auto-delete transcripts</span>
+          <select
+            value={snapshot.settings.autoDeleteTranscriptsAfterMinutes ?? ""}
+            onChange={(event) =>
+              void onUpdatePrivacy(
+                snapshot.settings.privacyMode,
+                event.currentTarget.value.length > 0 ? Number(event.currentTarget.value) : null,
+              )
+            }
+          >
+            <option value="">Never</option>
+            <option value={15}>After 15 minutes</option>
+            <option value={60}>After 1 hour</option>
+            <option value={1440}>After 1 day</option>
+            <option value={10080}>After 7 days</option>
+          </select>
+        </label>
+      </div>
+      <div className="machine-card">
+        <div className="machine-card__header">
           <Cpu size={20} />
           <h3>Offline engine</h3>
         </div>
@@ -979,6 +1662,17 @@ function HomePanel({ snapshot, modelStatus, recentSession, onStart, busy }: Home
           <h3>Latest transcript</h3>
         </div>
         <p>{recentSession?.cleanedText ?? "History is empty. Your first transcript will appear here."}</p>
+        {recentSession ? (
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => void onPolishLatest(recentSession)}
+            disabled={polishingSessionId === recentSession.id}
+          >
+            <Sparkles size={18} />
+            {polishingSessionId === recentSession.id ? "Editing" : "Edit last"}
+          </button>
+        ) : null}
       </div>
     </section>
   );
@@ -993,52 +1687,275 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function parseOptionalWordCount(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function HistoryPanel({
   sessions,
   onCopy,
   onInject,
+  onPolish,
+  polishingSessionId,
+  onExport,
+  onUpdateNotes,
+  recentApps,
 }: {
   sessions: TranscriptSession[];
   onCopy: (session: TranscriptSession) => Promise<void>;
   onInject: (session: TranscriptSession) => Promise<void>;
+  onPolish: (session: TranscriptSession) => Promise<void>;
+  polishingSessionId: string | null;
+  onExport: (session: TranscriptSession, format: ExportFormat) => Promise<void>;
+  onUpdateNotes: (session: TranscriptSession, notes: string) => Promise<void>;
+  recentApps: RecentAppUsage[];
 }) {
+  const [query, setQuery] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [minWords, setMinWords] = useState("");
+  const [maxWords, setMaxWords] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
+  const [filtered, setFiltered] = useState<TranscriptSession[]>(sessions);
+  const [filterError, setFilterError] = useState<string | null>(null);
+
+  const searchFilters = useMemo<HistorySearchFilters>(
+    () => ({
+      query: query.trim() || null,
+      fromDate: fromDate || null,
+      toDate: toDate || null,
+      minWordCount: parseOptionalWordCount(minWords),
+      maxWordCount: parseOptionalWordCount(maxWords),
+      limit: 200,
+    }),
+    [fromDate, maxWords, minWords, query, toDate],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const runSearch = async () => {
+      const hasFilters =
+        searchFilters.query !== null ||
+        searchFilters.fromDate !== null ||
+        searchFilters.toDate !== null ||
+        searchFilters.minWordCount !== null ||
+        searchFilters.maxWordCount !== null;
+      if (!hasFilters) {
+        setFiltered(sessions);
+        setFilterError(null);
+        return;
+      }
+
+      try {
+        const nextSessions = await searchSessions(searchFilters);
+        if (!cancelled) {
+          setFiltered(nextSessions);
+          setFilterError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFiltered(sessions);
+          setFilterError(stringifyError(error));
+        }
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      void runSearch();
+    }, 160);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchFilters, sessions]);
+
   return (
     <section className="list-panel">
       <PanelTitle icon={<History size={22} />} title="Transcript history" />
-      {sessions.length === 0 ? (
-        <EmptyState text="No transcripts yet. Start a recording from the floating control." />
+      <div className="history-toolbar">
+        <input
+          type="search"
+          placeholder="Search transcripts, apps, notes"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+        />
+        <input
+          type="date"
+          aria-label="From date"
+          value={fromDate}
+          onChange={(event) => setFromDate(event.currentTarget.value)}
+        />
+        <input
+          type="date"
+          aria-label="To date"
+          value={toDate}
+          onChange={(event) => setToDate(event.currentTarget.value)}
+        />
+        <input
+          type="number"
+          min="0"
+          inputMode="numeric"
+          placeholder="Min words"
+          value={minWords}
+          onChange={(event) => setMinWords(event.currentTarget.value)}
+        />
+        <input
+          type="number"
+          min="0"
+          inputMode="numeric"
+          placeholder="Max words"
+          value={maxWords}
+          onChange={(event) => setMaxWords(event.currentTarget.value)}
+        />
+      </div>
+      {filterError ? <p className="history-filter-error">Filter unavailable: {filterError}</p> : null}
+      {recentApps.length > 0 ? (
+        <div className="recent-apps">
+          <span className="eyebrow">Top apps</span>
+          <div className="recent-apps__row">
+            {recentApps.map((app) => (
+              <span className="chip" key={app.name} title={`${app.sessionCount} sessions`}>
+                {app.name} <small>· {app.category}</small>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {filtered.length === 0 ? (
+        <EmptyState
+          text={
+            sessions.length === 0
+              ? "No transcripts yet. Start a recording from the floating control."
+              : "No transcripts match the current search."
+          }
+        />
       ) : (
-        sessions.map((session) => (
-          <article className="history-item" key={session.id}>
-            <div>
-              <span className="history-item__date">{formatDate(session.createdAt)}</span>
-              <p>{session.cleanedText}</p>
-              <small>
-                {session.wordCount} words / {formatDuration(session.durationMs)}
-              </small>
-            </div>
-            <div className="history-item__actions">
-              <button
-                className="button button--ghost button--square"
-                type="button"
-                onClick={() => void onCopy(session)}
-                aria-label="Copy transcript"
-                title="Copy transcript"
-              >
-                <Copy size={18} />
-              </button>
-              <button
-                className="button button--ghost button--square"
-                type="button"
-                onClick={() => void onInject(session)}
-                aria-label="Paste transcript again"
-                title="Paste transcript again"
-              >
-                <Clipboard size={18} />
-              </button>
-            </div>
-          </article>
-        ))
+        filtered.map((session) => {
+          const expanded = expandedId === session.id;
+          const minutes = session.durationMs / 60_000;
+          const wpm = minutes > 0 ? Math.round(session.wordCount / minutes) : 0;
+          return (
+            <article
+              className={`history-item ${expanded ? "is-expanded" : ""}`}
+              key={session.id}
+            >
+              <div className="history-item__row">
+                <button
+                  type="button"
+                  className="history-item__summary"
+                  onClick={() => setExpandedId(expanded ? null : session.id)}
+                  aria-expanded={expanded}
+                >
+                  <span className="history-item__date">{formatDate(session.createdAt)}</span>
+                  <p>{session.cleanedText}</p>
+                  <small>
+                    {session.wordCount} words · {formatDuration(session.durationMs)} · {wpm} wpm
+                    {session.appName ? ` · ${session.appName}` : ""}
+                  </small>
+                </button>
+                <div className="history-item__actions">
+                  <button
+                    className="button button--ghost button--square"
+                    type="button"
+                    onClick={() => {
+                      void onCopy(session);
+                    }}
+                    aria-label="Copy transcript"
+                    title="Copy transcript"
+                  >
+                    <Copy size={18} />
+                  </button>
+                  <button
+                    className="button button--ghost button--square"
+                    type="button"
+                    onClick={() => {
+                      void onInject(session);
+                    }}
+                    aria-label="Paste transcript again"
+                    title="Paste transcript again"
+                  >
+                    <Clipboard size={18} />
+                  </button>
+                  <button
+                    className="button button--ghost button--square"
+                    type="button"
+                    onClick={() => {
+                      void onPolish(session);
+                    }}
+                    disabled={polishingSessionId === session.id}
+                    aria-label="AI edit transcript"
+                    title="AI edit transcript"
+                  >
+                    <Sparkles size={18} />
+                  </button>
+                </div>
+              </div>
+              {expanded ? (
+                <div className="history-item__detail">
+                  <div className="history-item__stats">
+                    <span>
+                      <strong>{session.wordCount}</strong> words
+                    </span>
+                    <span>
+                      <strong>{formatDuration(session.durationMs)}</strong> duration
+                    </span>
+                    <span>
+                      <strong>{wpm}</strong> wpm
+                    </span>
+                    <span>
+                      <strong>{session.appName ?? "Unknown"}</strong> app
+                    </span>
+                  </div>
+                  {session.audioPath ? (
+                    <audio
+                      controls
+                      preload="none"
+                      src={
+                        session.audioPath.startsWith("http") ||
+                        session.audioPath.startsWith("app:") ||
+                        session.audioPath.startsWith("mock:")
+                          ? session.audioPath
+                          : `tauri://localhost/${session.audioPath.replace(/\\/g, "/")}`
+                      }
+                    />
+                  ) : null}
+                  <label>
+                    <span>Notes</span>
+                    <textarea
+                      value={draftNotes[session.id] ?? session.notes}
+                      rows={2}
+                      onChange={(event) =>
+                        setDraftNotes({ ...draftNotes, [session.id]: event.currentTarget.value })
+                      }
+                      onBlur={() => {
+                        const value = draftNotes[session.id] ?? session.notes;
+                        if (value !== session.notes) {
+                          void onUpdateNotes(session, value);
+                        }
+                      }}
+                    />
+                  </label>
+                  <div className="history-item__exports">
+                    {(["txt", "md", "json", "srt"] as ExportFormat[]).map((format) => (
+                      <button
+                        key={format}
+                        className="button button--ghost"
+                        type="button"
+                        onClick={() => void onExport(session, format)}
+                      >
+                        <Download size={14} /> {format.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </article>
+          );
+        })
       )}
     </section>
   );
@@ -1145,6 +2062,9 @@ function Onboarding({
   modelStatus,
   shortcutStatus,
   shortcutTest,
+  micCheck,
+  onStartMicCheck,
+  onStopMicCheck,
   onTestShortcut,
   pasteTest,
   onPasteTest,
@@ -1157,12 +2077,23 @@ function Onboarding({
   modelStatus: ModelStatus | null;
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
+  micCheck: MicCheckState;
+  onStartMicCheck: () => Promise<void>;
+  onStopMicCheck: () => Promise<void>;
   onTestShortcut: () => void;
   pasteTest: PasteTestState;
   onPasteTest: () => Promise<void>;
   onShowFloatingControl: () => Promise<void>;
   onComplete: () => Promise<void>;
 }) {
+  const micStatusTone = micCheck.active
+    ? "hot"
+    : micCheck.passed
+      ? "good"
+      : microphones.length > 0
+        ? "idle"
+        : "warn";
+
   return (
     <main className="onboarding-shell">
       <section className="onboarding-panel">
@@ -1183,7 +2114,7 @@ function Onboarding({
             </p>
           </article>
           <article className="onboarding-step">
-            <StatusLed tone={microphones.length > 0 ? "good" : "warn"} label="Microphone check" />
+            <StatusLed tone={micStatusTone} label="Microphone check" />
             <label>
               <span>Input device</span>
               <select
@@ -1205,9 +2136,29 @@ function Onboarding({
                 ))}
               </select>
             </label>
-            <div className="mic-meter" aria-hidden="true">
+            <div className="shortcut-test">
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => void (micCheck.active ? onStopMicCheck() : onStartMicCheck())}
+                disabled={microphones.length === 0}
+              >
+                <Mic size={18} />
+                {micCheck.active ? "Stop mic check" : "Start mic check"}
+              </button>
+              <p>{micCheck.message}</p>
+            </div>
+            <div
+              className={clsx("mic-meter", "mic-meter--live", micCheck.active && "is-listening")}
+              aria-hidden="true"
+            >
               {Array.from({ length: 12 }, (_, index) => (
-                <span key={index} />
+                <span
+                  key={index}
+                  style={{
+                    transform: `scaleY(${meterBarScale(index, micCheck.level, micCheck.active)})`,
+                  }}
+                />
               ))}
             </div>
           </article>
@@ -1296,7 +2247,7 @@ function Onboarding({
               className="button button--primary"
               type="button"
               onClick={() => void onComplete()}
-              disabled={!modelStatus?.ready}
+              disabled={!modelStatus?.ready || micCheck.active}
             >
               <CheckCircle2 size={18} />
               Enter hub
@@ -1306,6 +2257,18 @@ function Onboarding({
       </section>
     </main>
   );
+}
+
+function meterBarScale(index: number, level: number, active: boolean) {
+  if (!active && level === 0) {
+    return 0.16;
+  }
+
+  const center = 5.5;
+  const distanceFromCenter = Math.abs(index - center);
+  const contour = 1 - distanceFromCenter / 7;
+  const signal = Math.max(level, active ? 0.08 : 0);
+  return Math.max(0.12, Math.min(1, 0.14 + signal * (0.45 + contour)));
 }
 
 function AdvancedPanel({
@@ -1332,14 +2295,64 @@ function AdvancedPanel({
           testing a custom build or a larger local model.
         </p>
       </div>
+      <label>
+        <span>Custom instructions</span>
+        <textarea
+          value={settings.customInstructions}
+          onChange={(event) =>
+            setSettings({ ...settings, customInstructions: event.currentTarget.value })
+          }
+          placeholder="e.g. Always expand acronyms; never insert emojis; rewrite as bullet points."
+          rows={3}
+        />
+      </label>
       <div className="model-grid">
-        {modelInventory?.models.map((model) => (
-          <div className="model-pill" key={model.id}>
-            <strong>{model.label}</strong>
-            <span>{model.installed ? (model.bundled ? "Bundled" : "Installed") : "Available later"}</span>
-          </div>
-        ))}
+        {modelInventory?.models.map((model) => {
+          const isActive = modelInventory?.activeModelId === model.id && !settings.advancedRuntimeEnabled;
+          return (
+            <button
+              type="button"
+              key={model.id}
+              className={`model-pill ${isActive ? "model-pill--active" : ""}`}
+              onClick={() => {
+                if (model.installed) {
+                  setSettings({ ...settings, activeModelId: model.id });
+                }
+              }}
+              disabled={!model.installed}
+            >
+              <strong>{model.label}</strong>
+              <span>
+                {!model.installed
+                  ? "Not installed"
+                  : isActive
+                    ? "Active"
+                    : model.bundled
+                      ? "Bundled"
+                      : "Installed"}
+              </span>
+            </button>
+          );
+        })}
       </div>
+      <label>
+        <span>Active model</span>
+        <select
+          value={settings.activeModelId}
+          onChange={(event) =>
+            setSettings({ ...settings, activeModelId: event.currentTarget.value })
+          }
+          disabled={settings.advancedRuntimeEnabled}
+        >
+          {modelInventory?.models
+            .filter((model) => model.installed)
+            .map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+        </select>
+      </label>
       <ToggleRow
         icon={<Cpu size={18} />}
         label="Use advanced runtime override"
@@ -1380,6 +2393,7 @@ function SettingsPanel({
   microphones,
   shortcutStatus,
   shortcutTest,
+  runtimeEvents,
   onTestShortcut,
   onToggleShortcutsPaused,
   onShowFloatingControl,
@@ -1389,12 +2403,16 @@ function SettingsPanel({
   updateResult,
   onCheckUpdates,
   onInstallUpdate,
+  feedbackDraft,
+  setFeedbackDraft,
+  onSubmitFeedback,
 }: {
   settings: AppSettings;
   setSettings: (settings: AppSettings) => void;
   microphones: MicrophoneInfo[];
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
+  runtimeEvents: RuntimeEvent[];
   onTestShortcut: () => void;
   onToggleShortcutsPaused: () => Promise<void>;
   onShowFloatingControl: () => Promise<void>;
@@ -1404,6 +2422,9 @@ function SettingsPanel({
   updateResult: UpdateCheckResult | null;
   onCheckUpdates: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
+  feedbackDraft: string;
+  setFeedbackDraft: (value: string) => void;
+  onSubmitFeedback: () => Promise<void>;
 }) {
   return (
     <section className="settings-panel">
@@ -1424,6 +2445,25 @@ function SettingsPanel({
             <option key={microphone.name} value={microphone.name}>
               {microphone.name}
               {microphone.isDefault ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Recognition language</span>
+        <select
+          value={settings.language ?? "auto"}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              language:
+                event.currentTarget.value === "auto" ? null : event.currentTarget.value,
+            })
+          }
+        >
+          {languageOptions.map((language) => (
+            <option key={language.value} value={language.value}>
+              {language.label}
             </option>
           ))}
         </select>
@@ -1462,6 +2502,42 @@ function SettingsPanel({
           </button>
           <p>{shortcutTest.message}</p>
         </div>
+        <RuntimeEventList events={runtimeEvents} />
+      </div>
+      <div className="instruction-card">
+        <h3>Send feedback</h3>
+        <p>
+          Sends your message with recent runtime events and sanitized settings. Local paths,
+          runtime override paths, and webhook URL are not included in the report.
+        </p>
+        <label>
+          <span>Feedback webhook URL</span>
+          <input
+            value={settings.feedbackWebhookUrl}
+            onChange={(event) =>
+              setSettings({ ...settings, feedbackWebhookUrl: event.currentTarget.value })
+            }
+            placeholder="https://example.com/wind-speak-feedback"
+          />
+        </label>
+        <label>
+          <span>Feedback message</span>
+          <textarea
+            value={feedbackDraft}
+            onChange={(event) => setFeedbackDraft(event.currentTarget.value)}
+            placeholder="What happened? What were you trying to do?"
+            rows={3}
+          />
+        </label>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={() => void onSubmitFeedback()}
+          disabled={feedbackDraft.trim().length === 0}
+        >
+          <Database size={18} />
+          Send feedback
+        </button>
       </div>
       <div className="instruction-card update-card">
         <div>
@@ -1502,12 +2578,157 @@ function SettingsPanel({
         checked={settings.autoInject}
         onChange={(autoInject) => setSettings({ ...settings, autoInject })}
       />
+      <label>
+        <span>Injection mode</span>
+        <select
+          value={settings.injectionMode}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              injectionMode: event.currentTarget.value as AppSettings["injectionMode"],
+            })
+          }
+          disabled={!settings.autoInject}
+        >
+          <option value="auto">Auto-paste into focused app</option>
+          <option value="clipboard">Copy to clipboard only</option>
+        </select>
+      </label>
       <ToggleRow
         icon={<RotateCw size={18} />}
         label="Cleanup punctuation, corrections, and dictionary terms"
         checked={settings.cleanupEnabled}
         onChange={(cleanupEnabled) => setSettings({ ...settings, cleanupEnabled })}
       />
+      <div className="instruction-card">
+        <h3>AI edit</h3>
+        <ToggleRow
+          icon={<Sparkles size={18} />}
+          label="Auto-edit before paste"
+          checked={settings.autoPolish}
+          onChange={(autoPolish) => setSettings({ ...settings, autoPolish })}
+        />
+        <label>
+          <span>Style</span>
+          <select
+            value={settings.polishStyle}
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                polishStyle: event.currentTarget.value as AppSettings["polishStyle"],
+              })
+            }
+          >
+            {polishStyleOptions.map((style) => (
+              <option key={style.value} value={style.value}>
+                {style.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Provider</span>
+          <select
+            value={settings.polishProvider}
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                polishProvider: event.currentTarget.value as AppSettings["polishProvider"],
+              })
+            }
+          >
+            <option value="ollama">Local Ollama</option>
+            <option value="openAiCompatible">OpenAI-compatible</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        </label>
+        <label>
+          <span>Endpoint</span>
+          <input
+            value={settings.polishEndpoint}
+            onChange={(event) =>
+              setSettings({ ...settings, polishEndpoint: event.currentTarget.value })
+            }
+            placeholder={
+              settings.polishProvider === "openAiCompatible"
+                ? "https://api.openai.com/v1/chat/completions"
+                : "http://127.0.0.1:11434/api/chat"
+            }
+          />
+        </label>
+        <label>
+          <span>Model</span>
+          <input
+            value={settings.polishModel}
+            onChange={(event) =>
+              setSettings({ ...settings, polishModel: event.currentTarget.value })
+            }
+            placeholder={settings.polishProvider === "openAiCompatible" ? "gpt-4o-mini" : "llama3.2"}
+          />
+        </label>
+        {settings.polishProvider === "openAiCompatible" ? (
+          <small>Uses WIND_SPEAK_POLISH_API_KEY from the desktop environment.</small>
+        ) : null}
+      </div>
+      <ToggleRow
+        icon={<Radio size={18} />}
+        label="Show live words in the floating control"
+        checked={settings.livePreviewEnabled}
+        onChange={(livePreviewEnabled) => setSettings({ ...settings, livePreviewEnabled })}
+      />
+      <label>
+        <span>Live preview cadence</span>
+        <select
+          value={settings.livePreviewIntervalMs}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              livePreviewIntervalMs: Number(event.currentTarget.value),
+            })
+          }
+          disabled={!settings.livePreviewEnabled}
+        >
+          <option value={500}>Fast - 500 ms</option>
+          <option value={750}>Balanced - 750 ms</option>
+          <option value={1000}>Calm - 1000 ms</option>
+          <option value={1500}>Light CPU - 1500 ms</option>
+        </select>
+      </label>
+      <ToggleRow
+        icon={<CheckCircle2 size={18} />}
+        label="Run final accuracy pass before paste"
+        checked={settings.finalPassEnabled}
+        onChange={(finalPassEnabled) => setSettings({ ...settings, finalPassEnabled })}
+      />
+      <label>
+        <span>Floating bubble size</span>
+        <select
+          value={settings.bubbleSize}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              bubbleSize: event.currentTarget.value as AppSettings["bubbleSize"],
+            })
+          }
+        >
+          <option value="small">Small</option>
+          <option value="medium">Medium</option>
+          <option value="large">Large</option>
+        </select>
+      </label>
+      <label>
+        <span>Floating bubble opacity ({Math.round(settings.bubbleOpacity * 100)}%)</span>
+        <input
+          type="range"
+          min={0.2}
+          max={1}
+          step={0.05}
+          value={settings.bubbleOpacity}
+          onChange={(event) =>
+            setSettings({ ...settings, bubbleOpacity: Number(event.currentTarget.value) })
+          }
+        />
+      </label>
       <ToggleRow
         icon={<Zap size={18} />}
         label="Start with Windows"
@@ -1565,6 +2786,27 @@ function SettingsPanel({
         Save settings
       </button>
     </section>
+  );
+}
+
+function RuntimeEventList({ events }: { events: RuntimeEvent[] }) {
+  const recent = events.slice(0, 6);
+  return (
+    <div className="runtime-events" aria-label="Runtime event log">
+      <p className="eyebrow">Runtime signal</p>
+      {recent.length === 0 ? (
+        <p>No shortcut events recorded in this session.</p>
+      ) : (
+        <ul>
+          {recent.map((event) => (
+            <li key={`${event.createdAt}-${event.kind}-${event.message}`}>
+              <span>{event.kind}</span>
+              <p>{event.message}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
