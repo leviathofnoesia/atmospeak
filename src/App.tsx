@@ -17,14 +17,17 @@ import {
   Scissors,
   Settings,
   Sparkles,
-  Trash2,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import "./App.css";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { DictionaryPanel } from "./components/DictionaryPanel";
+import { EmptyState } from "./components/EmptyState";
+import { PanelTitle } from "./components/PanelTitle";
 import { RecorderOverlay } from "./components/RecorderOverlay";
+import { SnippetPanel } from "./components/SnippetPanel";
 import type {
   RecorderOverlaySize,
   RecorderPhase,
@@ -1961,100 +1964,6 @@ function HistoryPanel({
   );
 }
 
-function DictionaryPanel({
-  entries,
-  draft,
-  setDraft,
-  onSubmit,
-  onToggle,
-  onDelete,
-}: {
-  entries: DictionaryEntry[];
-  draft: { phrase: string; replacement: string };
-  setDraft: (draft: { phrase: string; replacement: string }) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onToggle: (entry: DictionaryEntry) => Promise<void>;
-  onDelete: (entry: DictionaryEntry) => Promise<void>;
-}) {
-  return (
-    <section className="list-panel">
-      <PanelTitle icon={<BookOpen size={22} />} title="Custom dictionary" />
-      <form className="inline-form" onSubmit={(event) => void onSubmit(event)}>
-        <input
-          value={draft.phrase}
-          onChange={(event) => setDraft({ ...draft, phrase: event.currentTarget.value })}
-          placeholder="heard phrase"
-        />
-        <input
-          value={draft.replacement}
-          onChange={(event) => setDraft({ ...draft, replacement: event.currentTarget.value })}
-          placeholder="replacement"
-        />
-        <button className="button button--primary" type="submit">
-          Add
-        </button>
-      </form>
-      {entries.map((entry) => (
-        <EditableRow
-          key={entry.id}
-          title={entry.phrase}
-          body={entry.replacement}
-          enabled={entry.enabled}
-          onToggle={() => void onToggle(entry)}
-          onDelete={() => void onDelete(entry)}
-        />
-      ))}
-    </section>
-  );
-}
-
-function SnippetPanel({
-  snippets,
-  draft,
-  setDraft,
-  onSubmit,
-  onToggle,
-  onDelete,
-}: {
-  snippets: Snippet[];
-  draft: { trigger: string; body: string };
-  setDraft: (draft: { trigger: string; body: string }) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onToggle: (snippet: Snippet) => Promise<void>;
-  onDelete: (snippet: Snippet) => Promise<void>;
-}) {
-  return (
-    <section className="list-panel">
-      <PanelTitle icon={<Scissors size={22} />} title="Voice snippets" />
-      <form className="inline-form" onSubmit={(event) => void onSubmit(event)}>
-        <input
-          value={draft.trigger}
-          onChange={(event) => setDraft({ ...draft, trigger: event.currentTarget.value })}
-          placeholder="spoken trigger"
-        />
-        <input
-          value={draft.body}
-          onChange={(event) => setDraft({ ...draft, body: event.currentTarget.value })}
-          placeholder="expanded text"
-        />
-        <button className="button button--primary" type="submit">
-          Add
-        </button>
-      </form>
-      {snippets.map((snippet) => (
-        <EditableRow
-          key={snippet.id}
-          title={snippet.trigger}
-          body={snippet.body}
-          enabled={snippet.enabled}
-          onToggle={() => void onToggle(snippet)}
-          onDelete={() => void onDelete(snippet)}
-        />
-      ))}
-    </section>
-  );
-}
-
 function Onboarding({
   settings,
   setSettings,
@@ -2832,56 +2741,6 @@ function ToggleRow({
       />
     </label>
   );
-}
-
-function EditableRow({
-  title,
-  body,
-  enabled,
-  onToggle,
-  onDelete,
-}: {
-  title: string;
-  body: string;
-  enabled: boolean;
-  onToggle: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <article className={clsx("editable-row", !enabled && "is-muted")}>
-      <div>
-        <strong>{title}</strong>
-        <p>{body}</p>
-      </div>
-      <div className="row-actions">
-        <button className="button button--ghost" type="button" onClick={onToggle}>
-          {enabled ? "On" : "Off"}
-        </button>
-        <button
-          className="button button--ghost button--square"
-          type="button"
-          onClick={onDelete}
-          aria-label="Delete"
-          title="Delete"
-        >
-          <Trash2 size={17} />
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {
-  return (
-    <div className="panel-title">
-      {icon}
-      <h2>{title}</h2>
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return <p className="empty-state">{text}</p>;
 }
 
 function formatDuration(durationMs: number) {
