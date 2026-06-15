@@ -1,4 +1,4 @@
-# Wind Speak
+# Atmospeak
 
 Windows-first, local-only desktop dictation prototype built with Tauri 2, React, Rust, SQLite, and `whisper.cpp`.
 
@@ -23,7 +23,7 @@ bun install
 bun run tauri dev
 ```
 
-No model path setup is required. Wind Speak resolves the bundled whisper.cpp
+No model path setup is required. Atmospeak resolves the bundled whisper.cpp
 runtime and English base model from Tauri resources. Custom engine/model paths
 are available only under **Advanced**.
 
@@ -57,4 +57,4 @@ GitHub Releases, checksums, and the unsigned Windows prototype limitation.
 
 ## Prototype Boundaries
 
-Wind Speak is clean-room software. It emulates the core desktop dictation workflow of modern voice input tools, but it does not copy proprietary UI, code, model services, names, assets, or private behavior.
+Atmospeak is clean-room software. It emulates the core desktop dictation workflow of modern voice input tools, but it does not copy proprietary UI, code, model services, names, assets, or private behavior.

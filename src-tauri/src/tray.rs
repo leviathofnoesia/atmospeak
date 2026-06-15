@@ -7,7 +7,7 @@ use tauri::{
 use crate::services::{app_state::AppState, overlay_window, shortcuts};
 
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
-    let open = MenuItemBuilder::with_id("open", "Open Wind Speak").build(app)?;
+    let open = MenuItemBuilder::with_id("open", "Open Atmospeak").build(app)?;
     let overlay = MenuItemBuilder::with_id("overlay", "Show / Hide Floating Control").build(app)?;
     let pause = MenuItemBuilder::with_id("pause", "Pause / Resume Shortcuts").build(app)?;
     let dictate = MenuItemBuilder::with_id("dictate", "Start / Stop Dictation").build(app)?;
@@ -17,7 +17,7 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
         .build()?;
 
     TrayIconBuilder::new()
-        .tooltip("Wind Speak")
+        .tooltip("Atmospeak")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
