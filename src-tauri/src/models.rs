@@ -134,6 +134,14 @@ pub struct DictationResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeEvent {
+    pub created_at: DateTime<Utc>,
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InjectionResult {
     pub injected: bool,
     pub restored_clipboard: bool,
