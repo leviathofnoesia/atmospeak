@@ -151,5 +151,5 @@ pub fn run() {
             get_model_inventory
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Wind Speak");
+        .expect("error while running Atmospeak");
 }

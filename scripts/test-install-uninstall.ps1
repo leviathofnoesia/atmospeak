@@ -124,7 +124,7 @@ if ($install.ExitCode -ne 0) {
 
 $AppExe = Join-Path $InstallDir "Wind Speak.exe"
 if (-not (Test-Path $AppExe)) {
-  $AppExe = Join-Path $InstallDir "wind-speak.exe"
+  $AppExe = Join-Path $InstallDir "atmospeak.exe"
 }
 if (-not (Test-Path $AppExe)) {
   throw "Installed app executable not found under $InstallDir"

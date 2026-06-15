@@ -1,5 +1,5 @@
 param(
-  [string]$ReleaseRepo = $env:WIND_SPEAK_RELEASE_REPO,
+  [string]$ReleaseRepo = $env:ATMOSPEAK_RELEASE_REPO,
   [switch]$SkipTauriBuild
 )
 
@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ReleaseRepo)) {
-  $ReleaseRepo = "leviathofnoesia/wind-speak"
+  $ReleaseRepo = "leviathofnoesia/atmospeak"
 }
 
 $Package = Get-Content (Join-Path $Root "package.json") -Raw | ConvertFrom-Json
@@ -15,10 +15,10 @@ $Version = [string]$Package.version
 $ReleaseDir = Join-Path $Root "release"
 $StageDir = Join-Path $ReleaseDir "portable-stage"
 $BundleRoot = Join-Path $Root "src-tauri\target\release\bundle"
-$ReleaseExe = Join-Path $Root "src-tauri\target\release\wind-speak.exe"
+$ReleaseExe = Join-Path $Root "src-tauri\target\release\atmospeak.exe"
 $SidecarExe = Join-Path $Root "src-tauri\target\release\whisper-cli.exe"
 $ResourcesDir = Join-Path $Root "src-tauri\target\release\resources"
-$DefaultKey = Join-Path $env:USERPROFILE ".tauri\wind-speak\updater.key"
+$DefaultKey = Join-Path $env:USERPROFILE ".tauri\atmospeak\updater.key"
 $CargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $TauriCli = Join-Path $Root "node_modules\.bin\tauri.exe"
 $SigningKeyPath = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
@@ -103,10 +103,10 @@ $MsiSource = Get-ChildItem (Join-Path $BundleRoot "msi") -Filter "*.msi" -File |
 if (-not $NsisSource) { throw "NSIS installer was not produced." }
 if (-not $MsiSource) { throw "MSI installer was not produced." }
 
-$NsisName = "Wind-Speak_$Version`_x64-setup.exe"
-$MsiName = "Wind-Speak_$Version`_x64_en-US.msi"
-$UpdaterZipName = "Wind-Speak_$Version`_x64-setup.nsis.zip"
-$PortableName = "Wind-Speak_$Version`_x64-portable.zip"
+$NsisName = "atmospeak_$Version`_x64-setup.exe"
+$MsiName = "atmospeak_$Version`_x64_en-US.msi"
+$UpdaterZipName = "atmospeak_$Version`_x64-setup.nsis.zip"
+$PortableName = "atmospeak_$Version`_x64-portable.zip"
 $LatestName = "latest.json"
 $ChecksumsName = "SHA256SUMS.txt"
 
@@ -155,7 +155,7 @@ if (Test-Path $StageDir) {
 }
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
-Copy-Item $ReleaseExe (Join-Path $StageDir "wind-speak.exe") -Force
+Copy-Item $ReleaseExe (Join-Path $StageDir "atmospeak.exe") -Force
 Copy-Item $SidecarExe (Join-Path $StageDir "whisper-cli.exe") -Force
 Copy-Item $ResourcesDir (Join-Path $StageDir "resources") -Recurse -Force
 if (Test-Path $PortableDest) {

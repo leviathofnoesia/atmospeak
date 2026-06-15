@@ -254,6 +254,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "atmospeak"
+version = "0.1.9"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "chrono",
+ "cpal",
+ "dirs",
+ "hound",
+ "parking_lot",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "tempfile",
+ "uuid",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5200,33 +5227,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "wind-speak"
-version = "0.1.9"
-dependencies = [
- "anyhow",
- "arboard",
- "chrono",
- "cpal",
- "dirs",
- "hound",
- "parking_lot",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tempfile",
- "uuid",
- "windows 0.61.3",
-]
 
 [[package]]
 name = "window-vibrancy"
