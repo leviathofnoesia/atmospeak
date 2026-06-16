@@ -1,14 +1,10 @@
 import { emit, listen } from "@tauri-apps/api/event";
-import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
 import {
   BookOpen,
-  CheckCircle2,
-  Clipboard,
   Cpu,
   History,
-  Keyboard,
-  Mic,
   Radio,
   Scissors,
   Settings,
@@ -16,19 +12,18 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
+import "./styles/hub.css";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { Aura } from "./components/Aura";
 import { AdvancedPanel } from "./components/AdvancedPanel";
 import { DictionaryPanel } from "./components/DictionaryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { HomePanel } from "./components/HomePanel";
+import { Onboarding } from "./components/Onboarding";
 import { RecorderOverlay } from "./components/RecorderOverlay";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SnippetPanel } from "./components/SnippetPanel";
-import type {
-  RecorderOverlaySize,
-  RecorderPhase,
-  RecorderResizeDirection,
-} from "./components/RecorderOverlay";
+import type { RecorderPhase } from "./components/RecorderOverlay";
 import { StatusLed } from "./components/StatusLed";
 import {
   cancelRecording,
@@ -89,19 +84,6 @@ const recordingLevelPollMs = 250;
 const recordingFftPollMs = 60;
 const recordingLevelCommitMs = 400;
 const recordingLevelDelta = 0.03;
-const overlaySizeOrder: RecorderOverlaySize[] = ["compact", "standard", "expanded"];
-const overlaySizeDimensions: Record<RecorderOverlaySize, { width: number; height: number }> = {
-  compact: { width: 360, height: 92 },
-  standard: { width: 560, height: 220 },
-  expanded: { width: 680, height: 300 },
-};
-const shortcutOptions = [
-  "Ctrl+Alt+D",
-  "Ctrl+Alt+Space",
-  "Ctrl+Shift+Space",
-  "Ctrl+Win",
-  "Ctrl+Win+Space",
-];
 const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "home", label: "Home", icon: Radio },
   { id: "history", label: "History", icon: History },
@@ -170,7 +152,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<AppNotice>({
     tone: "neutral",
-    message: "Wind Speak is standing by.",
+    message: "Atmospeak is standing by.",
   });
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptState>(emptyLiveTranscript);
   const [shortcutTest, setShortcutTest] = useState<ShortcutTestState>({
@@ -353,6 +335,8 @@ function App() {
       recordingLevel: 0,
       recordingBands: [],
       liveTranscript,
+      bubbleSize: settingsDraft?.bubbleSize ?? "medium",
+      bubbleOpacity: settingsDraft?.bubbleOpacity ?? 1,
     };
     void emit("wind-speak://dictation-state", payload);
     return undefined;
@@ -364,27 +348,11 @@ function App() {
     notice,
     recorderPhase,
     recording,
+    settingsDraft?.bubbleOpacity,
+    settingsDraft?.bubbleSize,
     shortcutStatus,
   ]);
 
-  const handleCancel = useCallback(async () => {
-    if (busyRef.current) {
-      return;
-    }
-
-    setBusyState(true);
-    try {
-      queuedPushToTalkReleaseRef.current = false;
-      await cancelRecording();
-      setRecording(null);
-      setRecorderPhase("idle");
-      setNotice({ tone: "neutral", message: "Recording cancelled." });
-    } catch (error: unknown) {
-      setNotice({ tone: "error", message: stringifyError(error) });
-    } finally {
-      setBusyState(false);
-    }
-  }, [setBusyState]);
 
   useEffect(() => {
     if (!micCheck.active) {
@@ -549,7 +517,7 @@ function App() {
       passed: false,
       message: "Focus the target text field. Pasting in 3...",
     });
-    setNotice({ tone: "neutral", message: "Focus the target app. Wind Speak will paste in 3 seconds." });
+    setNotice({ tone: "neutral", message: "Focus the target app. Atmospeak will paste in 3 seconds." });
     try {
       for (const seconds of [2, 1]) {
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -560,7 +528,7 @@ function App() {
         });
       }
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      const result = await injectText("Wind Speak paste test");
+      const result = await injectText("Atmospeak paste test");
       setPasteTest({
         running: false,
         passed: result.injected,
@@ -930,8 +898,8 @@ function App() {
   if (snapshot === null || settingsDraft === null) {
     return (
       <main className="boot">
-        <div className="boot__mark">WS</div>
-        <p>Starting local command surface...</p>
+        <div className="boot__mark"><Aura size={48} active /></div>
+        <p>Starting Atmospeak…</p>
       </main>
     );
   }
@@ -943,6 +911,7 @@ function App() {
         setSettings={setSettingsDraft}
         microphones={microphones}
         modelStatus={modelStatus}
+        modelInventory={modelInventory}
         shortcutStatus={shortcutStatus}
         shortcutTest={shortcutTest}
         micCheck={micCheck}
@@ -963,7 +932,7 @@ function App() {
           setSnapshot(nextSnapshot);
           setSettingsDraft(nextSnapshot.settings);
           setShortcutStatus(nextShortcutStatus);
-          setNotice({ tone: "success", message: "Onboarding complete. Wind Speak is armed." });
+          setNotice({ tone: "success", message: "Onboarding complete. Atmospeak is armed." });
         }}
       />
     );
@@ -971,16 +940,30 @@ function App() {
 
   return (
     <ErrorBoundary>
-    <main className="app-shell">
-      <section className="top-strip" aria-label="Application status">
-        <div className="brand-block">
-          <span className="brand-block__index">0001</span>
-          <div>
-            <p className="eyebrow">Wind Speak</p>
-            <h1>Local dictation console</h1>
-          </div>
+    <main className="hub-shell">
+      <nav className="hub__nav" aria-label="Atmospeak sections">
+        <div className="hub__brand">
+          <span className="brand-aura"><Aura size={30} /></span>
+          <span className="wm">
+            <strong>Atmospeak</strong>
+            <span>Local · on device</span>
+          </span>
         </div>
-        <div className="status-row">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              className={clsx("hub__navitem", activeTab === tab.id && "active")}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <Icon size={17} />
+              <span className="lab">{tab.label}</span>
+            </button>
+          );
+        })}
+        <div className="hub__status" aria-label="Application status">
           <StatusLed tone={readiness.tone} label={readiness.label} />
           <StatusLed tone={recording ? "hot" : "idle"} label={recording ? "Recording" : "Idle"} />
           <StatusLed
@@ -992,48 +975,16 @@ function App() {
             }
           />
         </div>
-      </section>
+        <div className="marquee-foot">+ ON DEVICE + NO CLOUD + WHISPER · BASE.EN +</div>
+      </nav>
 
-      <RecorderOverlay
-        recording={recording}
-        elapsedSeconds={elapsedSeconds}
-        busy={busy}
-        phase={recorderPhase}
-        modelStatus={modelStatus}
-        hotkeyLabel={shortcutStatus?.hotkey || snapshot.settings.hotkey}
-        notice={shortcutStatus?.registered ? undefined : shortcutStatus?.message}
-        liveTranscript={liveTranscript}
-        inputLevel={0}
-        bubbleOpacity={snapshot.settings.bubbleOpacity}
-        bubbleSize={snapshot.settings.bubbleSize}
-        onToggle={handleToggleRecording}
-        onCancel={handleCancel}
-      />
+      <div className="hub__main">
+        <section className="notice-rail" aria-live="polite">
+          <span className={clsx("notice-rail__tone", `notice-rail__tone--${notice.tone}`)} />
+          <p>{notice.message}</p>
+        </section>
 
-      <section className="notice-rail" aria-live="polite">
-        <span className={clsx("notice-rail__tone", `notice-rail__tone--${notice.tone}`)} />
-        <p>{notice.message}</p>
-      </section>
-
-      <section className="workspace">
-        <nav className="side-nav" aria-label="Hub sections">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                className={clsx("side-nav__item", activeTab === tab.id && "is-active")}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <Icon size={18} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="hub">
+        <div className="hub__panel">
           {activeTab === "home" && (
             <HomePanel
               snapshot={snapshot}
@@ -1203,7 +1154,7 @@ function App() {
             />
           )}
         </div>
-      </section>
+      </div>
     </main>
     </ErrorBoundary>
   );
@@ -1220,18 +1171,11 @@ interface OverlayStatePayload {
   recordingLevel: number;
   recordingBands: number[];
   liveTranscript: LiveTranscriptState;
+  bubbleSize: AppSettings["bubbleSize"];
+  bubbleOpacity: number;
 }
 
 function OverlayWindow() {
-  const [overlaySize, setOverlaySize] = useState<RecorderOverlaySize>(() => {
-    if (typeof window === "undefined") {
-      return "standard";
-    }
-    const saved = window.localStorage.getItem("wind-speak-overlay-size");
-    return overlaySizeOrder.includes(saved as RecorderOverlaySize)
-      ? (saved as RecorderOverlaySize)
-      : "standard";
-  });
   const [state, setState] = useState<OverlayStatePayload>({
     recording: null,
     elapsedSeconds: 0,
@@ -1239,10 +1183,12 @@ function OverlayWindow() {
     recorderPhase: "idle",
     modelStatus: null,
     shortcutStatus: null,
-    notice: { tone: "neutral", message: "Wind Speak is standing by." },
+    notice: { tone: "neutral", message: "Atmospeak is standing by." },
     recordingLevel: 0,
     recordingBands: [],
     liveTranscript: emptyLiveTranscript,
+    bubbleSize: "medium",
+    bubbleOpacity: 1,
   });
   const recordingLevelRef = useRef(0);
   const lastRecordingLevelCommitRef = useRef(0);
@@ -1252,36 +1198,11 @@ function OverlayWindow() {
     return () => document.body.classList.remove("is-overlay-window");
   }, []);
 
-  useEffect(() => {
-    if (!hasTauriRuntime()) {
-      return;
-    }
-    const size = overlaySizeDimensions[overlaySize];
-    window.localStorage.setItem("wind-speak-overlay-size", overlaySize);
-    getCurrentWindow()
-      .setSize(new LogicalSize(size.width, size.height))
-      .catch(() => undefined);
-  }, [overlaySize]);
-
   const handleMoveStart = useCallback(() => {
     if (!hasTauriRuntime()) {
       return;
     }
     getCurrentWindow().startDragging().catch(() => undefined);
-  }, []);
-
-  const handleResizeStart = useCallback((direction: RecorderResizeDirection) => {
-    if (!hasTauriRuntime()) {
-      return;
-    }
-    getCurrentWindow().startResizeDragging(direction).catch(() => undefined);
-  }, []);
-
-  const handleCycleOverlaySize = useCallback(() => {
-    setOverlaySize((current) => {
-      const currentIndex = overlaySizeOrder.indexOf(current);
-      return overlaySizeOrder[(currentIndex + 1) % overlaySizeOrder.length];
-    });
   }, []);
 
   const handleOpenHub = useCallback(() => {
@@ -1504,7 +1425,7 @@ function OverlayWindow() {
     <ErrorBoundary
       fallback={
         <div role="alert" className="error-boundary error-boundary--overlay">
-          <p>Wind Speak encountered an error. Tap to reload.</p>
+          <p>Atmospeak encountered an error. Tap to reload.</p>
           <button
             type="button"
             onClick={() => {
@@ -1518,7 +1439,7 @@ function OverlayWindow() {
         </div>
       }
     >
-    <main className="overlay-shell" data-tauri-drag-region>
+    <main className="overlay-shell">
       <RecorderOverlay
         recording={state.recording}
         elapsedSeconds={state.elapsedSeconds}
@@ -1530,10 +1451,9 @@ function OverlayWindow() {
         liveTranscript={state.liveTranscript}
         inputLevel={state.recordingLevel}
         inputBands={state.recordingBands}
-        overlaySize={overlaySize}
+        bubbleSize={state.bubbleSize}
+        bubbleOpacity={state.bubbleOpacity}
         onMoveStart={handleMoveStart}
-        onResizeStart={handleResizeStart}
-        onCycleSize={handleCycleOverlaySize}
         onOpenHub={handleOpenHub}
         onToggle={() => void handleDictationAction("toggle")}
         onPressStart={() => void handleDictationAction("pressed")}
@@ -1543,222 +1463,6 @@ function OverlayWindow() {
     </main>
     </ErrorBoundary>
   );
-}
-
-function Onboarding({
-  settings,
-  setSettings,
-  microphones,
-  modelStatus,
-  shortcutStatus,
-  shortcutTest,
-  micCheck,
-  onStartMicCheck,
-  onStopMicCheck,
-  onTestShortcut,
-  pasteTest,
-  onPasteTest,
-  onShowFloatingControl,
-  onComplete,
-}: {
-  settings: AppSettings;
-  setSettings: (settings: AppSettings) => void;
-  microphones: MicrophoneInfo[];
-  modelStatus: ModelStatus | null;
-  shortcutStatus: ShortcutStatus | null;
-  shortcutTest: ShortcutTestState;
-  micCheck: MicCheckState;
-  onStartMicCheck: () => Promise<void>;
-  onStopMicCheck: () => Promise<void>;
-  onTestShortcut: () => void;
-  pasteTest: PasteTestState;
-  onPasteTest: () => Promise<void>;
-  onShowFloatingControl: () => Promise<void>;
-  onComplete: () => Promise<void>;
-}) {
-  const micStatusTone = micCheck.active
-    ? "hot"
-    : micCheck.passed
-      ? "good"
-      : microphones.length > 0
-        ? "idle"
-        : "warn";
-
-  return (
-    <main className="onboarding-shell">
-      <section className="onboarding-panel">
-        <div className="brand-block">
-          <span className="brand-block__index">0001</span>
-          <div>
-            <p className="eyebrow">Wind Speak</p>
-            <h1>Desktop dictation instrument</h1>
-          </div>
-        </div>
-        <div className="onboarding-grid">
-          <article className="onboarding-step">
-            <StatusLed tone={modelStatus?.ready ? "good" : "warn"} label="Bundled runtime" />
-            <h2>Install once. Speak anywhere.</h2>
-            <p>
-              The local whisper.cpp runtime and Base English model are packaged with the app.
-              Advanced paths stay hidden unless you turn them on.
-            </p>
-          </article>
-          <article className="onboarding-step">
-            <StatusLed tone={micStatusTone} label="Microphone check" />
-            <label>
-              <span>Input device</span>
-              <select
-                value={settings.microphoneName ?? ""}
-                onChange={(event) =>
-                  setSettings({
-                    ...settings,
-                    microphoneName:
-                      event.currentTarget.value.length > 0 ? event.currentTarget.value : null,
-                  })
-                }
-              >
-                <option value="">System default</option>
-                {microphones.map((microphone) => (
-                  <option key={microphone.name} value={microphone.name}>
-                    {microphone.name}
-                    {microphone.isDefault ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="shortcut-test">
-              <button
-                className="button button--ghost"
-                type="button"
-                onClick={() => void (micCheck.active ? onStopMicCheck() : onStartMicCheck())}
-                disabled={microphones.length === 0}
-              >
-                <Mic size={18} />
-                {micCheck.active ? "Stop mic check" : "Start mic check"}
-              </button>
-              <p>{micCheck.message}</p>
-            </div>
-            <div
-              className={clsx("mic-meter", "mic-meter--live", micCheck.active && "is-listening")}
-              aria-hidden="true"
-            >
-              {Array.from({ length: 12 }, (_, index) => (
-                <span
-                  key={index}
-                  style={{
-                    transform: `scaleY(${meterBarScale(index, micCheck.level, micCheck.active)})`,
-                  }}
-                />
-              ))}
-            </div>
-          </article>
-          <article className="onboarding-step">
-            <StatusLed
-              tone={shortcutStatus?.registered ? "good" : "warn"}
-              label={shortcutStatus?.hotkey || "Overlay fallback"}
-            />
-            <h2>Hold the shortcut, talk, release.</h2>
-            <p>
-              {shortcutStatus?.message ??
-                "Wind Speak registers a global shortcut on launch and keeps the floating control available if a shortcut is taken."}
-            </p>
-            <div className="shortcut-test">
-              <button className="button button--ghost" type="button" onClick={onTestShortcut}>
-                <Keyboard size={18} />
-                Test active shortcut
-              </button>
-              <p>{shortcutTest.message}</p>
-            </div>
-            <label>
-              <span>Shortcut</span>
-              <select
-                value={settings.hotkey}
-                onChange={(event) => setSettings({ ...settings, hotkey: event.currentTarget.value })}
-              >
-                {shortcutOptions.map((shortcut) => (
-                  <option key={shortcut} value={shortcut}>
-                    {shortcut}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Capture mode</span>
-              <select
-                value={settings.mode}
-                onChange={(event) =>
-                  setSettings({ ...settings, mode: event.currentTarget.value as AppSettings["mode"] })
-                }
-              >
-                <option value="pushToTalk">Push-to-talk</option>
-                <option value="toggle">Toggle</option>
-              </select>
-            </label>
-          </article>
-          <article className="onboarding-step">
-            <StatusLed tone="good" label="Floating control" />
-            <h2>Recorder pill stays above your apps.</h2>
-            <p>
-              Wind Speak opens the always-on-top control during onboarding. Use this recovery action
-              if Windows moved or hid it.
-            </p>
-            <div className="shortcut-test">
-              <button
-                className="button button--ghost"
-                type="button"
-                onClick={() => void onShowFloatingControl()}
-              >
-                <Radio size={18} />
-                Show floating control
-              </button>
-              <p>Use the pill, tray, or shortcut to start and stop dictation.</p>
-            </div>
-          </article>
-          <article className="onboarding-step onboarding-step--accent">
-            <StatusLed tone={pasteTest.passed ? "good" : "idle"} label="Private by default" />
-            <h2>First paste test</h2>
-            <p>
-              Focus Notepad or any text field, then run the same native paste path Wind Speak uses
-              after transcription.
-            </p>
-            <div className="shortcut-test">
-              <button
-                className="button button--ghost"
-                type="button"
-                onClick={() => void onPasteTest()}
-                disabled={pasteTest.running}
-              >
-                <Clipboard size={18} />
-                {pasteTest.running ? "Testing paste" : "Test paste"}
-              </button>
-              <p>{pasteTest.message}</p>
-            </div>
-            <button
-              className="button button--primary"
-              type="button"
-              onClick={() => void onComplete()}
-              disabled={!modelStatus?.ready || micCheck.active}
-            >
-              <CheckCircle2 size={18} />
-              Enter hub
-            </button>
-          </article>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function meterBarScale(index: number, level: number, active: boolean) {
-  if (!active && level === 0) {
-    return 0.16;
-  }
-
-  const center = 5.5;
-  const distanceFromCenter = Math.abs(index - center);
-  const contour = 1 - distanceFromCenter / 7;
-  const signal = Math.max(level, active ? 0.08 : 0);
-  return Math.max(0.12, Math.min(1, 0.14 + signal * (0.45 + contour)));
 }
 
 function stringifyError(error: unknown) {

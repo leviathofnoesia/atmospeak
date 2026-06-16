@@ -1,5 +1,6 @@
 import { Cpu, Database, Mic, Sparkles } from "lucide-react";
 import type { AppSnapshot, ModelStatus, TranscriptSession } from "../types/dictation";
+import { Aura } from "./Aura";
 import { MetricCard } from "./MetricCard";
 import { ToggleRow } from "./ToggleRow";
 
@@ -30,12 +31,15 @@ export function HomePanel({
   return (
     <section className="panel-grid">
       <div className="hero-panel">
-        <p className="eyebrow">Working mode</p>
-        <h2>Hold the shortcut, speak, release. Wind Speak cleans and pastes locally.</h2>
-        <button className="button button--primary" type="button" onClick={onStart} disabled={busy}>
-          <Mic size={18} />
-          Start dictation
-        </button>
+        <div className="hero-panel__body">
+          <p className="eyebrow">Working mode</p>
+          <h2>Hold, speak, release. Atmospeak cleans the words and sets them down locally.</h2>
+          <button className="button button--primary" type="button" onClick={onStart} disabled={busy}>
+            <Mic size={18} />
+            Start dictation
+          </button>
+        </div>
+        <div className="hero-panel__aura"><Aura size={116} active /></div>
       </div>
       <MetricCard label="Sessions" value={snapshot.stats.totalSessions.toString()} />
       <MetricCard label="Words" value={snapshot.stats.totalWords.toString()} />

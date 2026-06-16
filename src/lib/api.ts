@@ -9,14 +9,21 @@ import type {
   DictationResult,
   DictionaryEntry,
   DownloadArtifact,
+  ExportFormat,
+  FeedbackResult,
+  HistorySearchFilters,
   InjectionResult,
   MicrophoneInfo,
   ModelInventory,
   ModelStatus,
+  PolishResult,
+  RecentAppUsage,
   RecordingStarted,
   ReleaseArtifact,
+  RuntimeEvent,
   ShortcutStatus,
   Snippet,
+  TranscriptSession,
   UpdateCheckResult,
 } from "../types/dictation";
 
@@ -41,6 +48,23 @@ const defaultSettings: AppSettings = {
   advancedRuntimeEnabled: false,
   advancedModelPath: "",
   advancedWhisperCliPath: "",
+  activeModelId: "base.en",
+  language: null,
+  injectionMode: "auto",
+  customInstructions: "",
+  autoPolish: false,
+  polishStyle: "concise",
+  polishProvider: "ollama",
+  polishEndpoint: "http://127.0.0.1:11434/api/chat",
+  polishModel: "llama3.2",
+  livePreviewEnabled: true,
+  livePreviewIntervalMs: 750,
+  finalPassEnabled: true,
+  privacyMode: false,
+  autoDeleteTranscriptsAfterMinutes: null,
+  bubbleSize: "medium",
+  bubbleOpacity: 1,
+  feedbackWebhookUrl: "",
 };
 
 let mockSnapshot: AppSnapshot = {
@@ -49,7 +73,7 @@ let mockSnapshot: AppSnapshot = {
     {
       id: "mock-dictionary-1",
       phrase: "wind speak",
-      replacement: "Wind Speak",
+      replacement: "Atmospeak",
       enabled: true,
       createdAt: new Date().toISOString(),
     },
@@ -193,8 +217,8 @@ export function startRecording(): Promise<RecordingStarted> {
 export function stopRecording(): Promise<DictationResult> {
   return command("stop_recording", undefined, () => {
     const cleanedText =
-      "Wind Speak captured this offline prototype transcript and pasted it into the active window.";
-    const session = {
+      "Atmospeak captured this offline prototype transcript and pasted it into the active window.";
+    const session: TranscriptSession = {
       id: crypto.randomUUID(),
       rawText: cleanedText,
       cleanedText,
@@ -203,6 +227,8 @@ export function stopRecording(): Promise<DictationResult> {
       wordCount: cleanedText.split(/\s+/).length,
       injected: mockSnapshot.settings.autoInject,
       createdAt: new Date().toISOString(),
+      appName: "Letters",
+      notes: "",
     };
     mockSnapshot = recalculateStats({
       ...mockSnapshot,
@@ -365,7 +391,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       version: null,
       date: null,
       body: null,
-      message: "Wind Speak is current in browser preview mode.",
+      message: "Atmospeak is current in browser preview mode.",
     };
   }
 
@@ -378,7 +404,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
       version: null,
       date: null,
       body: null,
-      message: "Wind Speak is up to date.",
+      message: "Atmospeak is up to date.",
     };
   }
 
@@ -389,8 +415,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     date: update.date ?? null,
     body: update.body ?? null,
     message: update.available
-      ? `Wind Speak ${update.version} is ready to install.`
-      : "Wind Speak is up to date.",
+      ? `Atmospeak ${update.version} is ready to install.`
+      : "Atmospeak is up to date.",
   };
 }
 
@@ -415,7 +441,7 @@ export async function downloadAndInstallUpdate(): Promise<UpdateCheckResult> {
       version: null,
       date: null,
       body: null,
-      message: "Wind Speak is already up to date.",
+      message: "Atmospeak is already up to date.",
     };
   }
 
@@ -427,8 +453,97 @@ export async function downloadAndInstallUpdate(): Promise<UpdateCheckResult> {
     version: update.version,
     date: update.date ?? null,
     body: update.body ?? null,
-    message: `Wind Speak ${update.version} installed. Relaunching.`,
+    message: `Atmospeak ${update.version} installed. Relaunching.`,
   };
+}
+
+export function getRecordingFftBands(): Promise<number[]> {
+  return command("get_recording_fft_bands", undefined, () =>
+    Array.from({ length: 7 }, (_, index) => 0.18 + 0.32 * Math.abs(Math.sin(index * 0.9 + Date.now() / 400))),
+  );
+}
+
+export function getRuntimeEvents(): Promise<RuntimeEvent[]> {
+  return command("get_runtime_events", undefined, () => [] as RuntimeEvent[]);
+}
+
+export function handleDictationAction(action: string): Promise<void> {
+  return command("handle_dictation_action", { action }, () => undefined);
+}
+
+export function setShortcutTestActive(active: boolean): Promise<void> {
+  return command("set_shortcut_test_active", { active }, () => undefined);
+}
+
+export function showMainWindow(): Promise<void> {
+  return command("show_main_window", undefined, () => undefined);
+}
+
+export function listRecentApps(limit: number): Promise<RecentAppUsage[]> {
+  return command("list_recent_apps", { limit }, () => {
+    const counts = new Map<string, number>();
+    for (const session of mockSnapshot.sessions) {
+      const name = session.appName ?? "Unknown";
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([name, sessionCount]) => ({ name, category: "other", sessionCount }))
+      .sort((a, b) => b.sessionCount - a.sessionCount)
+      .slice(0, limit);
+  });
+}
+
+export function searchSessions(filters: HistorySearchFilters): Promise<TranscriptSession[]> {
+  return command("search_sessions", { filters }, () => {
+    const query = filters.query?.toLowerCase() ?? null;
+    return mockSnapshot.sessions
+      .filter((session) => {
+        if (query && !`${session.cleanedText} ${session.appName ?? ""} ${session.notes}`.toLowerCase().includes(query)) {
+          return false;
+        }
+        if (filters.minWordCount != null && session.wordCount < filters.minWordCount) return false;
+        if (filters.maxWordCount != null && session.wordCount > filters.maxWordCount) return false;
+        if (filters.fromDate && session.createdAt < filters.fromDate) return false;
+        if (filters.toDate && session.createdAt > `${filters.toDate}T23:59:59`) return false;
+        return true;
+      })
+      .slice(0, filters.limit);
+  });
+}
+
+export function exportSession(id: string, format: ExportFormat): Promise<string> {
+  return command("export_session", { id, format }, () => {
+    const session = mockSnapshot.sessions.find((candidate) => candidate.id === id);
+    const text = session?.cleanedText ?? "";
+    if (format === "json") return JSON.stringify(session ?? {}, null, 2);
+    if (format === "srt") return `1\n00:00:00,000 --> 00:00:04,000\n${text}\n`;
+    if (format === "md") return `# Transcript\n\n${text}\n`;
+    return text;
+  });
+}
+
+export function updateSessionNotes(id: string, notes: string): Promise<AppSnapshot> {
+  return command("update_session_notes", { id, notes }, () => {
+    mockSnapshot = {
+      ...mockSnapshot,
+      sessions: mockSnapshot.sessions.map((session) => (session.id === id ? { ...session, notes } : session)),
+    };
+    return mockSnapshot;
+  });
+}
+
+export function polishSession(id: string): Promise<PolishResult> {
+  return command("polish_session", { id }, () => ({
+    snapshot: mockSnapshot,
+    polish: { changed: false, style: mockSnapshot.settings.polishStyle },
+  }));
+}
+
+export function submitFeedback(message: string): Promise<FeedbackResult> {
+  return command("submit_feedback", { message }, () => ({
+    delivered: false,
+    message: "Feedback captured locally in preview mode.",
+  }));
 }
 
 export function getReleaseArtifacts(): Promise<DownloadArtifact[]> {

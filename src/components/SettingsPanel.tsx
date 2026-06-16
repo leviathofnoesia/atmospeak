@@ -128,7 +128,7 @@ export function SettingsPanel({
         <h3>Global shortcut</h3>
         <p>
           {shortcutStatus?.message ??
-            "Wind Speak registers your saved shortcut when the desktop app starts."}
+            "Atmospeak registers your saved shortcut when the desktop app starts."}
         </p>
         <div className="shortcut-test">
           <button
@@ -384,7 +384,7 @@ export function SettingsPanel({
           <h3>App updates</h3>
           <p>
             {updateResult?.message ??
-              "Wind Speak checks GitHub Releases for signed Tauri update metadata."}
+              "Atmospeak checks GitHub Releases for signed Tauri update metadata."}
           </p>
           {updateResult?.version && (
             <small>

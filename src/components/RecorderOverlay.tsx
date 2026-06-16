@@ -1,9 +1,24 @@
-import { Mic, Square, X } from "lucide-react";
-import { memo } from "react";
+import clsx from "clsx";
+import { memo, useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import type { ModelStatus, RecordingStarted } from "../types/dictation";
-import { StatusLed } from "./StatusLed";
+import type { BubbleSize } from "../types/dictation";
+import { Aura } from "./Aura";
+import { attachLiquidGlass } from "../lib/liquidGlass";
+import "./RecorderOverlay.css";
 
 export type RecorderPhase = "idle" | "listening" | "processing" | "pasted" | "error";
+export type RecorderAccent = "dusk" | "teal" | "lilac";
+export type RecorderTheme = "dark" | "light";
+export type RecorderWaveStyle = "ribbon" | "bars" | "pulse";
+
+// Kept for back-compat with callers that still import these names.
+interface LiveTranscript {
+  sessionId: string | null;
+  phase: "idle" | "partial" | "stable" | "final" | "error";
+  text: string;
+  latencyMs: number | null;
+}
 
 interface RecorderOverlayProps {
   recording: RecordingStarted | null;
@@ -13,144 +28,420 @@ interface RecorderOverlayProps {
   modelStatus: ModelStatus | null;
   hotkeyLabel?: string;
   notice?: string;
+  liveTranscript?: LiveTranscript;
   inputLevel?: number;
+  inputBands?: number[];
+  bubbleOpacity?: number;
+  bubbleSize?: BubbleSize;
+  hostApp?: string;
+  accent?: RecorderAccent;
+  theme?: RecorderTheme;
+  waveStyle?: RecorderWaveStyle;
   onToggle: () => void;
   onCancel: () => void;
+  onPressStart?: () => void;
+  onPressEnd?: () => void;
+  onMoveStart?: () => void;
+  onOpenHub?: () => void;
 }
 
-const meterBars = Array.from({ length: 18 }, (_, index) => index);
+const ACCENTS: Record<RecorderAccent, { accent: string; soft: string; deep: string; glow: string; neon: string }> = {
+  dusk: { accent: "#485696", soft: "#8a96cf", deep: "#2f3a6e", glow: "rgba(72,86,150,0.45)", neon: "#9db0ff" },
+  teal: { accent: "#689689", soft: "#8fc0b3", deep: "#3f6258", glow: "rgba(104,150,137,0.45)", neon: "#74f3cf" },
+  lilac: { accent: "#be95c4", soft: "#d8bcdc", deep: "#7a5586", glow: "rgba(190,149,196,0.50)", neon: "#eaa6ff" },
+};
 
-function RecorderOverlayComponent({
-  recording,
-  elapsedSeconds,
-  busy,
-  phase,
-  modelStatus,
-  hotkeyLabel = "CTRL WIN",
-  notice,
-  inputLevel = 0,
-  onToggle,
-  onCancel,
-}: RecorderOverlayProps) {
+const BUBBLE_SCALE: Record<BubbleSize, number> = {
+  small: 0.88,
+  medium: 1,
+  large: 1.08,
+};
+
+// ── inline glyphs (match the design's custom marks) ──────────────────
+function InsertGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v10M8.5 9.5L12 13l3.5-3.5M5 20h14" />
+    </svg>
+  );
+}
+function UndoGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-1" />
+    </svg>
+  );
+}
+function CheckGlyph({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+// ── WaveCanvas — live voice visualisation inside the expanded dock ──
+function WaveCanvas({
+  levelRef,
+  style,
+  accent,
+  accentSoft,
+  active,
+}: {
+  levelRef: React.MutableRefObject<number>;
+  style: RecorderWaveStyle;
+  accent: string;
+  accentSoft: string;
+  active: boolean;
+}) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  const buf = useRef<number[]>(Array.from({ length: 110 }, () => 0.04));
+  const raf = useRef<number | null>(null);
+
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    let w = 0;
+    let h = 0;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const resize = () => {
+      w = cv.clientWidth;
+      h = cv.clientHeight;
+      cv.width = w * dpr;
+      cv.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    ro?.observe(cv);
+
+    const rr = (c: CanvasRenderingContext2D, x: number, y: number, ww: number, hh: number, r: number) => {
+      c.beginPath();
+      c.moveTo(x + r, y);
+      c.arcTo(x + ww, y, x + ww, y + hh, r);
+      c.arcTo(x + ww, y + hh, x, y + hh, r);
+      c.arcTo(x, y + hh, x, y, r);
+      c.arcTo(x, y, x + ww, y, r);
+      c.closePath();
+    };
+
+    const draw = () => {
+      if (cv.clientWidth !== w || cv.clientHeight !== h) resize();
+      if (w === 0 || h === 0) {
+        raf.current = requestAnimationFrame(draw);
+        return;
+      }
+      const arr = buf.current;
+      arr.push(active ? levelRef.current : 0.04);
+      if (arr.length > 110) arr.shift();
+      ctx.clearRect(0, 0, w, h);
+      const mid = h / 2;
+      const n = arr.length;
+
+      if (style === "bars") {
+        const barW = 3;
+        const gap = 3;
+        const count = Math.floor(w / (barW + gap));
+        for (let i = 0; i < count; i++) {
+          const v = arr[Math.floor((i / count) * n)] || 0.04;
+          const bh = Math.max(2, v * (h - 2));
+          const x = i * (barW + gap);
+          const g = ctx.createLinearGradient(0, mid - bh / 2, 0, mid + bh / 2);
+          g.addColorStop(0, accentSoft);
+          g.addColorStop(1, accent);
+          ctx.fillStyle = g;
+          rr(ctx, x, mid - bh / 2, barW, bh, 1.5);
+          ctx.fill();
+        }
+      } else if (style === "pulse") {
+        const count = 30;
+        for (let i = 0; i < count; i++) {
+          const v = arr[Math.floor((i / count) * n)] || 0.04;
+          const x = (i + 0.5) * (w / count);
+          const r = 1.4 + v * 5.5;
+          ctx.beginPath();
+          ctx.arc(x, mid, r, 0, Math.PI * 2);
+          ctx.fillStyle = i % 2 ? accent : accentSoft;
+          ctx.globalAlpha = 0.35 + v * 0.65;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      } else {
+        // ribbon — calm, low-contrast aurora (two soft layers, easy on the eyes)
+        const layers = [
+          { amp: 1.0, alpha: 0.46, col: accent, ph: 0 },
+          { amp: 0.6, alpha: 0.2, col: accentSoft, ph: 1.7 },
+        ];
+        const tn = performance.now() / 600;
+        layers.forEach((L) => {
+          ctx.beginPath();
+          for (let i = 0; i <= n; i++) {
+            const x = (i / n) * w;
+            const v = (arr[i] || 0.04) * L.amp;
+            const ripple = Math.sin(i * 0.5 + tn + L.ph) * 0.12 * v;
+            const y = mid - (v + ripple) * (h / 2 - 1);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          for (let i = n; i >= 0; i--) {
+            const x = (i / n) * w;
+            const v = (arr[i] || 0.04) * L.amp;
+            const ripple = Math.sin(i * 0.5 + tn + L.ph) * 0.12 * v;
+            ctx.lineTo(x, mid + (v + ripple) * (h / 2 - 1));
+          }
+          ctx.closePath();
+          ctx.fillStyle = L.col;
+          ctx.globalAlpha = L.alpha;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        });
+      }
+      raf.current = requestAnimationFrame(draw);
+    };
+    raf.current = requestAnimationFrame(draw);
+    return () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      ro?.disconnect();
+    };
+  }, [style, accent, accentSoft, active, levelRef]);
+
+  return <canvas ref={ref} className="dock__wave" />;
+}
+
+function dockStateFromPhase(phase: RecorderPhase): "rest" | "listening" | "processing" | "delivered" {
+  switch (phase) {
+    case "listening":
+      return "listening";
+    case "processing":
+      return "processing";
+    case "pasted":
+      return "delivered";
+    default:
+      return "rest";
+  }
+}
+
+function RecorderOverlayComponent(props: RecorderOverlayProps) {
+  const {
+    recording,
+    elapsedSeconds,
+    busy,
+    phase,
+    modelStatus,
+    liveTranscript,
+    inputLevel = 0,
+    inputBands,
+    bubbleOpacity,
+    bubbleSize = "medium",
+    hostApp = "your cursor",
+    accent = "dusk",
+    theme = "dark",
+    waveStyle = "ribbon",
+    onToggle,
+    onCancel,
+    onMoveStart,
+    onOpenHub,
+  } = props;
+
   const isRecording = recording !== null;
-  const recorderState = phase ?? getRecorderPhase(isRecording, busy, modelStatus?.ready ?? false);
-  const primaryLabel = isRecording ? "Stop" : recorderState === "error" ? "Retry dictation" : "Dictate";
-  const timer = `${Math.floor(elapsedSeconds / 60)
-    .toString()
-    .padStart(2, "0")}:${Math.floor(elapsedSeconds % 60)
-    .toString()
-    .padStart(2, "0")}`;
-  const title = recorderTitle(recorderState, timer);
-  const status = recorderStatus(recorderState, recording?.microphoneName, modelStatus?.ready ?? false);
+  const resolvedPhase: RecorderPhase = phase ?? (isRecording ? "listening" : busy ? "processing" : "idle");
+  const state = dockStateFromPhase(resolvedPhase);
+  const listening = state === "listening";
+
+  const pigment = ACCENTS[accent] ?? ACCENTS.dusk;
+  const dockRef = useRef<HTMLDivElement>(null);
+  const txRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ sx: number; sy: number; moved: boolean } | null>(null);
+
+  // live amplitude target read by the wave — fed from real input level/bands
+  const levelRef = useRef(0.05);
+  const peakBand = inputBands && inputBands.length ? Math.max(...inputBands) : 0;
+  levelRef.current = Math.max(0.04, Math.min(1, Math.max(inputLevel, peakBand)));
+
+  // liquid-glass refraction — bends the real desktop behind the transparent window
+  useEffect(() => {
+    if (!dockRef.current) return;
+    return attachLiquidGlass(dockRef.current, () => ({
+      scaleMul: 2.2,
+      depthMul: 1.0,
+      splay: 1.12,
+      curvature: 1.05,
+      chroma: 0.08,
+    }));
+  }, []);
+
+  // keep the latest words in view; only fade the left once text overflows
+  const transcript = liveTranscript?.text ?? "";
+  useEffect(() => {
+    const el = txRef.current;
+    if (!el) return;
+    const overflowing = el.scrollWidth > el.clientWidth + 1;
+    el.classList.toggle("is-scrolled", overflowing);
+    if (overflowing) el.scrollLeft = el.scrollWidth;
+  }, [transcript, state]);
+
+  // the orb wakes (blooms) when the user reaches for a hotkey modifier
+  const armedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const setArmed = (on: boolean) => {
+      const el = dockRef.current;
+      if (!el) return;
+      if (on && state === "rest") el.setAttribute("data-armed", "");
+      else el.removeAttribute("data-armed");
+    };
+    const isMod = (e: KeyboardEvent) => e.altKey || e.ctrlKey || e.metaKey;
+    const down = (e: KeyboardEvent) => setArmed(isMod(e));
+    const up = () => setArmed(false);
+    const blur = () => setArmed(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, [state]);
+
+  // press → potential OS-window drag; a clean tap on the body starts dictation
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button != null && e.button !== 0) return;
+    drag.current = { sx: e.clientX, sy: e.clientY, moved: false };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const ds = drag.current;
+    if (!ds || ds.moved) return;
+    if (Math.hypot(e.clientX - ds.sx, e.clientY - ds.sy) > 4) {
+      ds.moved = true;
+      dockRef.current?.setAttribute("data-dragging", "");
+      onMoveStart?.(); // hand off to the OS window drag (Tauri startDragging)
+    }
+  };
+  const onPointerUp = () => {
+    const ds = drag.current;
+    drag.current = null;
+    dockRef.current?.removeAttribute("data-dragging");
+    if (!ds) return;
+    if (ds.moved) return; // it was a drag, not a tap
+    if (state === "rest") onToggle(); // clean tap on the body → start dictation
+  };
+
+  const timer = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(
+    Math.floor(elapsedSeconds % 60),
+  ).padStart(2, "0")}`;
+  const tip = "hold ⌥space";
+  const auraSize = state === "rest" ? 34 : 40;
+
+  const wrapStyle: CSSProperties = {
+    "--accent": pigment.accent,
+    "--accent-soft": pigment.soft,
+    "--accent-deep": pigment.deep,
+    "--accent-glow": pigment.glow,
+    "--neon": pigment.neon,
+    "--dock-scale": BUBBLE_SCALE[bubbleSize] ?? BUBBLE_SCALE.medium,
+    opacity: bubbleOpacity != null && bubbleOpacity > 0 ? bubbleOpacity : undefined,
+  } as CSSProperties;
+
+  const modelReady = modelStatus?.ready ?? true;
 
   return (
-    <aside
-      className="recorder"
-      aria-label="Recorder controls"
-      data-recorder-state={recorderState}
-      data-tauri-drag-region
-    >
-      <div className="recorder__meter" aria-hidden="true">
-        {meterBars.map((index) => (
-          <span
-            key={index}
-            style={{
-              transform: `scaleY(${meterScale(index, inputLevel, isRecording || busy)})`,
-            }}
-          />
-        ))}
+    <div className={clsx("dock-wrap", theme === "dark" && "dark-bg")} style={wrapStyle} ref={armedRef}>
+      <div
+        className="dock"
+        ref={dockRef}
+        data-state={state}
+        data-shape={state === "rest" ? "orb" : "capsule"}
+        data-size={bubbleSize}
+        data-theme={theme}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={onOpenHub}
+        title={state === "rest" ? "Tap to dictate · drag to move · double-click for hub" : "Drag to move"}
+        role="button"
+        tabIndex={0}
+        aria-label="Atmospeak companion — tap to dictate, drag to move"
+      >
+        <span className="dock__mark">
+          <Aura size={auraSize} active={listening} />
+        </span>
+
+        {state !== "rest" && (
+          <div className="dock__core">
+            {state === "processing" ? (
+              <div className="dock__transcript proc">
+                <span className="shim">transcribing on device</span>
+              </div>
+            ) : state === "delivered" ? (
+              <div className="dock__transcript">
+                <span className="stable">Set down in {hostApp}</span>
+              </div>
+            ) : (
+              <div className="dock__transcript" ref={txRef}>
+                {transcript ? (
+                  <span className="stable">{transcript}</span>
+                ) : (
+                  <span className="placeholder">listening — speak naturally…</span>
+                )}
+              </div>
+            )}
+            {listening && (
+              <WaveCanvas
+                levelRef={levelRef}
+                style={waveStyle}
+                active
+                accent={pigment.accent}
+                accentSoft={pigment.neon}
+              />
+            )}
+          </div>
+        )}
+
+        {listening && (
+          <div className="dock__right">
+            <span className="dock__timer">{timer}</span>
+            <button
+              className="dock__discard"
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onCancel}
+              title="Discard"
+              aria-label="Discard this dictation"
+            >
+              <UndoGlyph size={16} />
+            </button>
+            <button
+              className="dock__insert"
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onToggle}
+              disabled={busy}
+              title="Insert at cursor"
+              aria-label="Insert text at the cursor"
+            >
+              <InsertGlyph size={16} />
+              <span className="lbl">Insert</span>
+            </button>
+          </div>
+        )}
+        {state === "delivered" && (
+          <div className="dock__right">
+            <span className="dock__delivered">
+              <CheckGlyph size={15} />
+            </span>
+          </div>
+        )}
       </div>
-      <div className="recorder__main">
-        <div>
-          <p className="eyebrow">Global capture</p>
-          <h2>{title}</h2>
-          <StatusLed tone={status.tone} label={status.label} />
-          {notice ? <p className="recorder__notice">{notice}</p> : null}
-        </div>
-        <div className="recorder__actions">
-          <button
-            className="button button--primary button--square"
-            type="button"
-            onClick={onToggle}
-            disabled={busy}
-            aria-label={primaryLabel}
-            title={primaryLabel}
-          >
-            {isRecording ? <Square size={22} /> : <Mic size={22} />}
-          </button>
-          <button
-            className="button button--ghost button--square"
-            type="button"
-            onClick={onCancel}
-            disabled={!isRecording || busy}
-            aria-label="Cancel"
-            title="Cancel"
-          >
-            <X size={20} />
-          </button>
-        </div>
-      </div>
-      <div className="recorder__stripe">
-        {hotkeyLabel.split("+").map((part) => (
-          <span key={part}>{part.trim()}</span>
-        ))}
-      </div>
-    </aside>
+
+      {state === "rest" && (
+        <div className={clsx("dock-tip", !modelReady && "dock-tip--warn")}>{modelReady ? tip : "runtime offline"}</div>
+      )}
+    </div>
   );
 }
 
 export const RecorderOverlay = memo(RecorderOverlayComponent);
-
-function getRecorderPhase(isRecording: boolean, busy: boolean, ready: boolean): RecorderPhase {
-  if (isRecording) {
-    return "listening";
-  }
-  if (busy) {
-    return "processing";
-  }
-  return ready ? "idle" : "error";
-}
-
-function recorderTitle(phase: RecorderPhase, timer: string) {
-  switch (phase) {
-    case "listening":
-      return timer;
-    case "processing":
-      return "Processing";
-    case "pasted":
-      return "Pasted";
-    case "error":
-      return "Check input";
-    case "idle":
-      return "Ready";
-  }
-}
-
-function recorderStatus(
-  phase: RecorderPhase,
-  microphoneName: string | undefined,
-  ready: boolean,
-): { tone: "idle" | "good" | "warn" | "hot"; label: string } {
-  switch (phase) {
-    case "listening":
-      return { tone: "hot", label: microphoneName ?? "Listening" };
-    case "processing":
-      return { tone: "warn", label: "Transcribing locally" };
-    case "pasted":
-      return { tone: "good", label: "Transcript delivered" };
-    case "error":
-      return { tone: "warn", label: ready ? "Needs attention" : "Runtime unavailable" };
-    case "idle":
-      return { tone: ready ? "good" : "warn", label: ready ? "Bundled engine armed" : "Runtime unavailable" };
-  }
-}
-
-function meterScale(index: number, level: number, active: boolean) {
-  if (!active) {
-    return 0.18 + ((index % 5) * 0.035);
-  }
-
-  const normalized = Math.max(0, Math.min(1, level));
-  const contour = 0.45 + Math.sin(index * 0.9) * 0.22 + Math.cos(index * 0.42) * 0.16;
-  return Math.max(0.12, Math.min(1, 0.14 + normalized * contour));
-}
