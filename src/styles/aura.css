@@ -1,0 +1,29 @@
+/* ════════════════════════════════════════════════════════════════
+   The Aura mark — shared across the dock, hub, and onboarding.
+   Generic rings/core/spark + the breathing motion. Surface-specific
+   overrides (the dock's tinted-glass relighting) live with each surface.
+   ════════════════════════════════════════════════════════════════ */
+
+.aura { display: inline-grid; place-items: center; }
+.aura svg { display: block; overflow: visible; }
+.aura-ring { fill: none; stroke-width: 1.4; transform-origin: 24px 24px; }
+.aura-ring.r1 { stroke: rgba(244,244,238,0.62); opacity: 1; }
+.aura-ring.r2 { stroke: rgba(244,244,238,0.3); opacity: 1; }
+.aura-ring.r3 { stroke: rgba(244,244,238,0.16); opacity: 1; }
+.aura-core { fill: rgba(244,244,238,0.85); }
+.aura-spark { fill: #fff; opacity: 0.5; }
+
+/* active = listening / hero: same hue, lit to NEON and glowing, one slow breath */
+.aura.is-active .aura-ring.r1 { stroke: var(--neon, #9db0ff); opacity: 0.95; animation: ringbreath 3.4s ease-in-out infinite; }
+.aura.is-active .aura-ring.r2 { stroke: var(--neon, #9db0ff); opacity: 0.5; animation: ringbreath 3.4s ease-in-out infinite 0.5s; }
+.aura.is-active .aura-ring.r3 { stroke: var(--neon, #9db0ff); opacity: 0.22; }
+.aura.is-active .aura-core { fill: #fff; }
+
+@keyframes breath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+@keyframes ringbreath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes wake { 0% { transform: scale(0.92); } 55% { transform: scale(1.16); } 100% { transform: scale(1.05); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .aura * { animation: none !important; }
+}

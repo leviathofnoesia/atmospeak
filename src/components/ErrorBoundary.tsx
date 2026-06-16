@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div role="alert" className="error-boundary">
           <h2>Something went wrong</h2>
-          <p>Wind Speak hit an unexpected error. Reload to recover.</p>
+          <p>Atmospeak hit an unexpected error. Reload to recover.</p>
           <button type="button" onClick={this.handleReload}>
             Reload
           </button>

@@ -1,0 +1,406 @@
+import { useEffect, useRef, useState } from "react";
+import type {
+  AppSettings,
+  MicrophoneInfo,
+  ModelInventory,
+  ModelInventoryItem,
+  ModelStatus,
+  ShortcutStatus,
+} from "../types/dictation";
+import { shortcutOptions } from "../panelOptions";
+import { Aura } from "./Aura";
+import "./Onboarding.css";
+
+interface ShortcutTestState {
+  active: boolean;
+  detected: boolean;
+  message: string;
+}
+interface MicCheckState {
+  active: boolean;
+  passed: boolean;
+  level: number;
+  message: string;
+}
+interface PasteTestState {
+  running: boolean;
+  passed: boolean;
+  message: string;
+}
+
+interface OnboardingProps {
+  settings: AppSettings;
+  setSettings: (settings: AppSettings) => void;
+  microphones: MicrophoneInfo[];
+  modelStatus: ModelStatus | null;
+  modelInventory: ModelInventory | null;
+  shortcutStatus: ShortcutStatus | null;
+  shortcutTest: ShortcutTestState;
+  micCheck: MicCheckState;
+  onStartMicCheck: () => Promise<void>;
+  onStopMicCheck: () => Promise<void>;
+  onTestShortcut: () => void;
+  pasteTest: PasteTestState;
+  onPasteTest: () => Promise<void>;
+  onShowFloatingControl: () => Promise<void>;
+  onComplete: () => Promise<void>;
+}
+
+const STEPS = ["Welcome", "Microphone", "Voice model", "Shortcut", "Sound check", "Ready"];
+const SC_TARGET = "The porcelain moon hums over the studio.";
+
+const FALLBACK_MODELS: ModelInventoryItem[] = [
+  { id: "tiny.en", label: "Swift", installed: false, bundled: false, path: null, sizeMb: 74 },
+  { id: "base.en", label: "Balanced", installed: true, bundled: true, path: "bundled", sizeMb: 142 },
+  { id: "small.en", label: "Faithful", installed: false, bundled: false, path: null, sizeMb: 466 },
+];
+
+const MODEL_COPY: Record<string, { tag: string; desc: string }> = {
+  "tiny.en": { tag: "fast", desc: "Quick drafts, casual notes. Lightest footprint." },
+  "base.en": { tag: "recommended", desc: "The everyday voice - accurate and responsive." },
+  "small.en": { tag: "most accurate", desc: "Names, jargon, accents. Needs a little more room." },
+  "base": { tag: "multilingual", desc: "Auto-detect and non-English dictation with a local model." },
+};
+
+// ── small inline glyphs ──
+function Glyph({ d, size = 16, sw = 2 }: { d: string; size?: number; sw?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+const ICONS = {
+  check: "M5 13l4 4L19 7",
+  mic: "M9 3h6v11a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3",
+  arrow: "M5 12h14M13 6l6 6-6 6",
+  lock: "M8 11V8a4 4 0 0 1 8 0v3",
+};
+
+// live mic meter driven by the real input level
+function MicMeter({ live, level }: { live: boolean; level: number }) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  const bars = 38;
+  useEffect(() => {
+    const els = wrap.current ? Array.from(wrap.current.querySelectorAll<HTMLElement>(".bar")) : [];
+    let t = 0;
+    let raf = 0;
+    const tick = () => {
+      t += 0.08;
+      const sig = levelRef.current;
+      els.forEach((el, i) => {
+        let h: number;
+        if (live) {
+          const env = 0.5 + 0.5 * Math.sin(t * 1.7 + i * 0.18);
+          const tex = 0.5 + 0.5 * Math.sin(t * 4.1 + i * 0.6);
+          h = 6 + (0.35 * env + 0.3 * tex + 0.15 * Math.random()) * Math.max(0.18, sig) * 90;
+        } else {
+          h = 6 + 2 * (0.5 + 0.5 * Math.sin(t + i));
+        }
+        el.style.height = `${h.toFixed(1)}px`;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [live]);
+  return (
+    <div className="ob-meter" data-live={live ? "true" : "false"} ref={wrap}>
+      <span className="idle-note">microphone idle</span>
+      {Array.from({ length: bars }).map((_, i) => (
+        <span className="bar" key={i} />
+      ))}
+    </div>
+  );
+}
+
+export function Onboarding(props: OnboardingProps) {
+  const {
+    settings,
+    setSettings,
+    microphones,
+    modelStatus,
+    modelInventory,
+    shortcutStatus,
+    shortcutTest,
+    micCheck,
+    onStartMicCheck,
+    onStopMicCheck,
+    onTestShortcut,
+    pasteTest,
+    onPasteTest,
+    onShowFloatingControl,
+    onComplete,
+  } = props;
+
+  const [step, setStepRaw] = useState(0);
+  const setStep = (n: number) => setStepRaw(Math.max(0, Math.min(STEPS.length - 1, n)));
+
+  const modelReady = modelStatus?.ready ?? false;
+  const modelChoices = modelInventory?.models.length ? modelInventory.models : FALLBACK_MODELS;
+  const activeModel =
+    modelChoices.find((model) => model.id === settings.activeModelId) ??
+    modelChoices.find((model) => model.id === modelInventory?.activeModelId) ??
+    modelChoices.find((model) => model.id === "base.en") ??
+    modelChoices[0];
+  const canContinue = (() => {
+    if (step === 1) return micCheck.passed;
+    if (step === 2) return modelReady;
+    if (step === 4) return micCheck.passed;
+    return true;
+  })();
+  const progressPct = (step / (STEPS.length - 1)) * 100;
+  const hotkeyChips = settings.hotkey.split("+").map((part) => part.trim());
+
+  return (
+    <div className="ob-stage">
+      <div className="ob-window">
+        <span className="crop tl" /><span className="crop tr" />
+        <span className="crop bl" /><span className="crop br" />
+
+        {/* LEFT RAIL */}
+        <aside className="ob-rail">
+          <div className="ob-brand">
+            <span className="ob-aura"><Aura size={40} active /></span>
+            <span className="wm"><strong>Atmospeak</strong><span>First run · on device</span></span>
+          </div>
+          <nav className="ob-steps">
+            {STEPS.map((s, i) => (
+              <div key={s} className={`ob-step${i === step ? " active" : i < step ? " done" : ""}`}>
+                <span className="num">{i < step ? <Glyph d={ICONS.check} size={14} /> : String(i).padStart(2, "0")}</span>
+                <span className="lab">{s}</span>
+              </div>
+            ))}
+          </nav>
+          <div className="ob-foot">
+            <div className="ob-folio">
+              <span>P.0{step} / 0{STEPS.length - 1}</span>
+              <span className="ob-barcode">
+                {Array.from({ length: 16 }).map((_, i) => (
+                  <i key={i} style={{ height: `${5 + ((i * 37) % 12)}px`, opacity: i % 3 ? 0.4 : 0.7 }} />
+                ))}
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        {/* RIGHT CONTENT */}
+        <main className="ob-main">
+          <div className="ob-content">
+            {step === 0 && (
+              <div className="ob-fade">
+                <div className="ob-hero-aura"><Aura size={132} active /></div>
+                <div className="ob-kick">Welcome · v2.4 Edition</div>
+                <h1 className="ob-h">Speak. It listens.<br />It sets the words <em>down.</em></h1>
+                <p className="ob-lede">
+                  Atmospeak turns your voice into clean text wherever your cursor rests — transcribed entirely
+                  on this device. No cloud, no account, nothing to forget. Let's take a quiet minute to set it up.
+                </p>
+              </div>
+            )}
+
+            {step === 1 && (
+              <div className="ob-fade ob-mic">
+                <div>
+                  <div className="ob-kick">Step 01 · Permission</div>
+                  <h1 className="ob-h">May I <em>listen?</em></h1>
+                  <p className="ob-lede">
+                    Atmospeak needs your microphone to hear you. It only ever captures while you hold your key —
+                    never in the background.
+                  </p>
+                </div>
+                <label className="ob-field">
+                  <span>Input device</span>
+                  <select
+                    value={settings.microphoneName ?? ""}
+                    onChange={(e) =>
+                      setSettings({ ...settings, microphoneName: e.currentTarget.value || null })
+                    }
+                  >
+                    <option value="">System default</option>
+                    {microphones.map((m) => (
+                      <option key={m.name} value={m.name}>{m.name}{m.isDefault ? " (default)" : ""}</option>
+                    ))}
+                  </select>
+                </label>
+                <MicMeter live={micCheck.active} level={micCheck.level} />
+                {!micCheck.passed && !micCheck.active ? (
+                  <button className="pill-btn" onClick={() => void onStartMicCheck()} disabled={microphones.length === 0}>
+                    <Glyph d={ICONS.mic} size={16} /> Grant microphone access
+                  </button>
+                ) : micCheck.active ? (
+                  <button className="pill-btn ghost" onClick={() => void onStopMicCheck()}>Stop mic check</button>
+                ) : (
+                  <div className="ob-statline"><span className="ok"><Glyph d={ICONS.check} size={14} /></span> {micCheck.message}</div>
+                )}
+                <div className="ob-priv">
+                  <Glyph d={ICONS.lock} size={18} sw={1.8} />
+                  <div><b>Private by design.</b> Audio is processed locally and discarded the moment your words are written. It never touches a server.</div>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="ob-fade">
+                <div className="ob-kick">Step 02 · On-device model</div>
+                <h1 className="ob-h">A voice model, <em>downloaded once.</em></h1>
+                <p className="ob-lede">Pick the voice that fits how you work. It runs entirely offline.</p>
+                <div className="ob-panel ob-models">
+                  {modelChoices.map((m) => {
+                    const copy = MODEL_COPY[m.id] ?? {
+                      tag: m.bundled ? "bundled" : m.installed ? "installed" : "available",
+                      desc: m.installed
+                        ? "A local Whisper model ready to run offline."
+                        : "Visible in inventory; install it before selecting.",
+                    };
+                    const selected = settings.activeModelId === m.id;
+                    return (
+                    <button
+                      key={m.id}
+                      className="ob-model"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        if (m.installed) {
+                          setSettings({ ...settings, activeModelId: m.id });
+                        }
+                      }}
+                      disabled={!m.installed}
+                    >
+                      <span className="radio" />
+                      <span>
+                        <span className="mname">{m.label}<span className="tag">{selected ? "selected" : copy.tag}</span></span>
+                        <span className="mdesc">{copy.desc}</span>
+                      </span>
+                      <span className="msize">{m.sizeMb ? `${m.sizeMb} MB` : m.installed ? "local" : "not installed"}</span>
+                    </button>
+                    );
+                  })}
+                </div>
+                <div className="ob-download">
+                  <div className="row">
+                    <span className="lbl">{modelReady ? "Ready · runs offline forever" : modelStatus?.message ?? "Preparing engine…"}</span>
+                    <span className="pct">{modelReady ? "100%" : "…"}</span>
+                  </div>
+                  <div className={`ob-dlbar${modelReady ? " done" : ""}`}><i style={{ width: modelReady ? "100%" : "12%" }} /></div>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="ob-fade ob-keywrap">
+                <div>
+                  <div className="ob-kick">Step 03 · Your key</div>
+                  <h1 className="ob-h">Choose your <em>key.</em></h1>
+                  <p className="ob-lede">One key summons the companion from anywhere. Pick a familiar one, then test it.</p>
+                </div>
+                <div className="ob-keyfield">
+                  <span className="ob-keys">
+                    {hotkeyChips.map((k, i) => <kbd key={i}>{k}</kbd>)}
+                  </span>
+                  <button className="ob-preset" onClick={onTestShortcut}>Test shortcut</button>
+                </div>
+                <p className="ob-keyhint">{shortcutTest.message || shortcutStatus?.message || "Press your shortcut to confirm the desktop runtime hears it."}</p>
+                <div className="ob-presets">
+                  {shortcutOptions.map((opt) => (
+                    <button
+                      key={opt}
+                      className={`ob-preset${settings.hotkey === opt ? " sel" : ""}`}
+                      onClick={() => setSettings({ ...settings, hotkey: opt })}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <div className="ob-kick" style={{ marginBottom: 12 }}>Gesture</div>
+                  <div className="ob-modes">
+                    <button className={`ob-mode${settings.mode === "pushToTalk" ? " sel" : ""}`} onClick={() => setSettings({ ...settings, mode: "pushToTalk" })}>Hold to talk</button>
+                    <button className={`ob-mode${settings.mode === "toggle" ? " sel" : ""}`} onClick={() => setSettings({ ...settings, mode: "toggle" })}>Tap to toggle</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div className="ob-fade ob-sc">
+                <div>
+                  <div className="ob-kick">Step 04 · Sound check</div>
+                  <h1 className="ob-h">Say this <em>line.</em></h1>
+                  <p className="ob-lede">A quick read so Atmospeak can tune to your voice and your room.</p>
+                </div>
+                <div className="ob-sc-card">
+                  <div className="strip"><span>READ ALOUD</span><span>◇ CALIBRATION</span></div>
+                  <span className={`ob-sc-target${micCheck.passed ? " is-pass" : ""}`}>{SC_TARGET}</span>
+                </div>
+                <div className="ob-sc-row">
+                  {!micCheck.passed ? (
+                    <button
+                      className={`ob-hold${micCheck.active ? " holding" : ""}`}
+                      onPointerDown={() => void onStartMicCheck()}
+                      onPointerUp={() => void onStopMicCheck()}
+                      onPointerLeave={() => micCheck.active && void onStopMicCheck()}
+                    >
+                      <span className="dot" />{micCheck.active ? "Listening…" : "Hold to read"}
+                    </button>
+                  ) : (
+                    <div className="ob-sc-pass"><span className="ok"><Glyph d={ICONS.check} size={13} /></span> Heard you clearly — your voice is tuned.</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {step === 5 && (
+              <div className="ob-fade ob-ready">
+                <div className="ob-ready-aura"><Aura size={120} active /></div>
+                <div className="ob-kick">Ready</div>
+                <h1 className="ob-h">The companion is <em>waiting.</em></h1>
+                <p className="ob-lede">
+                  It rests quietly at the edge of your screen. Reach for your key and it wakes; speak, release,
+                  and your words are set down.
+                </p>
+                <div className="ob-ready-summary">
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{micCheck.passed ? "connected" : "not checked"}</b></div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> <b>{activeModel?.label ?? "Balanced"}</b> model · runs offline</div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{hotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "hold to talk" : "tap to toggle"}</div>
+                </div>
+                <div className="ob-ready-actions">
+                  <button className="ob-preset" onClick={() => void onPasteTest()} disabled={pasteTest.running}>
+                    {pasteTest.running ? "Testing paste…" : "Run paste test"}
+                  </button>
+                  <button className="ob-preset" onClick={() => void onShowFloatingControl()}>Show the companion</button>
+                </div>
+                {pasteTest.message && pasteTest.message !== "Paste test has not run yet." ? (
+                  <p className="ob-keyhint">{pasteTest.message}</p>
+                ) : null}
+              </div>
+            )}
+          </div>
+
+          <div className="ob-nav">
+            {step > 0 && <button className="pill-btn ghost" onClick={() => setStep(step - 1)}>Back</button>}
+            <div className="ob-progress"><i style={{ width: `${progressPct}%` }} /></div>
+            {step < STEPS.length - 1 ? (
+              <>
+                {step === 0 && <button className="ob-skip" onClick={() => setStep(STEPS.length - 1)}>Skip setup</button>}
+                <button
+                  className={`pill-btn${canContinue ? "" : " ghost"}`}
+                  disabled={!canContinue}
+                  onClick={() => setStep(step + 1)}
+                  style={canContinue ? {} : { opacity: 0.4, cursor: "not-allowed" }}
+                >
+                  {step === 0 ? "◇ Begin" : "Continue"} {canContinue && step > 0 ? <Glyph d={ICONS.arrow} size={15} /> : null}
+                </button>
+              </>
+            ) : (
+              <button className="pill-btn accent big" onClick={() => void onComplete()}>◇ Enter Atmospeak</button>
+            )}
+          </div>
+        </main>
+      </div>
+      <div className="grain-overlay" />
+    </div>
+  );
+}

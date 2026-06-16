@@ -1,0 +1,144 @@
+/* ═══════════════════════════════════════════════════════════════════════════════
+   NOV PAX — Design System v2.4 · "Edition"  (Atmospeak)
+   Surrealist brutalism × heavenly vaporwave warmth.
+   Plates carry the structure. Cormorant carries the breath.
+   Ported from the Claude Design handoff. Google-Fonts @import replaced with
+   self-hosted @font-face (offline-first CSP: font-src 'self').
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Self-hosted faces ──────────────────────────────────────────────────────── */
+/* Cormorant Garamond — editorial display */
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-Light.woff2') format('woff2'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-LightItalic.woff2') format('woff2'); font-weight: 300; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Cormorant Garamond'; src: url('../assets/nov-pax/fonts/Cormorant-MediumItalic.woff2') format('woff2'); font-weight: 500; font-style: italic; font-display: swap; }
+
+/* IBM Plex Mono — kickers, data, technical */
+@font-face { font-family: 'IBM Plex Mono'; src: url('../assets/nov-pax/fonts/IBMPlexMono-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../assets/nov-pax/fonts/IBMPlexMono-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../assets/nov-pax/fonts/IBMPlexMono-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../assets/nov-pax/fonts/IBMPlexMono-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+
+/* Self-hosted Geist (sans + mono) */
+@font-face { font-family: 'Geist'; src: url('../assets/nov-pax/fonts/Geist-Light.woff2') format('woff2'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('../assets/nov-pax/fonts/Geist-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('../assets/nov-pax/fonts/Geist-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('../assets/nov-pax/fonts/Geist-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('../assets/nov-pax/fonts/Geist-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('../assets/nov-pax/fonts/Geist-Black.woff2') format('woff2'); font-weight: 900; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('../assets/nov-pax/fonts/GeistMono-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('../assets/nov-pax/fonts/GeistMono-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('../assets/nov-pax/fonts/GeistMono-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'GeistPixel'; src: url('../assets/nov-pax/fonts/GeistPixel-Square.woff2') format('woff2'); font-display: swap; }
+
+:root {
+  /* ─── TYPE FAMILIES ──────────────────────────────────────────────────────── */
+  --font-display:   'Cormorant Garamond', ui-serif, Georgia, serif;     /* Editorial / poetic */
+  --font-body:      'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif; /* UI / running text */
+  --font-mono:      'IBM Plex Mono', 'Geist Mono', ui-monospace, monospace; /* kickers, data, technical */
+  --font-tech:      'Geist Mono', ui-monospace, monospace;
+  --font-pixel:     'GeistPixel', monospace;
+
+  /* ─── COLOR SYSTEM ───────────────────────────────────────────────────────── */
+  /* Brand pigments — Dusk palette, emotional & restrained */
+  --c-dusk:        #485696;
+  --c-dusk-soft:   oklch(70% 0.07 268);
+  --c-dusk-deep:   oklch(34% 0.10 268);
+
+  --c-teal:        #689689;
+  --c-teal-soft:   oklch(80% 0.04 168);
+  --c-teal-deep:   oklch(45% 0.06 168);
+
+  --c-lilac:       #be95c4;
+  --c-lilac-soft:  oklch(86% 0.05 310);
+  --c-lilac-deep:  oklch(52% 0.11 310);
+
+  --c-porcelain:   #f7f7f2;
+  --c-onyx:        #121113;
+
+  --spectrum-1: var(--c-dusk);
+  --spectrum-2: var(--c-teal);
+  --spectrum-3: var(--c-lilac);
+
+  /* ─── SURFACES (Light = primary mode) ────────────────────────────────────── */
+  --bg:            #f7f7f2;
+  --surface:       oklch(99% 0.003 90);
+  --surface-muted: oklch(94% 0.005 80);
+  --surface-deep:  oklch(90% 0.006 80);
+
+  --fg:            #1b1a1d;
+  --text-primary:  #1b1a1d;
+  --text-secondary:oklch(38% 0.010 280);
+  --text-tertiary: oklch(55% 0.008 280);
+  --text-muted:    oklch(65% 0.006 280);
+  --text-inverse:  #f7f7f2;
+
+  --border:         oklch(86% 0.008 80);
+  --border-subtle:  oklch(92% 0.006 80);
+  --border-strong:  oklch(70% 0.010 280);
+
+  /* ─── SIGNATURE GRADIENTS ────────────────────────────────────────────────── */
+  --grad-aurora:    linear-gradient(135deg, var(--c-dusk) 0%, var(--c-lilac) 100%);
+  --grad-spectrum:  radial-gradient(circle at 30% 28%, var(--c-lilac) 0%, var(--c-dusk) 55%, var(--c-onyx) 110%);
+
+  /* ─── TYPOGRAPHY SCALE ───────────────────────────────────────────────────── */
+  --type-display-lg:  clamp(2.25rem, 5.5vw, 4rem);
+  --type-display-md:  clamp(1.75rem, 3.5vw, 2.5rem);
+  --type-body-md: 1rem;
+  --type-body-sm: 0.875rem;
+  --type-mono-xs: 0.6875rem;
+
+  --leading-tight:  1.05;
+  --leading-normal: 1.5;
+  --leading-relaxed:1.65;
+
+  --tracking-tight:  0;
+  --tracking-wide:   0.06em;
+  --tracking-widest: 0.22em;
+
+  /* ─── SHAPE ──────────────────────────────────────────────────────────────── */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-full: 9999px;
+
+  /* ─── SPACING ────────────────────────────────────────────────────────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+
+  /* ─── SHADOWS / GLOW ─────────────────────────────────────────────────────── */
+  --shadow-sm:    0 2px 6px oklch(28% 0.02 280 / 0.06);
+  --shadow-md:    0 8px 24px oklch(28% 0.02 280 / 0.08);
+  --shadow-lg:    0 24px 60px oklch(28% 0.02 280 / 0.10);
+  --shadow-xl:    0 40px 100px oklch(28% 0.02 280 / 0.14);
+
+  /* ─── MOTION ─────────────────────────────────────────────────────────────── */
+  --ease-cosmic:  cubic-bezier(0.22, 1, 0.36, 1);   /* expo out — primary */
+  --ease-breath:  cubic-bezier(0.45, 0, 0.55, 1);   /* sin in/out for breathing */
+  --ease-spring:  cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth:  cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ─── ATMOSPEAK RUNTIME TOKENS (accent driven, dock + hub + onboarding) ───── */
+  --accent:       #485696;
+  --accent-soft:  #8a96cf;
+  --accent-deep:  #2f3a6e;
+  --accent-glow:  rgba(72, 86, 150, 0.45);
+  --neon:         #9db0ff;
+
+  --ink:      #1b1a1d;
+  --paper:    #f7f7f2;
+  --onyx:     #121113;
+
+  --dur-breath: 6s;
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}

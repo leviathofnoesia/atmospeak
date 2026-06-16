@@ -26,7 +26,7 @@ export function AdvancedPanel({
       <div className="instruction-card">
         <h3>Bundled by default</h3>
         <p>
-          Wind Speak ships with whisper.cpp and Base English. Override these paths only when
+          Atmospeak ships with whisper.cpp and Base English. Override these paths only when
           testing a custom build or a larger local model.
         </p>
       </div>
