@@ -184,7 +184,8 @@
 .hub-shell .empty-state { padding: 40px; text-align: center; color: rgba(27,26,29,0.5); font-family: var(--font-display); font-style: italic; font-size: 19px; }
 
 /* ── History ── */
-.hub-shell .history-toolbar { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.hub-shell .history-toolbar { display: grid; grid-template-columns: minmax(0, 2fr) repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.hub-shell .history-toolbar > * { min-width: 0; }
 .hub-shell .history-filter-error { color: #c66b4b; font-size: 12.5px; margin: 0 0 10px; }
 .hub-shell .recent-apps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .hub-shell .recent-apps__row { display: flex; flex-wrap: wrap; gap: 8px; }
