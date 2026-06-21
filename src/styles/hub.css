@@ -184,7 +184,8 @@
 .hub-shell .empty-state { padding: 40px; text-align: center; color: rgba(27,26,29,0.5); font-family: var(--font-display); font-style: italic; font-size: 19px; }
 
 /* ── History ── */
-.hub-shell .history-toolbar { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.hub-shell .history-toolbar { display: grid; grid-template-columns: minmax(0, 2fr) repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.hub-shell .history-toolbar > * { min-width: 0; }
 .hub-shell .history-filter-error { color: #c66b4b; font-size: 12.5px; margin: 0 0 10px; }
 .hub-shell .recent-apps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .hub-shell .recent-apps__row { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -206,4 +207,90 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hub-shell .button:hover { transform: none; }
+}
+
+@media (max-width: 760px) {
+  .hub-shell {
+    position: fixed;
+    inset: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .hub__nav {
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 12px;
+    border-right: none;
+    border-bottom: 1px solid rgba(18,17,19,0.08);
+  }
+
+  .hub__brand {
+    min-width: max-content;
+    padding: 0 10px 0 0;
+  }
+
+  .hub__navitem {
+    width: auto;
+    min-width: max-content;
+    padding: 9px 10px;
+  }
+
+  .hub__status,
+  .hub__nav .marquee-foot {
+    display: none;
+  }
+
+  .hub__main {
+    min-width: 0;
+  }
+
+  .notice-rail {
+    padding: 11px 18px;
+  }
+
+  .hub-shell .panel-title,
+  .hub-shell .panel-grid,
+  .hub-shell .settings-panel,
+  .hub-shell .list-panel {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .hub-shell .panel-title h2 {
+    font-size: 29px;
+  }
+
+  .hub-shell .panel-grid,
+  .hub-shell .hero-panel,
+  .hub-shell .inline-form,
+  .hub-shell .history-toolbar,
+  .hub-shell .model-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hub-shell .hero-panel {
+    gap: 18px;
+  }
+
+  .hub-shell .hero-panel__aura {
+    width: 88px;
+    height: 88px;
+  }
+
+  .hub-shell .update-card,
+  .hub-shell .editable-row,
+  .hub-shell .history-item__row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hub-shell .history-item__actions,
+  .hub-shell .row-actions,
+  .hub-shell .update-card__actions {
+    flex-wrap: wrap;
+  }
 }

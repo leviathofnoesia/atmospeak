@@ -3,8 +3,8 @@ use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
 };
 
-const OVERLAY_WIDTH: f64 = 420.0;
-const OVERLAY_HEIGHT: f64 = 128.0;
+const OVERLAY_WIDTH: f64 = 520.0;
+const OVERLAY_HEIGHT: f64 = 150.0;
 const OVERLAY_BOTTOM_MARGIN: f64 = 56.0;
 
 pub fn show_and_reset(app: &AppHandle) -> Result<()> {
