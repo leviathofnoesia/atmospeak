@@ -1,6 +1,6 @@
 param(
   [string]$InstallerPath = "",
-  [string]$InstallDir = (Join-Path $env:TEMP "WindSpeakInstallTest")
+  [string]$InstallDir = (Join-Path $env:TEMP "AtmospeakInstallTest")
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,7 +122,7 @@ if ($install.ExitCode -ne 0) {
   throw "Installer exited with code $($install.ExitCode)"
 }
 
-$AppExe = Join-Path $InstallDir "Wind Speak.exe"
+$AppExe = Join-Path $InstallDir "Atmospeak.exe"
 if (-not (Test-Path $AppExe)) {
   $AppExe = Join-Path $InstallDir "atmospeak.exe"
 }
@@ -138,8 +138,8 @@ if (-not (Test-Path (Join-Path $InstallDir "resources\whisper-runtime\whisper-cl
 
 $process = Start-Process -FilePath $AppExe -PassThru
 try {
-  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Wind Speak"
-  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Wind Speak Overlay"
+  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Atmospeak"
+  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Atmospeak Overlay"
   if ($process.HasExited) {
     throw "App exited during launch smoke with code $($process.ExitCode)"
   }

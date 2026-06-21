@@ -253,3 +253,131 @@
 @media (prefers-reduced-motion: reduce) {
   .ob-hero-aura, .ob-ready-aura, .ob-fade { animation: none; }
 }
+
+@media (max-width: 760px) {
+  .ob-stage {
+    overflow-y: auto;
+    place-items: start center;
+    padding: 12px;
+  }
+
+  .ob-window {
+    width: min(100%, 560px);
+    min-height: calc(100vh - 24px);
+    height: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ob-rail {
+    padding: 24px 24px 14px;
+  }
+
+  .ob-steps {
+    margin-top: 22px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ob-step {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  .ob-rail .ob-foot {
+    display: none;
+  }
+
+  .ob-main {
+    min-height: 0;
+  }
+
+  .ob-content {
+    padding: 28px 24px 18px;
+    overflow: visible;
+  }
+
+  .ob-hero-aura {
+    width: 86px;
+    height: 86px;
+  }
+
+  .ob-h {
+    font-size: 34px;
+  }
+
+  .ob-lede {
+    max-width: none;
+  }
+
+  .ob-nav {
+    padding: 16px 24px 22px;
+    flex-wrap: wrap;
+  }
+
+  .ob-progress {
+    min-width: 130px;
+  }
+}
+
+@media (max-width: 460px) {
+  .ob-stage {
+    padding: 10px;
+  }
+
+  .ob-window {
+    min-height: calc(100vh - 20px);
+  }
+
+  .ob-rail,
+  .ob-content,
+  .ob-nav {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .ob-brand .wm strong {
+    font-size: 16px;
+  }
+
+  .ob-brand .wm span {
+    font-size: 8px;
+    letter-spacing: 0.18em;
+  }
+
+  .ob-step {
+    flex-basis: calc(50% - 8px);
+    grid-template-columns: 28px 1fr;
+    gap: 9px;
+  }
+
+  .ob-step .lab {
+    font-size: 12.5px;
+  }
+
+  .ob-h {
+    font-size: 30px;
+  }
+
+  .ob-keyfield,
+  .ob-sc-row,
+  .ob-ready-actions,
+  .ob-download .row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ob-keys {
+    flex-wrap: wrap;
+  }
+
+  .ob-model {
+    grid-template-columns: 24px 1fr;
+  }
+
+  .ob-model .msize {
+    grid-column: 2;
+    text-align: left;
+  }
+}

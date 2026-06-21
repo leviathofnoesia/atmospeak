@@ -33,7 +33,8 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/wind-speak/releases/latest/download";
+const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
+const releaseVersion = "0.1.9";
 
 const defaultSettings: AppSettings = {
   hotkey: "Ctrl+Win",
@@ -105,25 +106,25 @@ function releaseArtifacts(): ReleaseArtifact[] {
     {
       id: "nsis",
       label: "Windows installer",
-      fileName: "Wind-Speak_0.1.9_x64-setup.exe",
+      fileName: `atmospeak_${releaseVersion}_x64-setup.exe`,
       kind: "installer",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.9_x64-setup.exe`,
+      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-setup.exe`,
       recommended: true,
     },
     {
       id: "msi",
       label: "Windows MSI",
-      fileName: "Wind-Speak_0.1.9_x64_en-US.msi",
+      fileName: `atmospeak_${releaseVersion}_x64_en-US.msi`,
       kind: "msi",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.9_x64_en-US.msi`,
+      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64_en-US.msi`,
       recommended: false,
     },
     {
       id: "portable",
       label: "Portable zip",
-      fileName: "Wind-Speak_0.1.9_x64-portable.zip",
+      fileName: `atmospeak_${releaseVersion}_x64-portable.zip`,
       kind: "portable",
-      url: `${releaseBaseUrl}/Wind-Speak_0.1.9_x64-portable.zip`,
+      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-portable.zip`,
       recommended: false,
     },
     {

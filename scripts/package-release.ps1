@@ -25,6 +25,10 @@ $SigningKeyPath = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
 if ([string]::IsNullOrWhiteSpace($SigningKeyPath) -and (Test-Path $DefaultKey)) {
   $SigningKeyPath = $DefaultKey
 }
+$HasUpdaterSigningKey = $false
+if ($env:TAURI_SIGNING_PRIVATE_KEY -or -not [string]::IsNullOrWhiteSpace($SigningKeyPath)) {
+  $HasUpdaterSigningKey = $true
+}
 
 function Get-Sha256Hex([string]$Path) {
   $stream = [System.IO.File]::OpenRead($Path)
@@ -68,6 +72,17 @@ function Invoke-UpdaterSigner([string]$Path) {
   & $signerCommand @signerPrefix signer sign -k $env:TAURI_SIGNING_PRIVATE_KEY $Path
 }
 
+function Invoke-TauriBuild {
+  param([string[]]$BuildArgs)
+
+  if (Test-Path $TauriCli) {
+    & $TauriCli build @BuildArgs
+    return
+  }
+
+  & bun tauri build @BuildArgs
+}
+
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 Get-ChildItem $ReleaseDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
 
@@ -85,7 +100,19 @@ if ((Test-Path $CargoBin) -and ($env:PATH -notlike "*$CargoBin*")) {
 if (-not $SkipTauriBuild) {
   Push-Location $Root
   try {
-    bun run tauri build
+    $buildArgs = @()
+    if (-not $HasUpdaterSigningKey) {
+      Write-Warning "No Tauri updater signing key found. Building unsigned local installers without updater artifacts or latest.json."
+      $unsignedConfigPath = Join-Path $env:TEMP "atmospeak-tauri-unsigned-build.json"
+      [System.IO.File]::WriteAllText(
+        $unsignedConfigPath,
+        "{`"bundle`":{`"createUpdaterArtifacts`":false}}",
+        [System.Text.UTF8Encoding]::new($false)
+      )
+      $buildArgs = @("--config", $unsignedConfigPath)
+    }
+
+    Invoke-TauriBuild $buildArgs
     if ($LASTEXITCODE -ne 0) {
       throw "Tauri build failed with exit code $LASTEXITCODE"
     }
@@ -122,25 +149,28 @@ Copy-Item $MsiSource.FullName $MsiDest -Force
 
 $UpdaterAssetName = $NsisName
 $UpdaterSignaturePath = "$NsisDest.sig"
-$NsisSigSource = "$($NsisSource.FullName).sig"
-if (Test-Path $NsisSigSource) {
-  Copy-Item $NsisSigSource $UpdaterSignaturePath -Force
-} else {
-  $UpdaterSource = Get-ChildItem (Join-Path $BundleRoot "nsis") -Filter "*.nsis.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  $UpdaterAssetName = $UpdaterZipName
-  $UpdaterSignaturePath = "$UpdaterZipDest.sig"
-  if ($UpdaterSource) {
-  Copy-Item $UpdaterSource.FullName $UpdaterZipDest -Force
-  $UpdaterSigSource = "$($UpdaterSource.FullName).sig"
-  if (-not (Test-Path $UpdaterSigSource)) {
-    throw "Updater artifact was produced without a signature: $UpdaterSigSource"
-  }
-  Copy-Item $UpdaterSigSource $UpdaterSignaturePath -Force
+
+if ($HasUpdaterSigningKey) {
+  $NsisSigSource = "$($NsisSource.FullName).sig"
+  if (Test-Path $NsisSigSource) {
+    Copy-Item $NsisSigSource $UpdaterSignaturePath -Force
   } else {
-    Compress-Archive -Path $NsisDest -DestinationPath $UpdaterZipDest -CompressionLevel Optimal
-    Invoke-UpdaterSigner $UpdaterZipDest
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to sign $UpdaterZipDest"
+    $UpdaterSource = Get-ChildItem (Join-Path $BundleRoot "nsis") -Filter "*.nsis.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $UpdaterAssetName = $UpdaterZipName
+    $UpdaterSignaturePath = "$UpdaterZipDest.sig"
+    if ($UpdaterSource) {
+      Copy-Item $UpdaterSource.FullName $UpdaterZipDest -Force
+      $UpdaterSigSource = "$($UpdaterSource.FullName).sig"
+      if (-not (Test-Path $UpdaterSigSource)) {
+        throw "Updater artifact was produced without a signature: $UpdaterSigSource"
+      }
+      Copy-Item $UpdaterSigSource $UpdaterSignaturePath -Force
+    } else {
+      Compress-Archive -Path $NsisDest -DestinationPath $UpdaterZipDest -CompressionLevel Optimal
+      Invoke-UpdaterSigner $UpdaterZipDest
+      if ($LASTEXITCODE -ne 0) {
+        throw "Failed to sign $UpdaterZipDest"
+      }
     }
   }
 }
@@ -163,20 +193,22 @@ if (Test-Path $PortableDest) {
 }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $PortableDest -CompressionLevel Optimal
 
-$UpdaterSignature = (Get-Content $UpdaterSignaturePath -Raw).Trim()
-$Latest = [ordered]@{
-  version = $Version
-  notes = "Wind Speak $Version desktop release with bundled offline transcription runtime."
-  pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-  platforms = [ordered]@{
-    "windows-x86_64" = [ordered]@{
-      signature = $UpdaterSignature
-      url = "https://github.com/$ReleaseRepo/releases/latest/download/$UpdaterAssetName"
+if ($HasUpdaterSigningKey) {
+  $UpdaterSignature = (Get-Content $UpdaterSignaturePath -Raw).Trim()
+  $Latest = [ordered]@{
+    version = $Version
+    notes = "Atmospeak $Version desktop release with bundled offline transcription runtime."
+    pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    platforms = [ordered]@{
+      "windows-x86_64" = [ordered]@{
+        signature = $UpdaterSignature
+        url = "https://github.com/$ReleaseRepo/releases/latest/download/$UpdaterAssetName"
+      }
     }
   }
+  $LatestJson = $Latest | ConvertTo-Json -Depth 8
+  [System.IO.File]::WriteAllText($LatestDest, "$LatestJson`n", [System.Text.UTF8Encoding]::new($false))
 }
-$LatestJson = $Latest | ConvertTo-Json -Depth 8
-[System.IO.File]::WriteAllText($LatestDest, "$LatestJson`n", [System.Text.UTF8Encoding]::new($false))
 
 $ReleaseFiles = Get-ChildItem $ReleaseDir -File | Where-Object { $_.Name -ne $ChecksumsName } | Sort-Object Name
 $HashLines = foreach ($file in $ReleaseFiles) {

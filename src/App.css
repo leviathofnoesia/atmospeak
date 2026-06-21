@@ -20,7 +20,6 @@ body,
 }
 
 body {
-  min-width: 960px;
   min-height: 640px;
   color: var(--ink);
   background: var(--paper);
