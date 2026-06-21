@@ -4,7 +4,7 @@ Atmospeak ships Windows-first release artifacts:
 
 - NSIS installer: primary user download.
 - MSI installer: enterprise-friendly fallback.
-- Portable zip: unzip-and-run build containing `atmospeak.exe`, sidecar runtime, and bundled resources.
+- Portable zip: unzip-and-run build containing `Atmospeak.exe`, sidecar runtime, and bundled resources.
 - NSIS updater signature: signed Tauri v2 updater artifact used by `latest.json`.
 - `latest.json`: Tauri updater metadata for GitHub Releases.
 - `SHA256SUMS.txt`: checksum manifest for public verification.

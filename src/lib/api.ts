@@ -34,6 +34,7 @@ interface WindowWithTauri extends Window {
 }
 
 const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
+// Keep in sync with `version` in src-tauri/tauri.conf.json and package.json on every release bump.
 const releaseVersion = "0.1.9";
 
 const defaultSettings: AppSettings = {

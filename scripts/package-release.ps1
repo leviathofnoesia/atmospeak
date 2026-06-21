@@ -117,6 +117,9 @@ if (-not $SkipTauriBuild) {
       throw "Tauri build failed with exit code $LASTEXITCODE"
     }
   } finally {
+    if ($unsignedConfigPath -and (Test-Path $unsignedConfigPath)) {
+      Remove-Item $unsignedConfigPath -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
   }
 }
