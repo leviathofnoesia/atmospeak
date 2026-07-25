@@ -5,10 +5,12 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
+use tauri::{AppHandle, Manager};
+
 use crate::{
     db::Database,
     models::{RuntimeEvent, ShortcutStatus, StageMetrics},
-    services::{dictation_engine::EngineHandle, recorder::RecorderService},
+    services::{asr_host::AsrHost, dictation_engine::EngineHandle, recorder::RecorderService},
 };
 
 /// The application's data plane: every long-lived piece of state lives here.
@@ -24,6 +26,7 @@ pub struct AppState {
     pub retention_sweeper_cancel: Arc<AtomicBool>,
     engine: Mutex<Option<EngineHandle>>,
     last_metrics: Mutex<Option<StageMetrics>>,
+    asr_host: Mutex<Option<Arc<AsrHost>>>,
 }
 
 impl AppState {
@@ -48,7 +51,27 @@ impl AppState {
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
             engine: Mutex::new(None),
             last_metrics: Mutex::new(None),
+            asr_host: Mutex::new(None),
         })
+    }
+
+    pub fn set_asr_host(&self, host: Arc<AsrHost>) {
+        *self.asr_host.lock() = Some(host);
+    }
+
+    pub fn asr_host(&self) -> Option<Arc<AsrHost>> {
+        self.asr_host.lock().clone()
+    }
+
+    /// Convenience for call sites that only hold an `AppHandle`.
+    pub fn asr_host_from(app: &AppHandle) -> Option<Arc<AsrHost>> {
+        app.try_state::<AppState>()?.asr_host()
+    }
+
+    pub fn shutdown_asr_host(&self) {
+        if let Some(host) = self.asr_host.lock().take() {
+            host.shutdown();
+        }
     }
 
     pub fn set_engine(&self, handle: EngineHandle) {

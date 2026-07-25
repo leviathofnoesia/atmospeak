@@ -1,9 +1,11 @@
 pub mod app_state;
+pub mod asr_host;
 pub mod cleanup;
 pub mod dictation_engine;
 pub mod injection;
 pub mod metrics;
 pub mod overlay_window;
+pub mod proc;
 pub mod recorder;
 pub mod runtime;
 pub mod shortcuts;

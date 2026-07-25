@@ -15,6 +15,19 @@ pub struct ResolvedRuntime {
     pub model_path: PathBuf,
 }
 
+/// The resident Phase B server, resolved next to the CLI binary.
+///
+/// Advanced overrides only name a `whisper-cli.exe`, so for that source we look for
+/// a sibling `whisper-server.exe`. Absent one, the caller falls back to the CLI.
+pub fn resolve_server(app: &AppHandle, settings: &AppSettings) -> Option<PathBuf> {
+    let runtime = resolve_runtime(app, settings).ok()?;
+    let candidate = runtime
+        .whisper_cli_path
+        .parent()?
+        .join("whisper-server.exe");
+    candidate.is_file().then_some(candidate)
+}
+
 pub fn resolve_runtime(app: &AppHandle, settings: &AppSettings) -> Result<ResolvedRuntime> {
     if settings.advanced_runtime_enabled {
         return Ok(ResolvedRuntime {

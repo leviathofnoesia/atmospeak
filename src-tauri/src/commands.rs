@@ -129,9 +129,14 @@ pub fn handle_dictation_action(
     action: String,
 ) -> CommandResult<String> {
     let engine = engine(&state)?;
+    // "pressed"/"released" are hotkey-shaped edges and must go through the mode-aware
+    // arms, so the overlay behaves identically to the hook (D10). "start"/"stop" stay
+    // explicit and mode-independent for direct UI buttons.
     let engine_action = match action.as_str() {
-        "pressed" | "start" => EngineAction::Start,
-        "released" | "stop" => EngineAction::Stop,
+        "pressed" => EngineAction::Pressed,
+        "released" => EngineAction::Released,
+        "start" => EngineAction::Start,
+        "stop" => EngineAction::Stop,
         "toggle" => EngineAction::Toggle,
         "cancel" => EngineAction::Cancel,
         other => return Err(format!("unknown dictation action: {other}")),

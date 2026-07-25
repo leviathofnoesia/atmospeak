@@ -2,7 +2,9 @@
 
 Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQLite, and `whisper.cpp`.
 
-**Version:** 0.2.0 (Phase A — Honest MVP). See [`docs/PHASE_A_HONEST_MVP.md`](docs/PHASE_A_HONEST_MVP.md).
+**Version:** 0.3.0 (Phase B — resident ASR host). See
+[`docs/PHASE_A_HONEST_MVP.md`](docs/PHASE_A_HONEST_MVP.md) and
+[`docs/PHASE_B_ASR_HOST.md`](docs/PHASE_B_ASR_HOST.md).
 
 ## What works
 
@@ -10,7 +12,8 @@ Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQL
 - Global hotkey (Windows low-level hook) and tray **dispatch into the engine** (not React)
 - Push-to-talk and toggle modes (frozen mapping; toggle ignores key-up)
 - CPAL microphone capture → 16 kHz mono WAV
-- **Bundled `whisper-cli.exe`** (one process per utterance — **multi-second latency is normal**)
+- **Resident `whisper-server.exe`** keeps the model warm, with automatic fallback to the
+  one-shot `whisper-cli.exe` whenever the host is unavailable
 - Cleanup: fillers, spoken punctuation, dictionary, snippets, sentence casing
 - Injection: clipboard + Ctrl+V with **last external window restore** and soft-fail “left on clipboard”
 - SQLite settings/history/dictionary/snippets under `%LOCALAPPDATA%\Atmospeak`
@@ -20,9 +23,11 @@ Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQL
 
 ## What is *not* claimed
 
-- Instant / sub-second cloud-style latency (CLI ASR cold-loads per utterance)
+- A fixed latency figure. Keeping the model resident removes roughly 0.7 s of load per
+  utterance; the rest is real inference and scales with how long you spoke. Short phrases
+  land under a second, long-form dictation does not.
 - Live streaming partials, AI polish, cloud STT, privacy auto-delete, export formats, FFT “pro” meter as product features
-- Persistent Whisper host (Phase B — see [`docs/PHASE_B_ASR_HOST.md`](docs/PHASE_B_ASR_HOST.md))
+- Any non-Windows support
 
 ## First run
 

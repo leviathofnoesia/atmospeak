@@ -8,8 +8,10 @@ use crate::{
     services::app_state::AppState,
 };
 
-/// Labels ASR backend for Phase A (CLI only). Reserved for Phase B host.
+/// One-shot `whisper-cli.exe` per utterance (Phase A, and the Phase B fallback).
 pub const ASR_BACKEND_CLI: &str = "cli";
+/// Resident `whisper-server.exe` with the model kept warm (Phase B).
+pub const ASR_BACKEND_HOST: &str = "host";
 
 pub struct StageTimer {
     started: Instant,
@@ -18,6 +20,7 @@ pub struct StageTimer {
     asr_ms: u64,
     cleanup_ms: u64,
     inject_ms: u64,
+    asr_backend: &'static str,
 }
 
 impl StageTimer {
@@ -29,7 +32,12 @@ impl StageTimer {
             asr_ms: 0,
             cleanup_ms: 0,
             inject_ms: 0,
+            asr_backend: ASR_BACKEND_CLI,
         }
+    }
+
+    pub fn mark_backend(&mut self, backend: &'static str) {
+        self.asr_backend = backend;
     }
 
     pub fn mark_capture_stop(&mut self, ms: u64) {
@@ -61,7 +69,7 @@ impl StageTimer {
             cleanup_ms: self.cleanup_ms,
             inject_ms: self.inject_ms,
             total_ms: self.started.elapsed().as_millis() as u64,
-            asr_backend: ASR_BACKEND_CLI.to_string(),
+            asr_backend: self.asr_backend.to_string(),
             audio_duration_ms,
         }
     }

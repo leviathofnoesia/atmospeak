@@ -16,7 +16,70 @@ use commands::{
     show_main_window, show_overlay_window, start_recording, stop_recording,
     upsert_dictionary_entry, upsert_snippet,
 };
-use services::{app_state::AppState, dictation_engine, overlay_window, shortcuts};
+use services::{
+    app_state::AppState, asr_host, dictation_engine, metrics, overlay_window, runtime, shortcuts,
+};
+
+/// Bring up the resident ASR host in the background: loading the model takes
+/// seconds and must not delay the window. Dictation works off the CLI backend
+/// until the host is warm, and keeps working if it never comes up at all.
+fn start_asr_host(app: &tauri::AppHandle) {
+    if asr_host::is_disabled() {
+        metrics::emit_runtime(
+            app,
+            "asr-host-disabled",
+            "ATMOSPEAK_WHISPER_HOST=0 — using the one-shot CLI backend.",
+        );
+        return;
+    }
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("atmospeak-asr-host-warmup".into())
+        .spawn(move || {
+            let Ok(settings) = app.state::<AppState>().database.lock().load_settings() else {
+                return;
+            };
+            let Some(server_exe) = runtime::resolve_server(&app, &settings) else {
+                metrics::emit_runtime(
+                    &app,
+                    "asr-host-unavailable",
+                    "whisper-server.exe is not bundled — using the one-shot CLI backend.",
+                );
+                return;
+            };
+            let Ok(resolved) = runtime::resolve_runtime(&app, &settings) else {
+                return;
+            };
+
+            let host = match asr_host::AsrHost::new(server_exe, resolved.model_path) {
+                Ok(host) => std::sync::Arc::new(host),
+                Err(error) => {
+                    metrics::emit_runtime(&app, "asr-host-error", error.to_string());
+                    return;
+                }
+            };
+
+            match host.ensure_running() {
+                Ok(_) => {
+                    app.state::<AppState>().set_asr_host(host);
+                    metrics::emit_runtime(
+                        &app,
+                        "asr-host-ready",
+                        "Resident speech model is warm.",
+                    );
+                }
+                Err(error) => {
+                    metrics::emit_runtime(
+                        &app,
+                        "asr-host-error",
+                        format!("resident host unavailable, using CLI backend: {error}"),
+                    );
+                }
+            }
+        })
+        .expect("failed to spawn ASR host warmup thread");
+}
 
 /// Must match frontend `ONBOARDING_VERSION` in `src/types/dictation.ts`.
 const ONBOARDING_VERSION: &str = "phase-a-honest-mvp-v1";
@@ -89,6 +152,7 @@ pub fn run() {
         .setup(move |app| {
             let engine = dictation_engine::spawn(app.handle().clone());
             app.state::<AppState>().set_engine(engine);
+            start_asr_host(app.handle());
 
             install_global_shortcut(
                 app,
@@ -164,6 +228,15 @@ pub fn run() {
             get_model_status,
             get_model_inventory
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Atmospeak");
+        .build(tauri::generate_context!())
+        .expect("error while building Atmospeak")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Stop the resident model before we go. The job object is the
+                // backstop for crashes; this is the clean path.
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.shutdown_asr_host();
+                }
+            }
+        });
 }

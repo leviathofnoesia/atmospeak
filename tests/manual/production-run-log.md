@@ -2,6 +2,29 @@
 
 This file tracks evidence for the 100-test production matrix in `tests/manual/production-100.md`.
 
+## 2026-07-25 - Phase B 0.3.0 resident ASR host
+
+- Automated verification (no microphone involved):
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **25 passed** (was 16)
+  - `bun run build`, `bun run test` (8 passed): pass
+  - `whisper-server.exe` confirmed present in upstream `whisper-bin-x64.zip` v1.8.4
+  - Host lifecycle in the real app: launched `atmospeak.exe`, confirmed a
+    `whisper-server` process resident at ~206 MB (model loaded); hard-killed
+    `atmospeak.exe` and confirmed **0 orphaned** `whisper-server` processes
+- Backend comparison on 6.42 s of **synthesized** speech (`base.en`, CPU), which is a
+  plumbing check, not a product measurement:
+
+  | Backend | ASR time (3 runs) |
+  |---|---|
+  | `cli` (cold model each run) | 2.57 / 2.62 / 1.98 s |
+  | `host` (warm) | 1.93 / 1.82 / 1.55 s |
+
+  Model load ≈ 0.7 s per utterance is what the host removes. Transcript identical on
+  both paths.
+- **Still operator-pending — the actual gate.** 001 and 005 with a real microphone,
+  recording session id, audio path, target-app output, and `asr_backend` per run.
+  Nothing above substitutes for this.
+
 ## 2026-07-25 - Phase A 0.2.0 implementation
 
 - App version target: **0.2.0**

@@ -158,6 +158,79 @@ struct Worker {
     settle_deadline: Option<Instant>,
 }
 
+/// What a dispatched action should do, decided purely from state + mode.
+///
+/// Kept free of `Worker` and `AppHandle` so the frozen mode/signal table
+/// (`docs/PHASE_A_HONEST_MVP.md` D10) is unit-testable without a running Tauri app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionPlan {
+    Start,
+    Stop,
+    Cancel,
+    Ignore(&'static str),
+    Reject(&'static str),
+}
+
+fn plan_action(state: EngineState, mode: DictationMode, action: EngineAction) -> ActionPlan {
+    match action {
+        EngineAction::Pressed => match mode {
+            DictationMode::PushToTalk => plan_start(state),
+            DictationMode::Toggle => plan_toggle(state),
+        },
+        EngineAction::Released => match mode {
+            DictationMode::PushToTalk => plan_stop(state),
+            DictationMode::Toggle => ActionPlan::Ignore("released ignored in toggle mode"),
+        },
+        EngineAction::Toggle => plan_toggle(state),
+        EngineAction::Start => plan_start(state),
+        EngineAction::Stop => plan_stop(state),
+        EngineAction::Cancel => plan_cancel(state),
+    }
+}
+
+fn plan_toggle(state: EngineState) -> ActionPlan {
+    if state == EngineState::Listening {
+        plan_stop(state)
+    } else {
+        plan_start(state)
+    }
+}
+
+fn plan_start(state: EngineState) -> ActionPlan {
+    match state {
+        EngineState::MicCheck => ActionPlan::Reject("Finish microphone check first."),
+        EngineState::Processing => ActionPlan::Ignore("already processing"),
+        EngineState::Listening => ActionPlan::Ignore("already listening"),
+        // Pasted / Error settle straight back into a startable state.
+        EngineState::Idle | EngineState::Pasted | EngineState::Error => ActionPlan::Start,
+    }
+}
+
+fn plan_stop(state: EngineState) -> ActionPlan {
+    if state == EngineState::Listening {
+        ActionPlan::Stop
+    } else {
+        ActionPlan::Ignore("not listening")
+    }
+}
+
+fn plan_cancel(state: EngineState) -> ActionPlan {
+    match state {
+        EngineState::Listening | EngineState::MicCheck => ActionPlan::Cancel,
+        EngineState::Processing => ActionPlan::Reject("cannot cancel while processing"),
+        _ => ActionPlan::Reject("no active recording to cancel"),
+    }
+}
+
+/// How long the worker may block before it must settle a terminal phase back to idle.
+/// `None` means nothing is pending and the worker can block indefinitely.
+fn settle_wait(state: EngineState, deadline: Option<Instant>, now: Instant) -> Option<Duration> {
+    if !matches!(state, EngineState::Pasted | EngineState::Error) {
+        return None;
+    }
+    Some(deadline?.saturating_duration_since(now))
+}
+
 pub fn spawn(app: AppHandle) -> EngineHandle {
     let (tx, rx) = mpsc::channel::<EngineCmd>();
     let worker_app = app.clone();
@@ -178,8 +251,24 @@ pub fn spawn(app: AppHandle) -> EngineHandle {
 
 impl Worker {
     fn run(&mut self, rx: Receiver<EngineCmd>) {
-        while let Ok(cmd) = rx.recv() {
+        loop {
+            // In a terminal phase, wake up when the settle deadline expires so the UI
+            // returns to idle on its own instead of waiting for the next user action.
+            let cmd = match self.settle_wait() {
+                Some(wait) => match rx.recv_timeout(wait) {
+                    Ok(cmd) => Some(cmd),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                },
+                None => match rx.recv() {
+                    Ok(cmd) => Some(cmd),
+                    Err(_) => break,
+                },
+            };
             self.tick_settle();
+            let Some(cmd) = cmd else {
+                continue;
+            };
             match cmd {
                 EngineCmd::Shutdown => break,
                 EngineCmd::Action { action, reply } => {
@@ -210,6 +299,10 @@ impl Worker {
                 }
             }
         }
+    }
+
+    fn settle_wait(&self) -> Option<Duration> {
+        settle_wait(self.state, self.settle_deadline, Instant::now())
     }
 
     fn tick_settle(&mut self) {
@@ -250,55 +343,18 @@ impl Worker {
             };
         }
 
-        let mode = self.load_mode();
-
-        match action {
-            EngineAction::Pressed => match mode {
-                DictationMode::PushToTalk => self.try_start(),
-                DictationMode::Toggle => self.try_toggle(),
+        match plan_action(self.state, self.load_mode(), action) {
+            ActionPlan::Start => self.enter_listening(),
+            ActionPlan::Stop => self.try_stop_fire_and_forget(),
+            ActionPlan::Cancel => self.try_cancel_action(),
+            ActionPlan::Ignore(reason) => DispatchResult::Ignored { reason },
+            ActionPlan::Reject(reason) => DispatchResult::Rejected {
+                reason: reason.to_string(),
             },
-            EngineAction::Released => match mode {
-                DictationMode::PushToTalk => self.try_stop_fire_and_forget(),
-                DictationMode::Toggle => DispatchResult::Ignored {
-                    reason: "released ignored in toggle mode",
-                },
-            },
-            EngineAction::Toggle => self.try_toggle(),
-            EngineAction::Start => self.try_start(),
-            EngineAction::Stop => self.try_stop_fire_and_forget(),
-            EngineAction::Cancel => self.try_cancel_action(),
         }
     }
 
-    fn try_toggle(&mut self) -> DispatchResult {
-        if self.state == EngineState::Listening {
-            self.try_stop_fire_and_forget()
-        } else {
-            self.try_start()
-        }
-    }
-
-    fn try_start(&mut self) -> DispatchResult {
-        if self.state == EngineState::MicCheck {
-            return DispatchResult::Rejected {
-                reason: "Finish microphone check first.".to_string(),
-            };
-        }
-        if self.state == EngineState::Processing {
-            return DispatchResult::Ignored {
-                reason: "already processing",
-            };
-        }
-        if self.state == EngineState::Listening {
-            return DispatchResult::Ignored {
-                reason: "already listening",
-            };
-        }
-        if !self.can_start_from() {
-            return DispatchResult::Ignored {
-                reason: "not ready",
-            };
-        }
+    fn enter_listening(&mut self) -> DispatchResult {
         match self.begin_listening() {
             Ok(started) => {
                 self.state = EngineState::Listening;
@@ -479,7 +535,7 @@ impl Worker {
         self.emit_phase(
             DictationPhase::Processing,
             recording.clone(),
-            "Transcribing locally… (CLI; may take several seconds)",
+            "Transcribing locally…",
             None,
             None,
         );
@@ -507,8 +563,10 @@ impl Worker {
             timer.mark_write(write_started.elapsed().as_millis() as u64);
 
             let asr_started = Instant::now();
-            let raw_text = transcriber::transcribe(&app, &snapshot.settings, &finished.path)?;
+            let transcription = transcriber::transcribe(&app, &snapshot.settings, &finished.path)?;
             timer.mark_asr(asr_started.elapsed().as_millis() as u64);
+            timer.mark_backend(transcription.backend);
+            let raw_text = transcription.text;
 
             let cleanup_started = Instant::now();
             let cleaned_text = if snapshot.settings.cleanup_enabled {
@@ -687,9 +745,163 @@ pub fn route_shortcut_payload(app: &AppHandle, payload: &str) {
 mod tests {
     use super::*;
 
+    const PTT: DictationMode = DictationMode::PushToTalk;
+    const TOGGLE: DictationMode = DictationMode::Toggle;
+
+    /// D10 hard gate: one `Pressed` produces exactly one `Listening` transition.
+    /// The second press must not start a competing recording.
     #[test]
-    fn toggle_mode_ignores_released_semantics() {
-        // Document D10: released is ignored in toggle — covered by match arms.
-        assert!(matches!(EngineAction::Released, EngineAction::Released));
+    fn one_pressed_yields_one_listening() {
+        assert_eq!(
+            plan_action(EngineState::Idle, PTT, EngineAction::Pressed),
+            ActionPlan::Start
+        );
+        assert_eq!(
+            plan_action(EngineState::Listening, PTT, EngineAction::Pressed),
+            ActionPlan::Ignore("already listening")
+        );
+    }
+
+    /// D10: toggle mode ignores key-up entirely, so holding the chord does not stop it.
+    #[test]
+    fn toggle_mode_ignores_released() {
+        assert_eq!(
+            plan_action(EngineState::Listening, TOGGLE, EngineAction::Released),
+            ActionPlan::Ignore("released ignored in toggle mode")
+        );
+        // Push-to-talk, by contrast, stops on the same signal.
+        assert_eq!(
+            plan_action(EngineState::Listening, PTT, EngineAction::Released),
+            ActionPlan::Stop
+        );
+    }
+
+    #[test]
+    fn toggle_starts_from_idle_and_stops_from_listening() {
+        assert_eq!(
+            plan_action(EngineState::Idle, TOGGLE, EngineAction::Pressed),
+            ActionPlan::Start
+        );
+        assert_eq!(
+            plan_action(EngineState::Listening, TOGGLE, EngineAction::Pressed),
+            ActionPlan::Stop
+        );
+        // Tray "toggle" behaves identically in both modes.
+        for mode in [PTT, TOGGLE] {
+            assert_eq!(
+                plan_action(EngineState::Idle, mode, EngineAction::Toggle),
+                ActionPlan::Start
+            );
+            assert_eq!(
+                plan_action(EngineState::Listening, mode, EngineAction::Toggle),
+                ActionPlan::Stop
+            );
+        }
+    }
+
+    /// Illegal re-entry while the ASR pipeline is running must be ignored, not queued.
+    #[test]
+    fn processing_ignores_re_entry() {
+        for mode in [PTT, TOGGLE] {
+            for action in [
+                EngineAction::Pressed,
+                EngineAction::Start,
+                EngineAction::Toggle,
+            ] {
+                assert_eq!(
+                    plan_action(EngineState::Processing, mode, action),
+                    ActionPlan::Ignore("already processing"),
+                    "{action:?} in {mode:?} should be ignored while processing"
+                );
+            }
+            assert_eq!(
+                plan_action(EngineState::Processing, mode, EngineAction::Stop),
+                ActionPlan::Ignore("not listening")
+            );
+        }
+    }
+
+    /// D12: mic-check and dictation are mutually exclusive.
+    #[test]
+    fn mic_check_rejects_dictation() {
+        for action in [
+            EngineAction::Pressed,
+            EngineAction::Start,
+            EngineAction::Toggle,
+        ] {
+            assert_eq!(
+                plan_action(EngineState::MicCheck, PTT, action),
+                ActionPlan::Reject("Finish microphone check first.")
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_states_are_startable_again() {
+        for state in [EngineState::Pasted, EngineState::Error, EngineState::Idle] {
+            assert_eq!(
+                plan_action(state, PTT, EngineAction::Pressed),
+                ActionPlan::Start,
+                "{state:?} should accept a new recording"
+            );
+        }
+    }
+
+    #[test]
+    fn cancel_applies_only_to_active_capture() {
+        assert_eq!(
+            plan_action(EngineState::Listening, PTT, EngineAction::Cancel),
+            ActionPlan::Cancel
+        );
+        assert_eq!(
+            plan_action(EngineState::MicCheck, PTT, EngineAction::Cancel),
+            ActionPlan::Cancel
+        );
+        assert_eq!(
+            plan_action(EngineState::Processing, PTT, EngineAction::Cancel),
+            ActionPlan::Reject("cannot cancel while processing")
+        );
+        assert_eq!(
+            plan_action(EngineState::Idle, PTT, EngineAction::Cancel),
+            ActionPlan::Reject("no active recording to cancel")
+        );
+    }
+
+    /// The worker must not block indefinitely while a settle is pending, or the
+    /// overlay stays stuck on the terminal phase until the next user action.
+    #[test]
+    fn settle_wait_is_bounded_in_terminal_states() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(1200);
+
+        for state in [EngineState::Pasted, EngineState::Error] {
+            assert_eq!(
+                settle_wait(state, Some(deadline), now),
+                Some(Duration::from_millis(1200)),
+                "{state:?} must schedule a wake-up"
+            );
+        }
+
+        // An already-expired deadline wakes the worker immediately rather than
+        // underflowing into a very long wait.
+        assert_eq!(
+            settle_wait(
+                EngineState::Pasted,
+                Some(now - Duration::from_secs(1)),
+                now
+            ),
+            Some(Duration::ZERO)
+        );
+
+        // Non-terminal states have nothing to settle, so the worker may block.
+        for state in [
+            EngineState::Idle,
+            EngineState::Listening,
+            EngineState::Processing,
+            EngineState::MicCheck,
+        ] {
+            assert_eq!(settle_wait(state, Some(deadline), now), None);
+        }
+        assert_eq!(settle_wait(EngineState::Pasted, None, now), None);
     }
 }

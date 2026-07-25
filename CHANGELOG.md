@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.0 — Phase B resident ASR host (2026-07-25)
+
+### Added
+- Resident `whisper-server.exe` (`services/asr_host.rs`) keeps the speech model warm
+  instead of reloading it per utterance. Bundled from the same upstream archive as the
+  CLI; see `docs/PHASE_B_ASR_HOST.md`.
+- Automatic degradation to the one-shot CLI whenever the host is missing, disabled,
+  slow to start, or failing mid-session. A dead host is respawned on the next utterance.
+- `StageMetrics.asr_backend` now reports `"host"` or `"cli"` per utterance.
+- `ATMOSPEAK_WHISPER_HOST=0` forces the CLI backend.
+- Windows job object ties the server's lifetime to the app, so a crash or force-kill
+  leaves no orphaned process holding the model.
+
+### Fixed
+- **Terminal phases never settled.** `tick_settle` only ran when a new command arrived,
+  so the overlay stayed on `Pasted`/`Error` until the next user action. The engine worker
+  now wakes itself on the settle deadline.
+- **`handle_dictation_action` bypassed the mode table.** `"pressed"`/`"released"` mapped
+  to unconditional start/stop, so overlay buttons behaved differently from the hotkey in
+  toggle mode. They now route through the mode-aware arms (D10).
+- Whisper subprocesses no longer flash a console window on every utterance
+  (`CREATE_NO_WINDOW`).
+- An empty transcript is reported as "no speech" rather than provoking a redundant
+  CLI retry of audio the host already handled correctly.
+
+### Tests
+- Replaced the tautological `dictation_engine` placeholder with real coverage of the
+  frozen transition table: one `Pressed` → one `Listening`, re-entry while `Processing`
+  is ignored, toggle ignores key-up, mic-check exclusion, cancel guards, settle bounds.
+  Rust suite: 16 → 25 tests.
+
 ## 0.2.0 — Phase A Honest MVP (2026-07-25)
 
 ### Added
