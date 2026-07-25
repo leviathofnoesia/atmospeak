@@ -7,47 +7,31 @@ use std::{
 
 use crate::{
     db::Database,
-    models::{RuntimeEvent, ShortcutStatus},
-    services::recorder::RecorderService,
+    models::{RuntimeEvent, ShortcutStatus, StageMetrics},
+    services::{dictation_engine::EngineHandle, recorder::RecorderService},
 };
 
 /// The application's data plane: every long-lived piece of state lives here.
-///
-/// Most fields are `pub` so existing consumers can read/write them through the
-/// `parking_lot::Mutex` directly. New code should prefer the named accessor
-/// methods (`[set|with]_shortcuts_paused`, `[set|with]_shortcut_test_active`,
-/// `record_event`, `last_target_window`, `cancel_retention_sweeper`) so that
-/// callers don't need to know the internal layout. The aim of the deepening
-/// is to make AppState the single place behaviour is altered, not to
-/// immediately hide every field.
 pub struct AppState {
-    /// Resolved on-disk app data directory; used by diagnostics, streaming,
-    /// and the retention sweeper for absolute paths.
     pub app_dir: PathBuf,
-    /// SQLite-backed persistence for settings, dictionary, snippets, sessions.
     pub database: Mutex<Database>,
-    /// CPAL recorder and FFT analyser for the active recording.
     pub recorder: RecorderService,
-    /// Current state of the global shortcut (registered, paused, hotkey label).
     pub shortcut_status: Arc<Mutex<ShortcutStatus>>,
-    /// Whether shortcut handling is paused (e.g. while another app is focused).
     pub shortcuts_paused: Arc<Mutex<bool>>,
-    /// Set to true while the user is running the "press your shortcut" test.
     pub shortcut_test_active: Arc<Mutex<bool>>,
-    /// Last external (non-Wind Speak) target window we pasted into. Lets us
-    /// restore focus to the same window across the next injection. Stored as
-    /// a raw `isize` window handle until `injection` grows a typed
-    /// `InjectionTarget` value.
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
-    /// Bounded log of recent runtime events; surfaced to the UI on demand.
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
-    /// Signal the background retention sweeper to exit cleanly on app shutdown.
     pub retention_sweeper_cancel: Arc<AtomicBool>,
+    engine: Mutex<Option<EngineHandle>>,
+    last_metrics: Mutex<Option<StageMetrics>>,
 }
 
 impl AppState {
     pub fn new() -> Result<Self> {
-        let app_dir = resolve_app_dir()?;
+        let (app_dir, from_env_override) = resolve_app_dir()?;
+        std::fs::create_dir_all(&app_dir).context("failed to create application data directory")?;
+        maybe_migrate_from_legacy(&app_dir, from_env_override);
+
         let recordings_dir = app_dir.join("recordings");
         std::fs::create_dir_all(&recordings_dir)
             .context("failed to create recordings directory")?;
@@ -62,43 +46,52 @@ impl AppState {
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(Vec::new())),
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
+            engine: Mutex::new(None),
+            last_metrics: Mutex::new(None),
         })
     }
 
-    // ---- Named accessors (the seam) ----
+    pub fn set_engine(&self, handle: EngineHandle) {
+        *self.engine.lock() = Some(handle);
+    }
 
-    /// Read whether shortcuts are currently paused.
+    pub fn engine(&self) -> Option<EngineHandle> {
+        self.engine.lock().clone()
+    }
+
+    pub fn set_last_metrics(&self, metrics: StageMetrics) {
+        *self.last_metrics.lock() = Some(metrics);
+    }
+
+    pub fn last_metrics(&self) -> Option<StageMetrics> {
+        self.last_metrics.lock().clone()
+    }
+
     pub fn shortcuts_paused(&self) -> bool {
         *self.shortcuts_paused.lock()
     }
 
-    /// Atomically set the paused flag and return its new value.
     pub fn set_shortcuts_paused(&self, paused: bool) -> bool {
         *self.shortcuts_paused.lock() = paused;
         paused
     }
 
-    /// Read whether the shortcut test mode is active.
     pub fn shortcut_test_active(&self) -> bool {
         *self.shortcut_test_active.lock()
     }
 
-    /// Set the shortcut test flag.
     pub fn set_shortcut_test_active(&self, active: bool) {
         *self.shortcut_test_active.lock() = active;
     }
 
-    /// Read the most recently captured external target window.
     pub fn last_target_window(&self) -> Option<isize> {
         *self.last_external_target_window.lock()
     }
 
-    /// Replace the external target window.
     pub fn set_last_target_window(&self, target: Option<isize>) {
         *self.last_external_target_window.lock() = target;
     }
 
-    /// Append a runtime event to the bounded log (capped at 200 entries).
     pub fn record_event(&self, event: RuntimeEvent) {
         let mut log = self.runtime_events.lock();
         log.insert(0, event);
@@ -107,7 +100,6 @@ impl AppState {
         }
     }
 
-    /// Read the most recent N runtime events (newest first).
     pub fn recent_events(&self, limit: usize) -> Vec<RuntimeEvent> {
         self.runtime_events
             .lock()
@@ -117,24 +109,109 @@ impl AppState {
             .collect()
     }
 
-    /// Signal the retention sweeper to exit at the next check.
     pub fn cancel_retention_sweeper(&self) {
         self.retention_sweeper_cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
-fn resolve_app_dir() -> Result<PathBuf> {
+fn resolve_app_dir() -> Result<(PathBuf, bool)> {
+    if let Ok(override_dir) = std::env::var("ATMOSPEAK_APP_DATA_DIR") {
+        let trimmed = override_dir.trim();
+        if !trimmed.is_empty() {
+            return Ok((PathBuf::from(trimmed), true));
+        }
+    }
     if let Ok(override_dir) = std::env::var("WIND_SPEAK_APP_DATA_DIR") {
         let trimmed = override_dir.trim();
         if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
+            return Ok((PathBuf::from(trimmed), true));
         }
     }
 
-    Ok(dirs::data_local_dir()
-        .context("failed to resolve local application data directory")?
-        .join("Wind Speak"))
+    Ok((
+        dirs::data_local_dir()
+            .context("failed to resolve local application data directory")?
+            .join("Atmospeak"),
+        false,
+    ))
+}
+
+fn maybe_migrate_from_legacy(app_dir: &PathBuf, from_env_override: bool) {
+    // SAFETY: never copy production profile into a test/dev override path
+    if from_env_override {
+        return;
+    }
+
+    let Some(local) = dirs::data_local_dir() else {
+        return;
+    };
+    let legacy = local.join("Wind Speak");
+    let marker = app_dir.join("migrated-from-wind-speak.json");
+    let new_db = app_dir.join("wind-speak.sqlite3");
+    let legacy_db = legacy.join("wind-speak.sqlite3");
+
+    if marker.exists() {
+        return;
+    }
+    if new_db.exists() {
+        if let Ok(meta) = std::fs::metadata(&new_db) {
+            if meta.len() > 0 {
+                let _ = write_marker(&marker, &legacy);
+                return;
+            }
+        }
+    }
+    if !legacy_db.exists() {
+        return;
+    }
+
+    if let Err(error) = std::fs::create_dir_all(app_dir) {
+        eprintln!("atmospeak migrate: create app_dir failed: {error}");
+        return;
+    }
+    if let Err(error) = std::fs::copy(&legacy_db, &new_db) {
+        eprintln!("atmospeak migrate: copy db failed: {error}");
+        return;
+    }
+    let legacy_recordings = legacy.join("recordings");
+    let new_recordings = app_dir.join("recordings");
+    if legacy_recordings.is_dir() {
+        if let Err(error) = copy_dir_recursive(&legacy_recordings, &new_recordings) {
+            eprintln!("atmospeak migrate: copy recordings failed: {error}");
+        }
+    }
+    let _ = write_marker(&marker, &legacy);
+    eprintln!(
+        "atmospeak migrate: migrated profile from {} to {}",
+        legacy.display(),
+        app_dir.display()
+    );
+}
+
+fn write_marker(marker: &PathBuf, legacy: &PathBuf) -> std::io::Result<()> {
+    let body = serde_json::json!({
+        "from": legacy.display().to_string(),
+        "at": chrono::Utc::now().to_rfc3339(),
+        "ok": true,
+    });
+    std::fs::write(marker, body.to_string())
+}
+
+fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -144,9 +221,6 @@ mod tests {
     use chrono::Utc;
     use std::sync::atomic::Ordering;
 
-    /// AppState can be built with all named fields populated and the named
-    /// accessors return the expected values. Exercises every new seam
-    /// without needing the Tauri runtime.
     #[test]
     fn named_accessors_round_trip_state() {
         let key = "WIND_SPEAK_APP_DATA_DIR";
@@ -157,25 +231,21 @@ mod tests {
 
         let state = AppState::new().expect("app state");
 
-        // Defaults
         assert!(!state.shortcuts_paused());
         assert!(!state.shortcut_test_active());
         assert!(state.last_target_window().is_none());
         assert!(state.recent_events(10).is_empty());
         assert!(!state.retention_sweeper_cancel.load(Ordering::Relaxed));
 
-        // Round trip shortcuts_paused
         let new_value = state.set_shortcuts_paused(true);
         assert!(new_value);
         assert!(state.shortcuts_paused());
 
-        // Round trip shortcut_test_active
         state.set_shortcut_test_active(true);
         assert!(state.shortcut_test_active());
         state.set_shortcut_test_active(false);
         assert!(!state.shortcut_test_active());
 
-        // Round trip record_event / recent_events
         for i in 0..5 {
             state.record_event(RuntimeEvent {
                 created_at: Utc::now(),
@@ -188,7 +258,6 @@ mod tests {
         assert_eq!(events[0].message, "event-4");
         assert_eq!(events[2].message, "event-2");
 
-        // Round trip retention cancel
         state.cancel_retention_sweeper();
         assert!(state.retention_sweeper_cancel.load(Ordering::Relaxed));
 

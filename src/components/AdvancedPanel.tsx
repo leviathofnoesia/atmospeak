@@ -1,5 +1,5 @@
 import { CheckCircle2, Cpu } from "lucide-react";
-import type { AppSettings, ModelInventory, ModelStatus } from "../types/dictation";
+import type { AppSettings, ModelInventory, ModelStatus, StageMetrics } from "../types/dictation";
 import { PanelTitle } from "./PanelTitle";
 import { StatusLed } from "./StatusLed";
 import { ToggleRow } from "./ToggleRow";
@@ -9,6 +9,7 @@ interface AdvancedPanelProps {
   setSettings: (settings: AppSettings) => void;
   modelStatus: ModelStatus | null;
   modelInventory: ModelInventory | null;
+  lastMetrics: StageMetrics | null;
   onSave: () => Promise<void>;
 }
 
@@ -17,44 +18,31 @@ export function AdvancedPanel({
   setSettings,
   modelStatus,
   modelInventory,
+  lastMetrics,
   onSave,
 }: AdvancedPanelProps) {
   return (
     <section className="settings-panel">
       <PanelTitle icon={<Cpu size={22} />} title="Advanced runtime" />
-      <StatusLed tone={modelStatus?.ready ? "good" : "warn"} label={modelStatus?.message ?? "Checking"} />
+      <StatusLed
+        tone={modelStatus?.ready ? "good" : "warn"}
+        label={modelStatus?.message ?? "Checking"}
+      />
       <div className="instruction-card">
         <h3>Bundled by default</h3>
         <p>
-          Atmospeak ships with whisper.cpp and Base English. Override these paths only when
-          testing a custom build or a larger local model.
+          Atmospeak ships with whisper.cpp CLI and Base English. Each utterance spawns the CLI
+          process (multi-second latency is expected). Override paths only for custom local builds.
         </p>
       </div>
-      <label>
-        <span>Custom instructions</span>
-        <textarea
-          value={settings.customInstructions}
-          onChange={(event) =>
-            setSettings({ ...settings, customInstructions: event.currentTarget.value })
-          }
-          placeholder="e.g. Always expand acronyms; never insert emojis; rewrite as bullet points."
-          rows={3}
-        />
-      </label>
       <div className="model-grid">
         {modelInventory?.models.map((model) => {
-          const isActive = modelInventory?.activeModelId === model.id && !settings.advancedRuntimeEnabled;
+          const isActive =
+            modelInventory?.activeModelId === model.id && !settings.advancedRuntimeEnabled;
           return (
-            <button
-              type="button"
+            <div
               key={model.id}
               className={`model-pill ${isActive ? "model-pill--active" : ""}`}
-              onClick={() => {
-                if (model.installed) {
-                  setSettings({ ...settings, activeModelId: model.id });
-                }
-              }}
-              disabled={!model.installed}
             >
               <strong>{model.label}</strong>
               <span>
@@ -66,57 +54,53 @@ export function AdvancedPanel({
                       ? "Bundled"
                       : "Installed"}
               </span>
-            </button>
+            </div>
           );
         })}
       </div>
-      <label>
-        <span>Active model</span>
-        <select
-          value={settings.activeModelId}
-          onChange={(event) =>
-            setSettings({ ...settings, activeModelId: event.currentTarget.value })
-          }
-          disabled={settings.advancedRuntimeEnabled}
-        >
-          {modelInventory?.models
-            .filter((model) => model.installed)
-            .map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.label}
-              </option>
-            ))}
-        </select>
-      </label>
       <ToggleRow
         icon={<Cpu size={18} />}
         label="Use advanced runtime override"
         checked={settings.advancedRuntimeEnabled}
-        onChange={(advancedRuntimeEnabled) => setSettings({ ...settings, advancedRuntimeEnabled })}
+        onChange={(advancedRuntimeEnabled) =>
+          setSettings({ ...settings, advancedRuntimeEnabled })
+        }
       />
       <label>
-        <span>whisper-cli.exe</span>
+        <span>Advanced whisper-cli path</span>
         <input
           value={settings.advancedWhisperCliPath}
+          disabled={!settings.advancedRuntimeEnabled}
           onChange={(event) =>
             setSettings({ ...settings, advancedWhisperCliPath: event.currentTarget.value })
           }
-          disabled={!settings.advancedRuntimeEnabled}
-          placeholder="C:\tools\whisper.cpp\build\bin\Release\whisper-cli.exe"
+          placeholder="C:\\path\\to\\whisper-cli.exe"
         />
       </label>
       <label>
-        <span>ggml-base.en.bin</span>
+        <span>Advanced model path</span>
         <input
           value={settings.advancedModelPath}
-          onChange={(event) => setSettings({ ...settings, advancedModelPath: event.currentTarget.value })}
           disabled={!settings.advancedRuntimeEnabled}
-          placeholder="C:\models\ggml-base.en.bin"
+          onChange={(event) =>
+            setSettings({ ...settings, advancedModelPath: event.currentTarget.value })
+          }
+          placeholder="C:\\path\\to\\ggml-base.en.bin"
         />
       </label>
-      <button className="button button--primary" type="button" onClick={() => void onSave()}>
-        <CheckCircle2 size={18} />
-        Save runtime settings
+      {lastMetrics ? (
+        <div className="instruction-card">
+          <h3>Last stage metrics</h3>
+          <p>
+            total {lastMetrics.totalMs}ms · capture_stop {lastMetrics.captureStopMs}ms · write{" "}
+            {lastMetrics.writeMs}ms · asr {lastMetrics.asrMs}ms · cleanup {lastMetrics.cleanupMs}ms ·
+            inject {lastMetrics.injectMs}ms · backend {lastMetrics.asrBackend}
+          </p>
+        </div>
+      ) : null}
+      <button type="button" className="button button--primary" onClick={() => void onSave()}>
+        <CheckCircle2 size={16} />
+        Save advanced settings
       </button>
     </section>
   );

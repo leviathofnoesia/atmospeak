@@ -65,6 +65,16 @@ pub enum DictationMode {
     PushToTalk,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DictationPhase {
+    Idle,
+    Listening,
+    Processing,
+    Pasted,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DictionaryEntry {
@@ -145,6 +155,8 @@ pub struct RuntimeEvent {
 pub struct InjectionResult {
     pub injected: bool,
     pub restored_clipboard: bool,
+    pub restored_target: bool,
+    pub target_process_name: Option<String>,
     pub message: String,
 }
 
@@ -190,4 +202,29 @@ pub struct ModelInventoryItem {
     pub bundled: bool,
     pub path: Option<String>,
     pub size_mb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StageMetrics {
+    pub session_id: String,
+    /// Wall time to stop stream and take sample buffer ownership (not hold duration).
+    pub capture_stop_ms: u64,
+    pub write_ms: u64,
+    pub asr_ms: u64,
+    pub cleanup_ms: u64,
+    pub inject_ms: u64,
+    pub total_ms: u64,
+    pub asr_backend: String,
+    pub audio_duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeDictationEvent {
+    pub recording: Option<RecordingStarted>,
+    pub phase: DictationPhase,
+    pub message: String,
+    pub result: Option<DictationResult>,
+    pub metrics: Option<StageMetrics>,
 }

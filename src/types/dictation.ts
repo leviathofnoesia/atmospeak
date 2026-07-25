@@ -1,11 +1,5 @@
 export type DictationMode = "toggle" | "pushToTalk";
 
-export type PolishStyle = "concise" | "formal" | "casual" | "excited" | "summarize";
-export type PolishProvider = "ollama" | "openAiCompatible" | "disabled";
-export type InjectionMode = "auto" | "clipboard";
-export type BubbleSize = "small" | "medium" | "large";
-export type ExportFormat = "txt" | "md" | "json" | "srt";
-
 export interface AppSettings {
   hotkey: string;
   mode: DictationMode;
@@ -19,24 +13,6 @@ export interface AppSettings {
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
   advancedWhisperCliPath: string;
-  // ── parity / migration surface (see paritygoal.md) ──
-  activeModelId: string;
-  language: string | null;
-  injectionMode: InjectionMode;
-  customInstructions: string;
-  autoPolish: boolean;
-  polishStyle: PolishStyle;
-  polishProvider: PolishProvider;
-  polishEndpoint: string;
-  polishModel: string;
-  livePreviewEnabled: boolean;
-  livePreviewIntervalMs: number;
-  finalPassEnabled: boolean;
-  privacyMode: boolean;
-  autoDeleteTranscriptsAfterMinutes: number | null;
-  bubbleSize: BubbleSize;
-  bubbleOpacity: number;
-  feedbackWebhookUrl: string;
 }
 
 export interface DictionaryEntry {
@@ -64,23 +40,6 @@ export interface TranscriptSession {
   wordCount: number;
   injected: boolean;
   createdAt: string;
-  appName: string | null;
-  notes: string;
-}
-
-export interface RecentAppUsage {
-  name: string;
-  category: string;
-  sessionCount: number;
-}
-
-export interface HistorySearchFilters {
-  query: string | null;
-  fromDate: string | null;
-  toDate: string | null;
-  minWordCount: number | null;
-  maxWordCount: number | null;
-  limit: number;
 }
 
 export interface RuntimeEvent {
@@ -91,30 +50,24 @@ export interface RuntimeEvent {
 
 export type DictationPhase = "idle" | "listening" | "processing" | "pasted" | "error";
 
+export interface StageMetrics {
+  sessionId: string;
+  captureStopMs: number;
+  writeMs: number;
+  asrMs: number;
+  cleanupMs: number;
+  injectMs: number;
+  totalMs: number;
+  asrBackend: string;
+  audioDurationMs: number;
+}
+
 export interface NativeDictationEvent {
   recording: RecordingStarted | null;
   phase: DictationPhase;
   message: string;
   result: DictationResult | null;
-}
-
-export interface TranscriptStreamEvent {
-  sessionId: string;
-  phase: "idle" | "partial" | "stable" | "final" | "error";
-  stableText: string | null;
-  provisionalText: string | null;
-  message: string | null;
-  latencyMs: number | null;
-}
-
-export interface PolishResult {
-  snapshot: AppSnapshot;
-  polish: { changed: boolean; style: string };
-}
-
-export interface FeedbackResult {
-  delivered: boolean;
-  message: string;
+  metrics: StageMetrics | null;
 }
 
 export interface DictationStats {
@@ -148,6 +101,8 @@ export interface RecordingStarted {
 export interface InjectionResult {
   injected: boolean;
   restoredClipboard: boolean;
+  restoredTarget: boolean;
+  targetProcessName: string | null;
   message: string;
 }
 
@@ -228,4 +183,26 @@ export type HubTab =
 export interface AppNotice {
   tone: "neutral" | "success" | "warning" | "error";
   message: string;
+}
+
+// "warning" is allowed for soft UX notices (e.g. shortcuts paused).
+
+/** Shared onboarding contract — must match Rust `ONBOARDING_VERSION`. */
+export const ONBOARDING_VERSION = "phase-a-honest-mvp-v1";
+
+export function defaultSettings(): AppSettings {
+  return {
+    hotkey: "Ctrl+Win",
+    mode: "pushToTalk",
+    microphoneName: null,
+    restoreClipboard: true,
+    autoInject: true,
+    cleanupEnabled: true,
+    startAtLogin: false,
+    onboardingComplete: false,
+    onboardingVersion: "",
+    advancedRuntimeEnabled: false,
+    advancedModelPath: "",
+    advancedWhisperCliPath: "",
+  };
 }

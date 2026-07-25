@@ -523,6 +523,7 @@ mod windows_keyboard_hook {
             if context.runtime.active {
                 context.runtime = ShortcutRuntimeState::default();
                 let _ = app.emit("wind-speak://shortcut", "released");
+                crate::services::dictation_engine::route_shortcut_payload(&app, "released");
             }
             return false;
         }
@@ -538,6 +539,8 @@ mod windows_keyboard_hook {
                 ShortcutSignal::Cancel => "cancel",
             };
             let _ = app.emit("wind-speak://shortcut", payload);
+            // Single path: hook → engine (emit is observability / shortcut-test only).
+            crate::services::dictation_engine::route_shortcut_payload(&app, payload);
         }
         outcome.consume
     }

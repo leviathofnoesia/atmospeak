@@ -9,23 +9,19 @@ import type {
   DictationResult,
   DictionaryEntry,
   DownloadArtifact,
-  ExportFormat,
-  FeedbackResult,
-  HistorySearchFilters,
   InjectionResult,
   MicrophoneInfo,
   ModelInventory,
   ModelStatus,
-  PolishResult,
-  RecentAppUsage,
   RecordingStarted,
   ReleaseArtifact,
   RuntimeEvent,
   ShortcutStatus,
   Snippet,
-  TranscriptSession,
+  StageMetrics,
   UpdateCheckResult,
 } from "../types/dictation";
+import { defaultSettings } from "../types/dictation";
 
 type InvokeArgs = Record<string, unknown>;
 
@@ -34,43 +30,10 @@ interface WindowWithTauri extends Window {
 }
 
 const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
-// Keep in sync with `version` in src-tauri/tauri.conf.json and package.json on every release bump.
-const releaseVersion = "0.1.9";
-
-const defaultSettings: AppSettings = {
-  hotkey: "Ctrl+Win",
-  mode: "pushToTalk",
-  microphoneName: null,
-  restoreClipboard: true,
-  autoInject: true,
-  cleanupEnabled: true,
-  startAtLogin: false,
-  onboardingComplete: false,
-  onboardingVersion: "",
-  advancedRuntimeEnabled: false,
-  advancedModelPath: "",
-  advancedWhisperCliPath: "",
-  activeModelId: "base.en",
-  language: null,
-  injectionMode: "auto",
-  customInstructions: "",
-  autoPolish: false,
-  polishStyle: "concise",
-  polishProvider: "ollama",
-  polishEndpoint: "http://127.0.0.1:11434/api/chat",
-  polishModel: "llama3.2",
-  livePreviewEnabled: true,
-  livePreviewIntervalMs: 750,
-  finalPassEnabled: true,
-  privacyMode: false,
-  autoDeleteTranscriptsAfterMinutes: null,
-  bubbleSize: "medium",
-  bubbleOpacity: 1,
-  feedbackWebhookUrl: "",
-};
+const releaseVersion = "0.2.0";
 
 let mockSnapshot: AppSnapshot = {
-  settings: defaultSettings,
+  settings: defaultSettings(),
   dictionary: [
     {
       id: "mock-dictionary-1",
@@ -98,52 +61,14 @@ let mockSnapshot: AppSnapshot = {
   },
 };
 
-export function hasTauriRuntime() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as WindowWithTauri);
-}
-
-function releaseArtifacts(): ReleaseArtifact[] {
-  return [
-    {
-      id: "nsis",
-      label: "Windows installer",
-      fileName: `atmospeak_${releaseVersion}_x64-setup.exe`,
-      kind: "installer",
-      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-setup.exe`,
-      recommended: true,
-    },
-    {
-      id: "msi",
-      label: "Windows MSI",
-      fileName: `atmospeak_${releaseVersion}_x64_en-US.msi`,
-      kind: "msi",
-      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64_en-US.msi`,
-      recommended: false,
-    },
-    {
-      id: "portable",
-      label: "Portable zip",
-      fileName: `atmospeak_${releaseVersion}_x64-portable.zip`,
-      kind: "portable",
-      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-portable.zip`,
-      recommended: false,
-    },
-    {
-      id: "checksums",
-      label: "Checksums",
-      fileName: "SHA256SUMS.txt",
-      kind: "checksum",
-      url: `${releaseBaseUrl}/SHA256SUMS.txt`,
-      recommended: false,
-    },
-  ];
+export function hasTauriRuntime(): boolean {
+  return typeof window !== "undefined" && Boolean((window as WindowWithTauri).__TAURI_INTERNALS__);
 }
 
 function command<T>(name: string, args: InvokeArgs | undefined, fallback: () => T | Promise<T>) {
   if (hasTauriRuntime()) {
     return invoke<T>(name, args);
   }
-
   return Promise.resolve(fallback());
 }
 
@@ -220,7 +145,7 @@ export function stopRecording(): Promise<DictationResult> {
   return command("stop_recording", undefined, () => {
     const cleanedText =
       "Atmospeak captured this offline prototype transcript and pasted it into the active window.";
-    const session: TranscriptSession = {
+    const session = {
       id: crypto.randomUUID(),
       rawText: cleanedText,
       cleanedText,
@@ -229,8 +154,6 @@ export function stopRecording(): Promise<DictationResult> {
       wordCount: cleanedText.split(/\s+/).length,
       injected: mockSnapshot.settings.autoInject,
       createdAt: new Date().toISOString(),
-      appName: "Letters",
-      notes: "",
     };
     mockSnapshot = recalculateStats({
       ...mockSnapshot,
@@ -242,6 +165,8 @@ export function stopRecording(): Promise<DictationResult> {
         ? {
             injected: true,
             restoredClipboard: mockSnapshot.settings.restoreClipboard,
+            restoredTarget: false,
+            targetProcessName: null,
             message: "Mock transcript pasted into the focused application.",
           }
         : null,
@@ -257,6 +182,8 @@ export function injectText(text: string): Promise<InjectionResult> {
   return command("inject_text", { text }, () => ({
     injected: text.trim().length > 0,
     restoredClipboard: mockSnapshot.settings.restoreClipboard,
+    restoredTarget: false,
+    targetProcessName: null,
     message: "Mock transcript copied to the focused application.",
   }));
 }
@@ -265,12 +192,9 @@ export async function copyText(text: string): Promise<string> {
   if (text.trim().length === 0) {
     throw new Error("cannot copy an empty transcript");
   }
-
   if (hasTauriRuntime()) {
     await writeText(text);
-    return "Transcript copied to clipboard.";
   }
-
   return "Transcript copied to clipboard.";
 }
 
@@ -373,14 +297,6 @@ export function getModelInventory(): Promise<ModelInventory> {
         path: null,
         sizeMb: null,
       },
-      {
-        id: "medium.en",
-        label: "Medium English",
-        installed: false,
-        bundled: false,
-        path: null,
-        sizeMb: null,
-      },
     ],
   }));
 }
@@ -389,7 +305,7 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   if (!hasTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.1.9",
+      currentVersion: releaseVersion,
       version: null,
       date: null,
       body: null,
@@ -426,7 +342,7 @@ export async function downloadAndInstallUpdate(): Promise<UpdateCheckResult> {
   if (!hasTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.1.9",
+      currentVersion: releaseVersion,
       version: null,
       date: null,
       body: null,
@@ -459,18 +375,16 @@ export async function downloadAndInstallUpdate(): Promise<UpdateCheckResult> {
   };
 }
 
-export function getRecordingFftBands(): Promise<number[]> {
-  return command("get_recording_fft_bands", undefined, () =>
-    Array.from({ length: 7 }, (_, index) => 0.18 + 0.32 * Math.abs(Math.sin(index * 0.9 + Date.now() / 400))),
-  );
-}
-
 export function getRuntimeEvents(): Promise<RuntimeEvent[]> {
   return command("get_runtime_events", undefined, () => [] as RuntimeEvent[]);
 }
 
-export function handleDictationAction(action: string): Promise<void> {
-  return command("handle_dictation_action", { action }, () => undefined);
+export function getLastStageMetrics(): Promise<StageMetrics | null> {
+  return command("get_last_stage_metrics", undefined, () => null);
+}
+
+export function handleDictationAction(action: string): Promise<string> {
+  return command("handle_dictation_action", { action }, () => "accepted");
 }
 
 export function setShortcutTestActive(active: boolean): Promise<void> {
@@ -481,79 +395,41 @@ export function showMainWindow(): Promise<void> {
   return command("show_main_window", undefined, () => undefined);
 }
 
-export function listRecentApps(limit: number): Promise<RecentAppUsage[]> {
-  return command("list_recent_apps", { limit }, () => {
-    const counts = new Map<string, number>();
-    for (const session of mockSnapshot.sessions) {
-      const name = session.appName ?? "Unknown";
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .map(([name, sessionCount]) => ({ name, category: "other", sessionCount }))
-      .sort((a, b) => b.sessionCount - a.sessionCount)
-      .slice(0, limit);
-  });
+export function micCheckStart(): Promise<void> {
+  return command("mic_check_start", undefined, () => undefined);
 }
 
-export function searchSessions(filters: HistorySearchFilters): Promise<TranscriptSession[]> {
-  return command("search_sessions", { filters }, () => {
-    const query = filters.query?.toLowerCase() ?? null;
-    return mockSnapshot.sessions
-      .filter((session) => {
-        if (query && !`${session.cleanedText} ${session.appName ?? ""} ${session.notes}`.toLowerCase().includes(query)) {
-          return false;
-        }
-        if (filters.minWordCount != null && session.wordCount < filters.minWordCount) return false;
-        if (filters.maxWordCount != null && session.wordCount > filters.maxWordCount) return false;
-        if (filters.fromDate && session.createdAt < filters.fromDate) return false;
-        if (filters.toDate && session.createdAt > `${filters.toDate}T23:59:59`) return false;
-        return true;
-      })
-      .slice(0, filters.limit);
-  });
+export function micCheckStop(): Promise<void> {
+  return command("mic_check_stop", undefined, () => undefined);
 }
 
-export function exportSession(id: string, format: ExportFormat): Promise<string> {
-  return command("export_session", { id, format }, () => {
-    const session = mockSnapshot.sessions.find((candidate) => candidate.id === id);
-    const text = session?.cleanedText ?? "";
-    if (format === "json") return JSON.stringify(session ?? {}, null, 2);
-    if (format === "srt") return `1\n00:00:00,000 --> 00:00:04,000\n${text}\n`;
-    if (format === "md") return `# Transcript\n\n${text}\n`;
-    return text;
-  });
+export function listReleaseArtifacts(): ReleaseArtifact[] {
+  return [
+    {
+      id: "nsis",
+      label: "Windows installer (NSIS)",
+      fileName: `atmospeak_${releaseVersion}_x64-setup.exe`,
+      kind: "installer",
+      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-setup.exe`,
+      recommended: true,
+    },
+    {
+      id: "msi",
+      label: "Windows installer (MSI)",
+      fileName: `atmospeak_${releaseVersion}_x64_en-US.msi`,
+      kind: "msi",
+      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64_en-US.msi`,
+      recommended: false,
+    },
+    {
+      id: "portable",
+      label: "Portable zip",
+      fileName: `atmospeak_${releaseVersion}_x64-portable.zip`,
+      kind: "portable",
+      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-portable.zip`,
+      recommended: false,
+    },
+  ];
 }
 
-export function updateSessionNotes(id: string, notes: string): Promise<AppSnapshot> {
-  return command("update_session_notes", { id, notes }, () => {
-    mockSnapshot = {
-      ...mockSnapshot,
-      sessions: mockSnapshot.sessions.map((session) => (session.id === id ? { ...session, notes } : session)),
-    };
-    return mockSnapshot;
-  });
-}
-
-export function polishSession(id: string): Promise<PolishResult> {
-  return command("polish_session", { id }, () => ({
-    snapshot: mockSnapshot,
-    polish: { changed: false, style: mockSnapshot.settings.polishStyle },
-  }));
-}
-
-export function submitFeedback(message: string): Promise<FeedbackResult> {
-  return command("submit_feedback", { message }, () => ({
-    delivered: false,
-    message: "Feedback captured locally in preview mode.",
-  }));
-}
-
-export function getReleaseArtifacts(): Promise<DownloadArtifact[]> {
-  return Promise.resolve(
-    releaseArtifacts().map((artifact) => ({
-      ...artifact,
-      sizeBytes: null,
-      sha256: null,
-    })),
-  );
-}
+export type { DownloadArtifact };

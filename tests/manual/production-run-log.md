@@ -2,6 +2,15 @@
 
 This file tracks evidence for the 100-test production matrix in `tests/manual/production-100.md`.
 
+## 2026-07-25 - Phase A 0.2.0 implementation
+
+- App version target: **0.2.0**
+- Design: `docs/PHASE_A_HONEST_MVP.md` implemented (DictationEngine, contract lock, injection restore, metrics, app data migrate, honest UI).
+- ASR backend label: `cli` (stock whisper-cli per utterance).
+- Automated: frontend `bun run build` / `bun run test` re-verified after honesty pass.
+- Native `cargo test` / real mic runs **require MSVC Build Tools** on this machine; mic evidence for 001–012 still pending operator dogfood.
+- Hard gate remains: **001** and **005** with session id, audio path, stage metrics (`capture_stop_ms`, `write_ms`, `asr_ms`, `cleanup_ms`, `inject_ms`, `total_ms`).
+
 ## 2026-06-16 - Baseline Automation And Matrix Setup
 
 - Matrix status: created `tests/manual/production-100.md` with exactly 100 numbered production validation cases.

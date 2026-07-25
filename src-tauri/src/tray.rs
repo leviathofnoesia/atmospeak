@@ -4,7 +4,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-use crate::services::{app_state::AppState, overlay_window, shortcuts};
+use crate::services::{app_state::AppState, dictation_engine, overlay_window, shortcuts};
 
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Atmospeak").build(app)?;
@@ -25,6 +25,7 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
             "pause" => toggle_shortcuts(app),
             "dictate" => {
                 let _ = app.emit("wind-speak://shortcut", "toggle");
+                dictation_engine::route_shortcut_payload(app, "toggle");
             }
             "quit" => app.exit(0),
             _ => {}
@@ -73,3 +74,4 @@ fn toggle_overlay_window(app: &tauri::AppHandle) {
         }
     }
 }
+

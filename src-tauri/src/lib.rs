@@ -10,13 +10,16 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
     cancel_recording, delete_dictionary_entry, delete_snippet, get_app_snapshot,
-    get_model_inventory, get_model_status, get_recording_level, get_shortcut_status, inject_text,
-    list_microphones, save_settings, set_shortcuts_paused, show_overlay_window, start_recording,
-    stop_recording, upsert_dictionary_entry, upsert_snippet,
+    get_last_stage_metrics, get_model_inventory, get_model_status, get_recording_level,
+    get_runtime_events, get_shortcut_status, handle_dictation_action, inject_text, list_microphones,
+    mic_check_start, mic_check_stop, save_settings, set_shortcut_test_active, set_shortcuts_paused,
+    show_main_window, show_overlay_window, start_recording, stop_recording,
+    upsert_dictionary_entry, upsert_snippet,
 };
-use services::{app_state::AppState, overlay_window, shortcuts};
+use services::{app_state::AppState, dictation_engine, overlay_window, shortcuts};
 
-const ONBOARDING_VERSION: &str = "desktop-parity-v5";
+/// Must match frontend `ONBOARDING_VERSION` in `src/types/dictation.ts`.
+const ONBOARDING_VERSION: &str = "phase-a-honest-mvp-v1";
 
 fn install_global_shortcut(
     app: &mut tauri::App,
@@ -49,6 +52,7 @@ fn install_global_shortcut(
                         ShortcutState::Released => "released",
                     };
                     let _ = app.emit("wind-speak://shortcut", payload);
+                    dictation_engine::route_shortcut_payload(app, payload);
                 })
                 .build(),
         )?;
@@ -81,7 +85,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(app_state)
         .setup(move |app| {
+            let engine = dictation_engine::spawn(app.handle().clone());
+            app.state::<AppState>().set_engine(engine);
+
             install_global_shortcut(
                 app,
                 shortcut_status.clone(),
@@ -130,7 +138,6 @@ pub fn run() {
                 }
             }
         })
-        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             get_app_snapshot,
             get_shortcut_status,
@@ -139,9 +146,16 @@ pub fn run() {
             save_settings,
             set_shortcuts_paused,
             show_overlay_window,
+            show_main_window,
+            set_shortcut_test_active,
+            get_runtime_events,
+            get_last_stage_metrics,
             start_recording,
             stop_recording,
             cancel_recording,
+            handle_dictation_action,
+            mic_check_start,
+            mic_check_stop,
             inject_text,
             upsert_dictionary_entry,
             delete_dictionary_entry,

@@ -1,21 +1,32 @@
 # Atmospeak
 
-Windows-first, local-only desktop dictation prototype built with Tauri 2, React, Rust, SQLite, and `whisper.cpp`.
+Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQLite, and `whisper.cpp`.
 
-## What Works
+**Version:** 0.2.0 (Phase A — Honest MVP). See [`docs/PHASE_A_HONEST_MVP.md`](docs/PHASE_A_HONEST_MVP.md).
 
-- Global shortcut event: `Ctrl+Win+Space` with `Ctrl+Alt+Space` fallback
-- Tray menu: open app, start/stop dictation event, quit
-- Microphone enumeration and recording through Rust/CPAL
-- WAV output resampled to 16 kHz mono
-- Bundled local `whisper-cli.exe`, required DLLs, and `ggml-base.en.bin`
-- Deterministic cleanup for filler words, spoken punctuation, dictionary replacements, and snippets
-- Clipboard paste injection through Windows SendKeys
-- SQLite persistence for settings, history, dictionary, snippets, and stats
-- Desktop onboarding for microphone selection, shortcut mode, privacy, and first paste test
-- Browser mock mode for fast UI testing without Tauri
+## What works
 
-## First Run
+- **DictationEngine (Rust)** owns the loop: idle → listening → processing → pasted/error
+- Global hotkey (Windows low-level hook) and tray **dispatch into the engine** (not React)
+- Push-to-talk and toggle modes (frozen mapping; toggle ignores key-up)
+- CPAL microphone capture → 16 kHz mono WAV
+- **Bundled `whisper-cli.exe`** (one process per utterance — **multi-second latency is normal**)
+- Cleanup: fillers, spoken punctuation, dictionary, snippets, sentence casing
+- Injection: clipboard + Ctrl+V with **last external window restore** and soft-fail “left on clipboard”
+- SQLite settings/history/dictionary/snippets under `%LOCALAPPDATA%\Atmospeak`
+- Stage metrics (log + events) for production validation
+- Desktop onboarding (version `phase-a-honest-mvp-v1`)
+- Browser mock mode for UI without Tauri
+
+## What is *not* claimed
+
+- Instant / sub-second cloud-style latency (CLI ASR cold-loads per utterance)
+- Live streaming partials, AI polish, cloud STT, privacy auto-delete, export formats, FFT “pro” meter as product features
+- Persistent Whisper host (Phase B — see [`docs/PHASE_B_ASR_HOST.md`](docs/PHASE_B_ASR_HOST.md))
+
+## First run
+
+Requires **Rust + MSVC Build Tools** (Desktop C++) and Bun:
 
 ```powershell
 $env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
@@ -23,38 +34,27 @@ bun install
 bun run tauri dev
 ```
 
-No model path setup is required. Atmospeak resolves the bundled whisper.cpp
-runtime and English base model from Tauri resources. Custom engine/model paths
-are available only under **Advanced**.
-
 ## Verification
 
 ```powershell
 bun run build
 bun run test
-$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"; cargo test --manifest-path src-tauri/Cargo.toml
+bun run e2e
+# Requires MSVC link.exe:
+$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## Release Build
+## Manual acceptance (Phase A gate)
 
-```powershell
-bun run release:build
-bun run site:build
-```
+1. Start Notepad and focus the body.
+2. Hold the registered shortcut (default family: `Ctrl+Win` / fallbacks).
+3. Speak ≥1 second; release.
+4. Expect cleaned text paste (or clipboard recovery message) and a History row.
+5. Record stage metrics from Advanced / runtime events if validating 001–012.
 
-Release artifacts are written to `release/` and the static download site builds
-to `dist-site/`. See [docs/RELEASE.md](docs/RELEASE.md) for updater signing,
-GitHub Releases, checksums, and the unsigned Windows prototype limitation.
+Production matrix: `tests/manual/production-100.md` (hard pass **001** and **005**).
 
-## Manual Acceptance
-
-1. Start Notepad.
-2. Focus the document body.
-3. Hold `Ctrl+Win+Space` or the registered fallback.
-4. Speak for at least one second.
-5. Release the shortcut.
-6. Confirm text is cleaned, pasted, saved to History, and clipboard restore behavior follows Settings.
-
-## Prototype Boundaries
+## Prototype boundaries
 
 Atmospeak is clean-room software. It emulates the core desktop dictation workflow of modern voice input tools, but it does not copy proprietary UI, code, model services, names, assets, or private behavior.
