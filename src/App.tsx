@@ -45,10 +45,12 @@ import {
   listMicrophones,
   micCheckStart,
   micCheckStop,
+  saveOverlayPosition,
   saveSettings,
   setShortcutTestActive,
   setShortcutsPaused,
   showFloatingControl,
+  showMainWindow,
   startRecording,
   stopRecording,
   upsertDictionaryEntry,
@@ -898,8 +900,31 @@ function OverlayShell() {
       onCancel={() => {
         void handleDictationAction("cancel");
       }}
+      onMoveStart={() => {
+        // Hand the gesture to the OS so the window follows the cursor, then
+        // remember where it was dropped.
+        if (!hasTauriRuntime()) return;
+        const overlay = getCurrentWindow();
+        void overlay
+          .startDragging()
+          .then(() => overlay.outerPosition())
+          .then((position) => saveOverlayPosition(position.x, position.y))
+          .catch(() => {
+            /* window closed mid-drag */
+          });
+      }}
+      onOpenHub={() => {
+        void showMainWindow();
+      }}
     />
   );
+}
+
+/// Marks the document as the transparent overlay window. Exported so `main.tsx`
+/// can apply it before first paint; also called on the window-label fallback path.
+export function markOverlayDocument() {
+  document.documentElement.classList.add("is-overlay-window");
+  document.body.classList.add("is-overlay-window");
 }
 
 export default function App() {
@@ -908,13 +933,17 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("view") === "overlay") {
+      markOverlayDocument();
       setIsOverlay(true);
       return;
     }
     if (hasTauriRuntime()) {
       try {
         const label = getCurrentWindow().label;
-        if (label === "overlay") setIsOverlay(true);
+        if (label === "overlay") {
+          markOverlayDocument();
+          setIsOverlay(true);
+        }
       } catch {
         /* browser mock */
       }

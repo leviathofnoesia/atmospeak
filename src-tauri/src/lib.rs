@@ -12,9 +12,9 @@ use commands::{
     cancel_recording, delete_dictionary_entry, delete_snippet, get_app_snapshot,
     get_last_stage_metrics, get_model_inventory, get_model_status, get_recording_level,
     get_runtime_events, get_shortcut_status, handle_dictation_action, inject_text, list_microphones,
-    mic_check_start, mic_check_stop, save_settings, set_shortcut_test_active, set_shortcuts_paused,
-    show_main_window, show_overlay_window, start_recording, stop_recording,
-    upsert_dictionary_entry, upsert_snippet,
+    mic_check_start, mic_check_stop, save_overlay_position, save_settings,
+    set_shortcut_test_active, set_shortcuts_paused, show_main_window, show_overlay_window,
+    start_recording, stop_recording, upsert_dictionary_entry, upsert_snippet,
 };
 use services::{
     app_state::AppState, asr_host, dictation_engine, metrics, overlay_window, runtime, shortcuts,
@@ -178,7 +178,8 @@ pub fn run() {
                     let _ = main.set_focus();
                 }
             }
-            let _ = overlay_window::show_and_reset(app.handle());
+            // Restore where the user parked it; only the tray action resets position.
+            let _ = overlay_window::show(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -212,6 +213,7 @@ pub fn run() {
             show_overlay_window,
             show_main_window,
             set_shortcut_test_active,
+            save_overlay_position,
             get_runtime_events,
             get_last_stage_metrics,
             start_recording,

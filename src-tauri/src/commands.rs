@@ -94,6 +94,11 @@ pub fn show_main_window(app: AppHandle) -> CommandResult<()> {
 }
 
 #[tauri::command]
+pub fn save_overlay_position(app: AppHandle, x: i32, y: i32) {
+    overlay_window::save_position(&app, x, y);
+}
+
+#[tauri::command]
 pub fn set_shortcut_test_active(state: State<'_, AppState>, active: bool) {
     state.set_shortcut_test_active(active);
 }
