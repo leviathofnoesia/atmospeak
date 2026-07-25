@@ -1,1 +1,27 @@
-# Changelog## Unreleased- Added command-backed History filters for transcript text, date range, and word-count bounds.- Added database tests for filtered transcript search and SRT timestamp export formatting.- Completed the installed-model selector surface for Tiny, Base, Small, Medium, Large v3, and Distil Large v3 inventory entries, with save-time validation.- Moved Custom Instructions into Advanced and covered Tier 0 settings persistence for clipboard mode, instructions, and floating bubble preferences.- Added tests for transcript export formats, recent app aggregation, tray tooltip stats, and floating bubble opacity/size behavior.- Wired the Recognition language setting through Settings and whisper.cpp `-l`, with Auto-detect represented as `AppSettings.language = null`.- Added Base Multilingual model inventory detection for `ggml-base.bin`; the actual multilingual model asset is still required before T1-02 can be marked complete.- Added Privacy mode controls on Home plus a runtime retention sweeper that auto-deletes expired transcript rows and audio files.- Added a real 7-band recording frequency meter command and wired the floating recorder bars to live band energy.- Added live-preview snippet expansion so spoken snippet triggers appear in the overlay before final paste without double-applying when preview text becomes final.- Added in-app feedback reports with sanitized settings, recent runtime events, local JSON persistence, and optional webhook delivery.- Added AI edit polish for latest/history transcripts plus optional auto-polish before paste through local Ollama-compatible or OpenAI-compatible chat endpoints.- Fixed History row markup so copy and paste actions are not nested inside the expand button.- Added full Tier 0 manual acceptance coverage in `tests/manual/tier0.md`.- Added Tier 1 manual acceptance coverage for language picker validation in `tests/manual/tier1.md`.Validation:- `bun run build`- `bun run test`- `$env:USERPROFILE\.cargo\bin\cargo.exe test` from `src-tauri`
+# Changelog
+
+## 0.2.0 — Phase A Honest MVP (2026-07-25)
+
+### Added
+- Rust `DictationEngine` actor (`services/dictation_engine.rs`) owns the dictation state machine.
+- Hotkey (Windows LL hook) and tray route through `dispatch_fire_and_forget` (single path).
+- Blocking IPC `start_recording` / `stop_recording` remain engine-backed with existing return shapes.
+- Commands: `handle_dictation_action`, `mic_check_start` / `mic_check_stop`, `set_shortcut_test_active`, `get_runtime_events`, `get_last_stage_metrics`, `show_main_window`.
+- Injection: last external HWND restore, soft-fail leaves transcript on clipboard, expanded `InjectionResult`.
+- Stage metrics (`capture_stop_ms`, `write_ms`, `asr_ms`, `cleanup_ms`, `inject_ms`, `total_ms`, `asr_backend: "cli"`).
+- App data directory `%LOCALAPPDATA%\Atmospeak` with one-way migrate from `Wind Speak` (DB filename kept).
+- Onboarding version unified: `phase-a-honest-mvp-v1` (Rust + TS).
+- Docs: `docs/PHASE_A_HONEST_MVP.md`, `docs/PHASE_B_ASR_HOST.md`.
+
+### Changed
+- Frontend `AppSettings` locked to the 12 Rust fields; phantom polish/privacy/export/FFT/language UI removed.
+- Startup Run key renamed to `Atmospeak` (legacy `Wind Speak` removed on update).
+- README honesty: CLI latency is multi-second; no false streaming/polish claims.
+
+### Notes
+- Persistent Whisper host is **not** shipped (stock `whisper-cli` is one-shot only). See Phase B doc.
+- Production mic matrix 001–012 still requires operator evidence on a machine with MSVC + mic.
+
+## Unreleased (historical pre-0.2.0 draft notes)
+
+Earlier CHANGELOG “Unreleased” bullets describing polish/FFT/privacy as shipped were **frontend/docs ahead of backend** and are superseded by 0.2.0 honesty.

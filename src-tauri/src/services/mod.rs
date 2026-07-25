@@ -1,6 +1,8 @@
 pub mod app_state;
 pub mod cleanup;
+pub mod dictation_engine;
 pub mod injection;
+pub mod metrics;
 pub mod overlay_window;
 pub mod recorder;
 pub mod runtime;

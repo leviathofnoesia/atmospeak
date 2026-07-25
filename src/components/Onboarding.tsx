@@ -142,7 +142,6 @@ export function Onboarding(props: OnboardingProps) {
   const modelReady = modelStatus?.ready ?? false;
   const modelChoices = modelInventory?.models.length ? modelInventory.models : FALLBACK_MODELS;
   const activeModel =
-    modelChoices.find((model) => model.id === settings.activeModelId) ??
     modelChoices.find((model) => model.id === modelInventory?.activeModelId) ??
     modelChoices.find((model) => model.id === "base.en") ??
     modelChoices[0];
@@ -256,18 +255,13 @@ export function Onboarding(props: OnboardingProps) {
                         ? "A local Whisper model ready to run offline."
                         : "Visible in inventory; install it before selecting.",
                     };
-                    const selected = settings.activeModelId === m.id;
+                    const selected = activeModel?.id === m.id;
                     return (
-                    <button
+                    <div
                       key={m.id}
                       className="ob-model"
                       aria-pressed={selected}
-                      onClick={() => {
-                        if (m.installed) {
-                          setSettings({ ...settings, activeModelId: m.id });
-                        }
-                      }}
-                      disabled={!m.installed}
+                      data-selected={selected ? "true" : "false"}
                     >
                       <span className="radio" />
                       <span>
@@ -275,7 +269,7 @@ export function Onboarding(props: OnboardingProps) {
                         <span className="mdesc">{copy.desc}</span>
                       </span>
                       <span className="msize">{m.sizeMb ? `${m.sizeMb} MB` : m.installed ? "local" : "not installed"}</span>
-                    </button>
+                    </div>
                     );
                   })}
                 </div>

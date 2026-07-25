@@ -2,7 +2,6 @@ import clsx from "clsx";
 import { memo, useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { ModelStatus, RecordingStarted } from "../types/dictation";
-import type { BubbleSize } from "../types/dictation";
 import { Aura } from "./Aura";
 import { attachLiquidGlass } from "../lib/liquidGlass";
 import "./RecorderOverlay.css";
@@ -11,6 +10,7 @@ export type RecorderPhase = "idle" | "listening" | "processing" | "pasted" | "er
 export type RecorderAccent = "dusk" | "teal" | "lilac";
 export type RecorderTheme = "dark" | "light";
 export type RecorderWaveStyle = "ribbon" | "bars" | "pulse";
+export type BubbleSize = "small" | "medium" | "large";
 
 // Kept for back-compat with callers that still import these names.
 interface LiveTranscript {
