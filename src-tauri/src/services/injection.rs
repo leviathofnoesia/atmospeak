@@ -114,7 +114,7 @@ pub fn hwnd_is_valid(hwnd: isize) -> bool {
         if hwnd == 0 {
             return false;
         }
-        unsafe { IsWindow(HWND(hwnd as *mut _)).as_bool() }
+        unsafe { IsWindow(Some(HWND(hwnd as *mut _))).as_bool() }
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -162,7 +162,7 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
             return Ok(false);
         }
         let hwnd = HWND(target.hwnd as *mut _);
-        if !unsafe { IsWindow(hwnd).as_bool() } {
+        if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
             return Ok(false);
         }
         let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };

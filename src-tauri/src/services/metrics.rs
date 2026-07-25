@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use chrono::Utc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
     models::{RuntimeEvent, StageMetrics},

@@ -8,7 +8,11 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
 - Design: `docs/PHASE_A_HONEST_MVP.md` implemented (DictationEngine, contract lock, injection restore, metrics, app data migrate, honest UI).
 - ASR backend label: `cli` (stock whisper-cli per utterance).
 - Automated: frontend `bun run build` / `bun run test` re-verified after honesty pass.
-- Native `cargo test` / real mic runs **require MSVC Build Tools** on this machine; mic evidence for 001–012 still pending operator dogfood.
+- **MSVC Build Tools installed** — native verification completed:
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **16 passed**
+  - `cargo build --manifest-path src-tauri/Cargo.toml`: **pass**
+  - Compile fixes: `IsWindow(Some(hwnd))` for windows-0.61; `use tauri::Manager` for `try_state` in metrics
+- Mic evidence for 001–012 still pending operator dogfood (`bun run tauri dev`).
 - Hard gate remains: **001** and **005** with session id, audio path, stage metrics (`capture_stop_ms`, `write_ms`, `asr_ms`, `cleanup_ms`, `inject_ms`, `total_ms`).
 
 ## 2026-06-16 - Baseline Automation And Matrix Setup
