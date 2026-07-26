@@ -1,12 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
-use tauri::{AppHandle, Manager, path::BaseDirectory};
+use anyhow::{anyhow, Result};
+use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 use crate::models::{AppSettings, ModelInventory, ModelInventoryItem, ModelStatus, RuntimeSource};
-
-const BUNDLED_MODEL_ID: &str = "base.en";
-const BUNDLED_MODEL_SIZE_MB: u64 = 142;
+use crate::services::{app_state::AppState, model_downloader};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedRuntime {
@@ -37,8 +35,19 @@ pub fn resolve_runtime(app: &AppHandle, settings: &AppSettings) -> Result<Resolv
         });
     }
 
+    let bundled_model = resolve_bundled_model(app)?;
+    let (source, model_path) = if let Some(state) = app.try_state::<AppState>() {
+        resolve_selected_model(
+            &state.app_dir,
+            settings.active_model_id.trim(),
+            bundled_model,
+        )
+    } else {
+        (RuntimeSource::Bundled, bundled_model)
+    };
+
     Ok(ResolvedRuntime {
-        source: RuntimeSource::Bundled,
+        source,
         whisper_cli_path: resolve_first_existing(
             app,
             &[
@@ -46,13 +55,7 @@ pub fn resolve_runtime(app: &AppHandle, settings: &AppSettings) -> Result<Resolv
                 "whisper-runtime/whisper-cli.exe",
             ],
         )?,
-        model_path: resolve_first_existing(
-            app,
-            &[
-                "resources/models/ggml-base.en.bin",
-                "models/ggml-base.en.bin",
-            ],
-        )?,
+        model_path,
     })
 }
 
@@ -64,11 +67,15 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
             let ready = whisper_cli_found && model_found;
             let source_label = match runtime.source {
                 RuntimeSource::Bundled => "bundled",
+                RuntimeSource::ManagedModel => "downloaded",
                 RuntimeSource::AdvancedOverride => "advanced",
             };
             let message = match (ready, whisper_cli_found, model_found, &runtime.source) {
                 (true, _, _, RuntimeSource::Bundled) => {
                     "Bundled offline transcription runtime is ready.".to_string()
+                }
+                (true, _, _, RuntimeSource::ManagedModel) => {
+                    "Downloaded offline transcription model is ready.".to_string()
                 }
                 (true, _, _, RuntimeSource::AdvancedOverride) => {
                     "Advanced transcription runtime override is ready.".to_string()
@@ -77,7 +84,7 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
                     format!("The {source_label} whisper-cli.exe could not be found.")
                 }
                 (false, true, false, _) => {
-                    format!("The {source_label} ggml-base.en.bin model could not be found.")
+                    format!("The {source_label} speech model could not be found.")
                 }
                 _ => format!("The {source_label} transcription runtime is incomplete."),
             };
@@ -109,43 +116,57 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
 }
 
 pub fn model_inventory(app: &AppHandle, settings: &AppSettings) -> ModelInventory {
-    let bundled = resolve_runtime(app, &AppSettings::default()).ok();
-    let active = model_status(app, settings);
-    let mut models = vec![ModelInventoryItem {
-        id: BUNDLED_MODEL_ID.to_string(),
-        label: "Base English".to_string(),
-        installed: bundled
-            .as_ref()
-            .map(|runtime| runtime.model_path.is_file())
-            .unwrap_or(false),
-        bundled: true,
-        path: bundled.map(|runtime| runtime.model_path.to_string_lossy().to_string()),
-        size_mb: Some(BUNDLED_MODEL_SIZE_MB),
-    }];
-
-    for (id, label) in [
-        ("tiny.en", "Tiny English"),
-        ("small.en", "Small English"),
-        ("medium.en", "Medium English"),
-        ("distil-large-v3", "Distil Large v3"),
-    ] {
-        models.push(ModelInventoryItem {
-            id: id.to_string(),
-            label: label.to_string(),
-            installed: false,
-            bundled: false,
-            path: None,
-            size_mb: None,
-        });
-    }
+    let bundled_path = resolve_bundled_model(app).ok();
+    let app_dir = app
+        .try_state::<AppState>()
+        .map(|state| state.app_dir.clone())
+        .unwrap_or_default();
+    let models = model_downloader::MODELS
+        .iter()
+        .map(|model| model_downloader::inventory_item(&app_dir, model, bundled_path.as_deref()))
+        .collect::<Vec<ModelInventoryItem>>();
+    let selected_is_installed = model_downloader::descriptor(settings.active_model_id.trim())
+        .and_then(|selected| models.iter().find(|model| model.id == selected.id))
+        .is_some_and(|model| model.installed);
 
     ModelInventory {
-        active_model_id: if active.source == RuntimeSource::Bundled {
-            BUNDLED_MODEL_ID.to_string()
-        } else {
+        active_model_id: if settings.advanced_runtime_enabled {
             "advanced-override".to_string()
+        } else if selected_is_installed {
+            settings.active_model_id.clone()
+        } else {
+            model_downloader::BUNDLED_MODEL_ID.to_string()
         },
         models,
+    }
+}
+
+fn resolve_bundled_model(app: &AppHandle) -> Result<PathBuf> {
+    resolve_first_existing(
+        app,
+        &[
+            "resources/models/ggml-base.en.bin",
+            "models/ggml-base.en.bin",
+        ],
+    )
+}
+
+fn resolve_selected_model(
+    app_dir: &Path,
+    active_model_id: &str,
+    bundled_model: PathBuf,
+) -> (RuntimeSource, PathBuf) {
+    let Some(model) = model_downloader::descriptor(active_model_id) else {
+        return (RuntimeSource::Bundled, bundled_model);
+    };
+    if model.bundled {
+        return (RuntimeSource::Bundled, bundled_model);
+    }
+    let managed_path = model_downloader::installed_model_path(app_dir, model);
+    if managed_path.is_file() {
+        (RuntimeSource::ManagedModel, managed_path)
+    } else {
+        (RuntimeSource::Bundled, bundled_model)
     }
 }
 
@@ -179,7 +200,35 @@ mod tests {
     fn advanced_overrides_are_disabled_by_default() {
         let settings = AppSettings::default();
         assert!(!settings.advanced_runtime_enabled);
+        assert_eq!(settings.active_model_id, model_downloader::BUNDLED_MODEL_ID);
         assert!(settings.advanced_model_path.is_empty());
         assert!(settings.advanced_whisper_cli_path.is_empty());
+    }
+
+    #[test]
+    fn missing_managed_model_falls_back_to_bundled_base() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bundled = dir.path().join("bundled-base.bin");
+        std::fs::write(&bundled, b"base").expect("bundled model");
+
+        let (source, selected) = resolve_selected_model(dir.path(), "small.en", bundled.clone());
+
+        assert_eq!(source, RuntimeSource::Bundled);
+        assert_eq!(selected, bundled);
+    }
+
+    #[test]
+    fn installed_managed_model_is_selected() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let model = model_downloader::descriptor("tiny.en").expect("tiny model");
+        let managed = model_downloader::installed_model_path(dir.path(), model);
+        std::fs::create_dir_all(managed.parent().expect("model parent")).expect("model dir");
+        std::fs::write(&managed, b"tiny").expect("managed model");
+
+        let (source, selected) =
+            resolve_selected_model(dir.path(), "tiny.en", dir.path().join("base.bin"));
+
+        assert_eq!(source, RuntimeSource::ManagedModel);
+        assert_eq!(selected, managed);
     }
 }

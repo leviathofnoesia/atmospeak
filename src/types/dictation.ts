@@ -10,6 +10,7 @@ export interface AppSettings {
   startAtLogin: boolean;
   onboardingComplete: boolean;
   onboardingVersion: string;
+  activeModelId: string;
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
   advancedWhisperCliPath: string;
@@ -133,7 +134,7 @@ export interface ModelStatus {
   modelFound: boolean;
   ready: boolean;
   message: string;
-  source: "bundled" | "advancedOverride";
+  source: "bundled" | "managedModel" | "advancedOverride";
   whisperCliPath: string;
   modelPath: string;
 }
@@ -150,6 +151,15 @@ export interface ModelInventoryItem {
   bundled: boolean;
   path: string | null;
   sizeMb: number | null;
+}
+
+export interface ModelDownloadProgress {
+  modelId: string;
+  status: "starting" | "downloading" | "verifying" | "installed" | "cancelled" | "error";
+  bytesDownloaded: number;
+  totalBytes: number | null;
+  percent: number | null;
+  message: string;
 }
 
 export type UpdateStatus =
@@ -213,6 +223,7 @@ export function defaultSettings(): AppSettings {
     startAtLogin: false,
     onboardingComplete: false,
     onboardingVersion: "",
+    activeModelId: "base.en",
     advancedRuntimeEnabled: false,
     advancedModelPath: "",
     advancedWhisperCliPath: "",

@@ -31,12 +31,21 @@ Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQL
 
 ## First run
 
-Requires **Rust + MSVC Build Tools** (Desktop C++) and Bun:
+Requires **Rust + MSVC Build Tools** (Desktop C++), Git LFS, and Bun:
 
 ```powershell
 $env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+git lfs install
+git lfs pull
 bun install
 bun run tauri dev
+```
+
+The bundled model and `whisper.cpp` Windows binaries are tracked by Git LFS.
+If a clone contains tiny pointer files instead of the runtime, recover them with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/bootstrap-whisper.ps1
 ```
 
 ## Verification

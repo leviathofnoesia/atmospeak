@@ -1,34 +1,9 @@
-@font-face {
-  font-family: "Geist";
-  src: url("/fonts/Geist-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Geist";
-  src: url("/fonts/Geist-Black.woff2") format("woff2");
-  font-weight: 900;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  src: url("/fonts/GeistMono-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-display: swap;
-}
+@import "../../src/styles/tokens.css";
 
 :root {
-  --c-dusk: #485696;
-  --c-teal: #689689;
-  --c-lilac: #be95c4;
-  --c-porcelain: #f7f7f2;
-  --c-onyx: #121113;
-  --ink: #1b1a1d;
   --muted: #68666e;
-  --line: #121113;
-  --shadow: 10px 10px 0 #121113;
+  --line: var(--c-onyx);
+  --shadow: 10px 10px 0 var(--c-onyx);
   font-family: "Geist", "Segoe UI", system-ui, sans-serif;
   color: var(--ink);
   background: var(--c-porcelain);
@@ -66,7 +41,7 @@ a {
   color: var(--c-porcelain);
   background:
     linear-gradient(rgba(18, 17, 19, 0.76), rgba(18, 17, 19, 0.82)),
-    url("/assets/brand/cloud-infinity.jpeg") center / cover,
+    url("../../src/assets/nov-pax/assets/brand/cloud-infinity.jpeg") center / cover,
     var(--c-onyx);
 }
 
@@ -89,6 +64,11 @@ a {
   padding: 10px 12px;
   border: 2px solid var(--c-porcelain);
   background: rgba(18, 17, 19, 0.72);
+}
+
+.nav-items {
+  display: flex;
+  gap: 18px;
 }
 
 .brand-chip,
@@ -131,6 +111,7 @@ a {
 .section-head p,
 .feature-card p,
 .download-card p,
+.doc-card li,
 .site-footer p {
   max-width: 680px;
   margin: 0;
@@ -205,6 +186,7 @@ a {
 
 .feature-band,
 .downloads,
+.docs,
 .site-footer {
   position: relative;
   width: min(1180px, calc(100vw - 40px));
@@ -219,6 +201,7 @@ a {
 
 .feature-card,
 .download-card,
+.doc-card,
 .site-footer {
   border: 2px solid var(--line);
   background: #ffffff;
@@ -226,13 +209,15 @@ a {
 }
 
 .feature-card,
-.download-card {
+.download-card,
+.doc-card {
   min-height: 240px;
   padding: 18px;
 }
 
 .feature-card h2,
 .downloads h2,
+.docs h2,
 .download-card h3 {
   margin: 14px 0 12px;
   font-size: 34px;
@@ -259,12 +244,17 @@ a {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 14px;
 }
 
 .download-card {
   color: var(--ink);
+}
+
+.download-card h3 {
+  font-size: 24px;
+  overflow-wrap: anywhere;
 }
 
 .download-card.is-primary {
@@ -275,6 +265,59 @@ a {
   display: inline-block;
   margin-top: 18px;
   overflow-wrap: anywhere;
+}
+
+.docs {
+  padding: 28px 0;
+}
+
+.docs .section-head {
+  max-width: 780px;
+}
+
+.docs h2 {
+  margin: 14px 0 12px;
+  font-size: 46px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.docs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.doc-card {
+  min-height: 0;
+  padding: 22px;
+}
+
+.doc-card--wide {
+  grid-column: span 2;
+  background: var(--c-lilac);
+}
+
+.doc-card h3 {
+  margin: 0 0 16px;
+  font-size: 25px;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+
+.doc-card ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.doc-card li {
+  max-width: none;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.doc-card li:last-child {
+  margin-bottom: 0;
 }
 
 .site-footer {
@@ -299,6 +342,7 @@ a {
 
   .feature-band,
   .download-grid,
+  .docs-grid,
   .spec-strip {
     grid-template-columns: 1fr;
   }
@@ -311,6 +355,62 @@ a {
 
   .spec-strip span:last-child {
     border-bottom: 0;
+  }
+
+  .doc-card--wide {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .plate {
+    min-height: 820px;
+    padding: 14px;
+  }
+
+  .plate::before,
+  .downloads::before {
+    inset: 8px;
+  }
+
+  .top-nav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero-content {
+    margin-top: 72px;
+  }
+
+  .hero h1 {
+    font-size: 41px;
+  }
+
+  .hero p,
+  .section-head p,
+  .feature-card p,
+  .download-card p,
+  .site-footer p {
+    font-size: 16px;
+  }
+
+  .halftone {
+    display: none;
+  }
+
+  .feature-band,
+  .downloads,
+  .docs,
+  .site-footer {
+    width: min(100% - 24px, 1180px);
+  }
+
+  .downloads {
+    padding: 18px;
+  }
+
+  .docs h2 {
+    font-size: 36px;
   }
 }
 

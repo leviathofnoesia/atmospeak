@@ -12,7 +12,7 @@ Atmospeak ships Windows-first release artifacts:
 ## Local Release Build
 
 ```powershell
-$env:ATMOSPEAK_RELEASE_REPO = "leviathofnoesia/atmospeak"
+$env:ATMOSPEAK_RELEASE_REPO = "leviathofnoesia/wind-speak"
 $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$env:USERPROFILE\.tauri\atmospeak\updater.key"
 bun run release:build
 ```
@@ -26,11 +26,11 @@ download and the updater artifact both use the NSIS `.exe`.
 
 ## GitHub Release
 
-Create or reuse `leviathofnoesia/atmospeak`, then upload every file from
-`release/` to a release tag such as `v0.1.9`. The updater endpoint is:
+Upload every file from `release/` to the `leviathofnoesia/wind-speak` release
+tag matching the application version. The updater endpoint is:
 
 ```text
-https://github.com/leviathofnoesia/atmospeak/releases/latest/download/latest.json
+https://github.com/leviathofnoesia/wind-speak/releases/latest/download/latest.json
 ```
 
 ## Unsigned Windows Prototype

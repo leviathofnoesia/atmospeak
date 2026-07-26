@@ -12,6 +12,12 @@
 - `ATMOSPEAK_WHISPER_HOST=0` forces the CLI backend.
 - Windows job object ties the server's lifetime to the app, so a crash or force-kill
   leaves no orphaned process holding the model.
+- Verified, cancellable model downloads for Tiny English, Small English, Medium English,
+  and Distil Large v3, with real on-disk inventory and bundled Base English fallback.
+- MIT project license, complete redistributed runtime/model acknowledgements, Atmospeak
+  application icons, version-sync tooling, and a GitHub Pages deployment workflow.
+- Rebranded landing page with version-derived release assets and Windows install,
+  SmartScreen, hotkey, microphone, local-data, and latency documentation.
 
 ### Fixed
 - **Terminal phases never settled.** `tick_settle` only ran when a new command arrived,
@@ -24,6 +30,9 @@
   (`CREATE_NO_WINDOW`).
 - An empty transcript is reported as "no speech" rather than provoking a redundant
   CLI retry of audio the host already handled correctly.
+- Normal launches now stay in the tray after onboarding. Tray hide/show preserves the
+  saved dock position; resetting it is a separate explicit action.
+- Updater and release URLs consistently target `leviathofnoesia/wind-speak`.
 
 ### Companion dock (design handoff)
 - Imported the Claude Design project and closed the integration gaps. The dock port
@@ -62,7 +71,7 @@
   is ignored, toggle ignores key-up, mic-check exclusion, cancel guards, settle bounds.
 - Settings blobs written before the appearance fields still load (the contract-lift risk).
 - Dock tip placement per resting shape, real-chord/gesture wording, runtime-offline state.
-- Rust suite: 16 → 27 tests. Frontend: 8 → 11.
+- Rust suite: 16 → 32 tests. Frontend: 8 → 11.
 
 ## 0.2.0 — Phase A Honest MVP (2026-07-25)
 

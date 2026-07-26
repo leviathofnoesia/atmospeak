@@ -10,7 +10,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class WindSpeakWindowProbe {
+public static class AtmospeakWindowProbe {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
   [DllImport("user32.dll")]
@@ -31,21 +31,21 @@ function Get-VisibleWindowTitlesForProcess {
   param([int]$ProcessId)
 
   $titles = New-Object System.Collections.Generic.List[string]
-  $callback = [WindSpeakWindowProbe+EnumWindowsProc]{
+  $callback = [AtmospeakWindowProbe+EnumWindowsProc]{
     param([IntPtr]$Handle, [IntPtr]$Param)
 
-    if (-not [WindSpeakWindowProbe]::IsWindowVisible($Handle)) {
+    if (-not [AtmospeakWindowProbe]::IsWindowVisible($Handle)) {
       return $true
     }
 
     [uint32]$windowProcessId = 0
-    [void][WindSpeakWindowProbe]::GetWindowThreadProcessId($Handle, [ref]$windowProcessId)
+    [void][AtmospeakWindowProbe]::GetWindowThreadProcessId($Handle, [ref]$windowProcessId)
     if ($windowProcessId -ne $ProcessId) {
       return $true
     }
 
     $builder = New-Object System.Text.StringBuilder 256
-    [void][WindSpeakWindowProbe]::GetWindowText($Handle, $builder, $builder.Capacity)
+    [void][AtmospeakWindowProbe]::GetWindowText($Handle, $builder, $builder.Capacity)
     $title = $builder.ToString()
     if (-not [string]::IsNullOrWhiteSpace($title)) {
       $titles.Add($title)
@@ -54,7 +54,7 @@ function Get-VisibleWindowTitlesForProcess {
     return $true
   }
 
-  [void][WindSpeakWindowProbe]::EnumWindows($callback, [IntPtr]::Zero)
+  [void][AtmospeakWindowProbe]::EnumWindows($callback, [IntPtr]::Zero)
   return $titles.ToArray()
 }
 
@@ -136,7 +136,21 @@ if (-not (Test-Path (Join-Path $InstallDir "resources\whisper-runtime\whisper-cl
   throw "Bundled whisper runtime not found in installed resources."
 }
 
-$process = Start-Process -FilePath $AppExe -PassThru
+$ProfileDir = "$InstallDir-profile"
+if (Test-Path $ProfileDir) {
+  Remove-Item $ProfileDir -Recurse -Force
+}
+$PreviousProfileOverride = $env:ATMOSPEAK_APP_DATA_DIR
+$env:ATMOSPEAK_APP_DATA_DIR = $ProfileDir
+try {
+  $process = Start-Process -FilePath $AppExe -PassThru
+} finally {
+  if ($null -eq $PreviousProfileOverride) {
+    Remove-Item Env:ATMOSPEAK_APP_DATA_DIR -ErrorAction SilentlyContinue
+  } else {
+    $env:ATMOSPEAK_APP_DATA_DIR = $PreviousProfileOverride
+  }
+}
 try {
   Wait-ForInstalledWindow -ProcessId $process.Id -Title "Atmospeak"
   Wait-ForInstalledWindow -ProcessId $process.Id -Title "Atmospeak Overlay"
@@ -164,5 +178,8 @@ if ($uninstall.ExitCode -ne 0) {
 }
 
 Wait-ForPathRemoval -Path $AppExe
+if (Test-Path $ProfileDir) {
+  Remove-Item $ProfileDir -Recurse -Force
+}
 
 Write-Host "Install/uninstall smoke passed."

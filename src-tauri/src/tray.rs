@@ -1,7 +1,7 @@
 use tauri::{
-    Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
 };
 
 use crate::services::{app_state::AppState, dictation_engine, overlay_window, shortcuts};
@@ -9,11 +9,12 @@ use crate::services::{app_state::AppState, dictation_engine, overlay_window, sho
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Atmospeak").build(app)?;
     let overlay = MenuItemBuilder::with_id("overlay", "Show / Hide Floating Control").build(app)?;
+    let recenter = MenuItemBuilder::with_id("recenter", "Reset Dock Position").build(app)?;
     let pause = MenuItemBuilder::with_id("pause", "Pause / Resume Shortcuts").build(app)?;
     let dictate = MenuItemBuilder::with_id("dictate", "Start / Stop Dictation").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &overlay, &pause, &dictate, &quit])
+        .items(&[&open, &overlay, &recenter, &pause, &dictate, &quit])
         .build()?;
 
     TrayIconBuilder::new()
@@ -22,6 +23,9 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
             "overlay" => toggle_overlay_window(app),
+            "recenter" => {
+                let _ = overlay_window::show_and_reset(app);
+            }
             "pause" => toggle_shortcuts(app),
             "dictate" => {
                 let _ = app.emit("wind-speak://shortcut", "toggle");
@@ -70,8 +74,9 @@ fn toggle_overlay_window(app: &tauri::AppHandle) {
         if is_visible {
             let _ = window.hide();
         } else {
-            let _ = overlay_window::show_and_reset(app);
+            // Restore it where the user left it. Re-centring is the explicit
+            // "Reset Dock Position" action, not a side effect of unhiding.
+            let _ = overlay_window::show(app);
         }
     }
 }
-

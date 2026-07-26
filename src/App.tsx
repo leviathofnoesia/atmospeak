@@ -27,11 +27,14 @@ import type { RecorderPhase } from "./components/RecorderOverlay";
 import { StatusLed } from "./components/StatusLed";
 import {
   cancelRecording,
+  cancelModelDownload,
   checkForUpdates,
   copyText,
   deleteDictionaryEntry,
+  deleteModel,
   deleteSnippet,
   downloadAndInstallUpdate,
+  downloadModel,
   getAppSnapshot,
   getLastStageMetrics,
   getModelInventory,
@@ -64,6 +67,7 @@ import type {
   HubTab,
   MicrophoneInfo,
   ModelInventory,
+  ModelDownloadProgress,
   ModelStatus,
   NativeDictationEvent,
   RecordingStarted,
@@ -118,6 +122,7 @@ function AppShell() {
   const [microphones, setMicrophones] = useState<MicrophoneInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
+  const [modelDownload, setModelDownload] = useState<ModelDownloadProgress | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
   const [lastMetrics, setLastMetrics] = useState<StageMetrics | null>(null);
@@ -329,6 +334,10 @@ function AppShell() {
           (payload) => setLastMetrics(payload as StageMetrics),
         ],
         [
+          "atmospeak://model-download",
+          (payload) => setModelDownload(payload as ModelDownloadProgress),
+        ],
+        [
           "wind-speak://overlay-visibility",
           (payload) =>
             setNotice({ tone: "neutral", message: String(payload) }),
@@ -538,6 +547,48 @@ function AppShell() {
     }
   }, [setBusyState, settingsDraft]);
 
+  const onDownloadModel = useCallback(async (modelId: string) => {
+    setModelDownload({
+      modelId,
+      status: "starting",
+      bytesDownloaded: 0,
+      totalBytes: null,
+      percent: 0,
+      message: "Starting model download.",
+    });
+    try {
+      const inventory = await downloadModel(modelId);
+      setModelInventory(inventory);
+      setSettingsDraft((current) =>
+        current ? { ...current, activeModelId: modelId } : current,
+      );
+      setModelStatus(await getModelStatus());
+      setNotice({
+        tone: "success",
+        message: `${modelId} is installed. Save settings or finish setup to use it.`,
+      });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+      throw error;
+    }
+  }, []);
+
+  const onDeleteModel = useCallback(async (modelId: string) => {
+    try {
+      const inventory = await deleteModel(modelId);
+      setModelInventory(inventory);
+      setSettingsDraft((current) =>
+        current?.activeModelId === modelId
+          ? { ...current, activeModelId: "base.en" }
+          : current,
+      );
+      setModelStatus(await getModelStatus());
+      setNotice({ tone: "success", message: `${modelId} was removed.` });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+    }
+  }, []);
+
   const needsOnboarding = useMemo(() => {
     if (!snapshot) return false;
     return (
@@ -578,6 +629,7 @@ function AppShell() {
         microphones={microphones}
         modelStatus={modelStatus}
         modelInventory={modelInventory}
+        modelDownload={modelDownload}
         shortcutStatus={shortcutStatus}
         shortcutTest={shortcutTest}
         micCheck={micCheck}
@@ -612,6 +664,15 @@ function AppShell() {
         onShowFloatingControl={async () => {
           await showFloatingControl();
         }}
+        onSelectModel={(modelId) =>
+          setSettingsDraft((current) =>
+            current ? { ...current, activeModelId: modelId } : current,
+          )
+        }
+        onDownloadModel={onDownloadModel}
+        onCancelModelDownload={async () => {
+          await cancelModelDownload();
+        }}
         onComplete={completeOnboarding}
       />
     );
@@ -624,7 +685,7 @@ function AppShell() {
           <Aura size={36} active={recorderPhase === "listening"} />
           <div>
             <strong>Atmospeak</strong>
-            <span>Local dictation · CLI ASR</span>
+            <span>Local dictation · resident ASR</span>
           </div>
         </div>
         <nav aria-label="Atmospeak sections">
@@ -821,7 +882,18 @@ function AppShell() {
             setSettings={setSettingsDraft}
             modelStatus={modelStatus}
             modelInventory={modelInventory}
+            modelDownload={modelDownload}
             lastMetrics={lastMetrics}
+            onSelectModel={(modelId) =>
+              setSettingsDraft((current) =>
+                current ? { ...current, activeModelId: modelId } : current,
+              )
+            }
+            onDownloadModel={onDownloadModel}
+            onCancelModelDownload={async () => {
+              await cancelModelDownload();
+            }}
+            onDeleteModel={onDeleteModel}
             onSave={onSaveSettings}
           />
         ) : null}

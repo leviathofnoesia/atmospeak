@@ -4,6 +4,7 @@ pub mod cleanup;
 pub mod dictation_engine;
 pub mod injection;
 pub mod metrics;
+pub mod model_downloader;
 pub mod overlay_window;
 pub mod proc;
 pub mod recorder;

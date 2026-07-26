@@ -14,6 +14,7 @@
       {
         "label": "main",
         "title": "Atmospeak",
+        "visible": false,
         "width": 1180,
         "height": 760,
         "minWidth": 980,
@@ -70,9 +71,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4OUM5NkZCMzdGQTJBQTIKUldTaUt2bzMrNWFjbURYdEJoMEw2Tmc0eWNIQ3pYazBNUExud0lrajFSNzk0dG50UHVaRTlQR24K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3RjM2RjFDRjE5NTM3RTgKUldUb041WHhIRy96eHl6N3VOcDN1OXRUV20zTmJrRmoyM1k2TWZSajEvSGhPd0NrdTJnNjU4Nk8K",
       "endpoints": [
-        "https://github.com/leviathofnoesia/atmospeak/releases/latest/download/latest.json"
+        "https://github.com/leviathofnoesia/wind-speak/releases/latest/download/latest.json"
       ]
     }
   }

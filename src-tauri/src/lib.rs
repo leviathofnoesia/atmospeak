@@ -9,12 +9,13 @@ use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
-    cancel_recording, delete_dictionary_entry, delete_snippet, get_app_snapshot,
-    get_last_stage_metrics, get_model_inventory, get_model_status, get_recording_level,
-    get_runtime_events, get_shortcut_status, handle_dictation_action, inject_text, list_microphones,
-    mic_check_start, mic_check_stop, save_overlay_position, save_settings,
-    set_shortcut_test_active, set_shortcuts_paused, show_main_window, show_overlay_window,
-    start_recording, stop_recording, upsert_dictionary_entry, upsert_snippet,
+    cancel_model_download, cancel_recording, delete_dictionary_entry, delete_model, delete_snippet,
+    download_model, get_app_snapshot, get_last_stage_metrics, get_model_inventory,
+    get_model_status, get_recording_level, get_runtime_events, get_shortcut_status,
+    handle_dictation_action, inject_text, list_microphones, mic_check_start, mic_check_stop,
+    save_overlay_position, save_settings, set_shortcut_test_active, set_shortcuts_paused,
+    show_main_window, show_overlay_window, start_recording, stop_recording,
+    upsert_dictionary_entry, upsert_snippet,
 };
 use services::{
     app_state::AppState, asr_host, dictation_engine, metrics, overlay_window, runtime, shortcuts,
@@ -23,7 +24,7 @@ use services::{
 /// Bring up the resident ASR host in the background: loading the model takes
 /// seconds and must not delay the window. Dictation works off the CLI backend
 /// until the host is warm, and keeps working if it never comes up at all.
-fn start_asr_host(app: &tauri::AppHandle) {
+pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
     if asr_host::is_disabled() {
         metrics::emit_runtime(
             app,
@@ -63,11 +64,7 @@ fn start_asr_host(app: &tauri::AppHandle) {
             match host.ensure_running() {
                 Ok(_) => {
                     app.state::<AppState>().set_asr_host(host);
-                    metrics::emit_runtime(
-                        &app,
-                        "asr-host-ready",
-                        "Resident speech model is warm.",
-                    );
+                    metrics::emit_runtime(&app, "asr-host-ready", "Resident speech model is warm.");
                 }
                 Err(error) => {
                     metrics::emit_runtime(
@@ -228,7 +225,10 @@ pub fn run() {
             upsert_snippet,
             delete_snippet,
             get_model_status,
-            get_model_inventory
+            get_model_inventory,
+            download_model,
+            cancel_model_download,
+            delete_model
         ])
         .build(tauri::generate_context!())
         .expect("error while building Atmospeak")

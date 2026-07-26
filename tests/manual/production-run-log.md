@@ -2,6 +2,24 @@
 
 This file tracks evidence for the 100-test production matrix in `tests/manual/production-100.md`.
 
+## 2026-07-26 - 0.3.0 daily-driver and release shell
+
+- Automated verification (no microphone involved):
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **32 passed**
+  - `bun run build`: **pass**
+  - `bun run test`: **11 passed**
+  - `bun run site:build`: **pass**, including the website TypeScript check
+  - Downloader coverage includes managed-model path resolution, checksum rejection
+    without damaging an installed model, and verified atomic replacement.
+- Browser QA:
+  - Landing page checked at 1280 px and 360 px widths.
+  - Version-derived release filenames, install docs, SmartScreen instructions,
+    shared assets/tokens, and responsive stacking render correctly.
+- **Operator gate remains pending:** run 001 and 005 with deliberate speech and
+  record the real session id, target output, and Advanced → Last stage metrics.
+  Confirm `asr_backend: host` and compare that run's `asr_ms` with the synthetic
+  CLI/host timings below. No host claim is promoted from synthetic evidence.
+
 ## 2026-07-25 - Phase B 0.3.0 resident ASR host
 
 - Automated verification (no microphone involved):

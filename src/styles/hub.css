@@ -161,12 +161,14 @@
 .hub-shell .toggle-row > span { flex: 1; font-size: 13.5px; color: var(--ink); text-transform: none; letter-spacing: 0; font-family: var(--font-body); }
 .hub-shell .toggle-row input { margin-left: auto; }
 .hub-shell .model-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-.hub-shell .model-pill { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 14px 16px; border: 1px solid rgba(18,17,19,0.14); border-radius: 10px; background: #fbfbf7; cursor: pointer; text-align: left; transition: border-color 0.18s, background 0.18s; }
+.hub-shell .model-pill { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 14px 16px; border: 1px solid rgba(18,17,19,0.14); border-radius: 10px; background: #fbfbf7; text-align: left; transition: border-color 0.18s, background 0.18s; }
 .hub-shell .model-pill:hover:not(:disabled) { border-color: rgba(18,17,19,0.3); }
 .hub-shell .model-pill:disabled { opacity: 0.5; cursor: not-allowed; }
 .hub-shell .model-pill--active { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 6%, #fbfbf7); }
 .hub-shell .model-pill strong { font-weight: 600; font-size: 14px; font-family: var(--font-body); }
 .hub-shell .model-pill span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(27,26,29,0.5); }
+.hub-shell .model-pill__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hub-shell .model-pill__actions .button { min-height: 30px; padding: 0 10px; font-size: 10px; }
 .hub-shell .runtime-events { display: flex; flex-direction: column; gap: 8px; }
 .hub-shell .runtime-events ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .hub-shell .runtime-events li { display: grid; grid-template-columns: 90px 1fr; gap: 12px; font-size: 12.5px; }

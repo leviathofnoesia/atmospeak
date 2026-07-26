@@ -1,5 +1,11 @@
 import { CheckCircle2, Cpu } from "lucide-react";
-import type { AppSettings, ModelInventory, ModelStatus, StageMetrics } from "../types/dictation";
+import type {
+  AppSettings,
+  ModelDownloadProgress,
+  ModelInventory,
+  ModelStatus,
+  StageMetrics,
+} from "../types/dictation";
 import { PanelTitle } from "./PanelTitle";
 import { StatusLed } from "./StatusLed";
 import { ToggleRow } from "./ToggleRow";
@@ -9,7 +15,12 @@ interface AdvancedPanelProps {
   setSettings: (settings: AppSettings) => void;
   modelStatus: ModelStatus | null;
   modelInventory: ModelInventory | null;
+  modelDownload: ModelDownloadProgress | null;
   lastMetrics: StageMetrics | null;
+  onSelectModel: (modelId: string) => void;
+  onDownloadModel: (modelId: string) => Promise<void>;
+  onCancelModelDownload: () => Promise<void>;
+  onDeleteModel: (modelId: string) => Promise<void>;
   onSave: () => Promise<void>;
 }
 
@@ -18,7 +29,12 @@ export function AdvancedPanel({
   setSettings,
   modelStatus,
   modelInventory,
+  modelDownload,
   lastMetrics,
+  onSelectModel,
+  onDownloadModel,
+  onCancelModelDownload,
+  onDeleteModel,
   onSave,
 }: AdvancedPanelProps) {
   return (
@@ -31,14 +47,17 @@ export function AdvancedPanel({
       <div className="instruction-card">
         <h3>Bundled by default</h3>
         <p>
-          Atmospeak ships with whisper.cpp CLI and Base English. Each utterance spawns the CLI
-          process (multi-second latency is expected). Override paths only for custom local builds.
+          Atmospeak ships with whisper.cpp and Base English. The resident host keeps the selected
+          model warm, with automatic one-shot CLI fallback. Override paths only for custom builds.
         </p>
       </div>
       <div className="model-grid">
         {modelInventory?.models.map((model) => {
           const isActive =
-            modelInventory?.activeModelId === model.id && !settings.advancedRuntimeEnabled;
+            settings.activeModelId === model.id && !settings.advancedRuntimeEnabled;
+          const downloading =
+            modelDownload?.modelId === model.id &&
+            ["starting", "downloading", "verifying"].includes(modelDownload.status);
           return (
             <div
               key={model.id}
@@ -54,6 +73,33 @@ export function AdvancedPanel({
                       ? "Bundled"
                       : "Installed"}
               </span>
+              {!model.bundled ? (
+                <div className="model-pill__actions">
+                  {downloading ? (
+                    <button type="button" className="button button--ghost" onClick={() => void onCancelModelDownload()}>
+                      Cancel {modelDownload?.percent != null ? `${Math.round(modelDownload.percent)}%` : ""}
+                    </button>
+                  ) : model.installed ? (
+                    <>
+                      <button type="button" className="button button--ghost" onClick={() => onSelectModel(model.id)}>
+                        {isActive ? "Selected" : "Use"}
+                      </button>
+                      <button type="button" className="button button--ghost" onClick={() => void onDeleteModel(model.id)}>
+                        Delete
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      disabled={Boolean(modelDownload && ["starting", "downloading", "verifying"].includes(modelDownload.status))}
+                      onClick={() => void onDownloadModel(model.id)}
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </div>
           );
         })}

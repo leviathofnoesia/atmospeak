@@ -14,6 +14,7 @@ pub struct AppSettings {
     pub start_at_login: bool,
     pub onboarding_complete: bool,
     pub onboarding_version: String,
+    pub active_model_id: String,
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
     pub advanced_whisper_cli_path: String,
@@ -81,6 +82,7 @@ impl Default for AppSettings {
             start_at_login: false,
             onboarding_complete: false,
             onboarding_version: String::new(),
+            active_model_id: "base.en".to_string(),
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
             advanced_whisper_cli_path: String::new(),
@@ -238,6 +240,7 @@ pub struct ModelStatus {
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeSource {
     Bundled,
+    ManagedModel,
     AdvancedOverride,
 }
 
@@ -257,6 +260,17 @@ pub struct ModelInventoryItem {
     pub bundled: bool,
     pub path: Option<String>,
     pub size_mb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadProgress {
+    pub model_id: String,
+    pub status: String,
+    pub bytes_downloaded: u64,
+    pub total_bytes: Option<u64>,
+    pub percent: Option<f64>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

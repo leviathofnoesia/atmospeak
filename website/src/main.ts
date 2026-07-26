@@ -1,30 +1,39 @@
 import "./styles.css";
+import { APP_VERSION } from "./version";
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/wind-speak/releases/latest/download";
+const releaseRepository = "leviathofnoesia/wind-speak";
+const releaseBaseUrl = `https://github.com/${releaseRepository}/releases/latest/download`;
+const versionedArtifact = (suffix: string) => `atmospeak_${APP_VERSION}_${suffix}`;
 
 const downloads = [
   {
     label: "Windows installer",
     detail: "Recommended NSIS setup",
-    file: "Wind-Speak_0.1.9_x64-setup.exe",
+    file: versionedArtifact("x64-setup.exe"),
     primary: true,
   },
   {
     label: "Windows MSI",
     detail: "Enterprise-friendly fallback",
-    file: "Wind-Speak_0.1.9_x64_en-US.msi",
+    file: versionedArtifact("x64_en-US.msi"),
     primary: false,
   },
   {
     label: "Portable zip",
     detail: "Unzip and run from a folder",
-    file: "Wind-Speak_0.1.9_x64-portable.zip",
+    file: versionedArtifact("x64-portable.zip"),
     primary: false,
   },
   {
     label: "Checksums",
     detail: "SHA-256 manifest",
     file: "SHA256SUMS.txt",
+    primary: false,
+  },
+  {
+    label: "Updater metadata",
+    detail: "Tauri release manifest",
+    file: "latest.json",
     primary: false,
   },
 ] as const;
@@ -40,12 +49,7 @@ if (!app) {
 
 const shell = document.createElement("main");
 shell.className = "site-shell";
-
-shell.appendChild(hero());
-shell.appendChild(featureBand());
-shell.appendChild(downloadSection());
-shell.appendChild(footer());
-
+shell.append(hero(), featureBand(), downloadSection(), docsSection(), footer());
 app.appendChild(shell);
 
 function hero() {
@@ -56,8 +60,11 @@ function hero() {
   const nav = document.createElement("nav");
   nav.className = "top-nav";
   nav.setAttribute("aria-label", "Primary");
-  nav.append(label("Wind Speak x Nov Pax", "brand-chip"));
-  nav.append(navLink("Downloads", "#downloads"));
+  nav.append(label("Atmospeak × Nov Pax", "brand-chip"));
+  const navItems = document.createElement("span");
+  navItems.className = "nav-items";
+  navItems.append(navLink("Downloads", "#downloads"), navLink("Docs", "#docs"));
+  nav.append(navItems);
   section.append(nav);
 
   const moon = document.createElement("div");
@@ -79,17 +86,19 @@ function hero() {
 
   const copy = document.createElement("p");
   copy.textContent =
-    "Wind Speak bundles its offline transcription engine, launches from your tray, and turns a global hotkey into clean pasted text.";
+    "Atmospeak bundles an offline transcription engine, launches from your tray, and turns a global hotkey into clean pasted text.";
   content.append(copy);
 
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(downloadButton("Download for Windows", downloads[0].file, true));
-  actions.append(downloadButton("Portable zip", downloads[2].file, false));
+  actions.append(
+    downloadButton("Download for Windows", downloads[0].file, true),
+    downloadButton("Read install docs", "#docs", false, true),
+  );
   content.append(actions);
 
   section.append(content);
-  section.append(specStrip("v0.1.9", "Windows x64", "Offline base.en model bundled"));
+  section.append(specStrip(`v${APP_VERSION}`, "Windows x64", "Offline base.en model bundled"));
   return section;
 }
 
@@ -99,8 +108,8 @@ function featureBand() {
   section.setAttribute("aria-label", "Product features");
 
   for (const item of [
-    ["Install once", "No model-picker detour. The first English model and whisper runtime are already inside the installer."],
-    ["Offline by default", "Audio stays local. The app writes WAV, transcribes locally, cleans text, and injects through the clipboard."],
+    ["Install once", "The first English model and whisper runtime are already inside the installer. Optional models download in the app."],
+    ["Offline by default", "Audio, transcripts, settings, and speech models stay on your Windows PC. No account or cloud transcription is required."],
     ["Speak anywhere", "Global push-to-talk works across Notepad, editors, browsers, chat fields, and terminals."],
   ] as const) {
     const card = document.createElement("article");
@@ -128,10 +137,10 @@ function downloadSection() {
   header.append(kicker("+ RELEASE FILES / GITHUB"));
   const heading = document.createElement("h2");
   heading.id = "downloads-title";
-  heading.textContent = "Download Wind Speak";
+  heading.textContent = "Download Atmospeak";
   const copy = document.createElement("p");
   copy.textContent =
-    "Installers, portable builds, updater metadata, and checksums are published as GitHub Release assets.";
+    "Installers, the portable build, updater metadata, and checksums are published together as GitHub Release assets.";
   header.append(heading, copy);
   section.append(header);
 
@@ -153,8 +162,76 @@ function downloadSection() {
     grid.append(card);
   }
   section.append(grid);
-
   return section;
+}
+
+function docsSection() {
+  const section = document.createElement("section");
+  section.id = "docs";
+  section.className = "docs";
+  section.setAttribute("aria-labelledby", "docs-title");
+
+  const header = document.createElement("div");
+  header.className = "section-head";
+  header.append(kicker("+ GET STARTED / WINDOWS"));
+  const heading = document.createElement("h2");
+  heading.id = "docs-title";
+  heading.textContent = "Install and dictate";
+  const copy = document.createElement("p");
+  copy.textContent =
+    "Atmospeak is currently an unsigned Windows build. These steps cover the warning, first-run setup, daily hotkey use, and local data.";
+  header.append(heading, copy);
+  section.append(header);
+
+  const grid = document.createElement("div");
+  grid.className = "docs-grid";
+  grid.append(
+    docCard("01 / Install", [
+      "Download the recommended setup executable above.",
+      "Open it and complete the installer.",
+      "Atmospeak starts in the tray and opens setup only on first run.",
+    ]),
+    docCard("02 / SmartScreen", [
+      "Windows may show “Windows protected your PC” because this release is not Authenticode-signed.",
+      "Choose More info, verify the app name is Atmospeak, then choose Run anyway.",
+      "You can verify the downloaded file against SHA256SUMS.txt before running it.",
+    ], true),
+    docCard("03 / Hotkey", [
+      "The default shortcut is Ctrl+Win in push-to-talk mode.",
+      "Hold the chord, speak, then release to transcribe and paste at your cursor.",
+      "Change the shortcut or switch to tap-to-toggle in Settings.",
+    ]),
+    docCard("04 / Microphone", [
+      "Choose an input during onboarding and complete the level check.",
+      "If no signal appears, open Windows Settings → Privacy & security → Microphone and allow desktop apps.",
+      "Return to Atmospeak and run onboarding again from Settings.",
+    ]),
+    docCard("05 / Local data", [
+      "Settings, history, recordings, and downloaded models live under %LOCALAPPDATA%\\Atmospeak.",
+      "Transcription runs on-device. Removing that folder resets the local profile after the app is closed.",
+    ]),
+    docCard("06 / Latency", [
+      "Latency depends on speech length, model size, CPU, and whether the resident model has finished warming.",
+      "Short phrases can land quickly after warm-up; long dictation and larger models take longer. No fixed latency is promised.",
+    ]),
+  );
+  section.append(grid);
+  return section;
+}
+
+function docCard(titleText: string, steps: readonly string[], wide = false) {
+  const article = document.createElement("article");
+  article.className = wide ? "doc-card doc-card--wide" : "doc-card";
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  const list = document.createElement("ol");
+  for (const step of steps) {
+    const item = document.createElement("li");
+    item.textContent = step;
+    list.append(item);
+  }
+  article.append(title, list);
+  return article;
 }
 
 function footer() {
@@ -163,16 +240,16 @@ function footer() {
   node.append(kicker("+ TRUST MODEL"));
   const copy = document.createElement("p");
   copy.textContent =
-    "Prototype builds are unsigned for Windows SmartScreen, but app updates are checked against Tauri updater signatures and release checksums.";
+    "Windows builds are unsigned, so SmartScreen can warn. Verify release checksums; in-app updates additionally require Tauri updater signatures when published.";
   node.append(copy);
   return node;
 }
 
-function downloadButton(text: string, file: string, primary: boolean) {
+function downloadButton(text: string, file: string, primary: boolean, direct = false) {
   const anchor = document.createElement("a");
   anchor.className = primary ? "button button-primary" : "button";
-  anchor.href = linkFor(file);
-  anchor.rel = "noopener";
+  anchor.href = direct ? file : linkFor(file);
+  if (!direct) anchor.rel = "noopener";
   anchor.textContent = text;
   return anchor;
 }

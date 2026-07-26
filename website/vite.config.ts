@@ -2,7 +2,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: "website",
-  publicDir: "assets",
+  base: process.env.GITHUB_ACTIONS ? "/wind-speak/" : "/",
+  publicDir: "../src/assets/nov-pax",
   build: {
     outDir: "../dist-site",
     emptyOutDir: true,
