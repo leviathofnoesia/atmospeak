@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type {
   AppSettings,
   MicrophoneInfo,
@@ -6,6 +6,7 @@ import type {
   ModelInventory,
   ModelInventoryItem,
   ModelStatus,
+  SoundCheckResult,
   ShortcutStatus,
 } from "../types/dictation";
 import { shortcutOptions } from "../panelOptions";
@@ -28,6 +29,11 @@ interface PasteTestState {
   passed: boolean;
   message: string;
 }
+interface SoundCheckState {
+  active: boolean;
+  result: SoundCheckResult | null;
+  message: string;
+}
 
 interface OnboardingProps {
   settings: AppSettings;
@@ -39,12 +45,15 @@ interface OnboardingProps {
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
   micCheck: MicCheckState;
+  soundCheck: SoundCheckState;
   onStartMicCheck: () => Promise<void>;
   onStopMicCheck: () => Promise<void>;
+  onStartSoundCheck: () => Promise<void>;
+  onFinishSoundCheck: () => Promise<void>;
+  onOpenWindowsSoundSettings: () => Promise<void>;
   onTestShortcut: () => void;
   pasteTest: PasteTestState;
   onPasteTest: () => Promise<void>;
-  onShowFloatingControl: () => Promise<void>;
   onSelectModel: (modelId: string) => void;
   onDownloadModel: (modelId: string) => Promise<void>;
   onCancelModelDownload: () => Promise<void>;
@@ -53,6 +62,7 @@ interface OnboardingProps {
 
 const STEPS = ["Welcome", "Microphone", "Voice model", "Shortcut", "Sound check", "Ready"];
 const SC_TARGET = "The porcelain moon hums over the studio.";
+const ONBOARDING_MODEL_IDS = new Set(["tiny.en", "base.en", "small.en"]);
 
 const FALLBACK_MODELS: ModelInventoryItem[] = [
   { id: "tiny.en", label: "Swift", installed: false, bundled: false, path: null, sizeMb: 74 },
@@ -87,38 +97,22 @@ const ICONS = {
 
 // live mic meter driven by the real input level
 function MicMeter({ live, level }: { live: boolean; level: number }) {
-  const wrap = useRef<HTMLDivElement>(null);
-  const levelRef = useRef(level);
-  levelRef.current = level;
   const bars = 38;
-  useEffect(() => {
-    const els = wrap.current ? Array.from(wrap.current.querySelectorAll<HTMLElement>(".bar")) : [];
-    let t = 0;
-    let raf = 0;
-    const tick = () => {
-      t += 0.08;
-      const sig = levelRef.current;
-      els.forEach((el, i) => {
-        let h: number;
-        if (live) {
-          const env = 0.5 + 0.5 * Math.sin(t * 1.7 + i * 0.18);
-          const tex = 0.5 + 0.5 * Math.sin(t * 4.1 + i * 0.6);
-          h = 6 + (0.35 * env + 0.3 * tex + 0.15 * Math.random()) * Math.max(0.18, sig) * 90;
-        } else {
-          h = 6 + 2 * (0.5 + 0.5 * Math.sin(t + i));
-        }
-        el.style.height = `${h.toFixed(1)}px`;
-      });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [live]);
+  const heights = useMemo(
+    () =>
+      Array.from({ length: bars }, (_, index) => {
+        if (!live) return 6;
+        const centerWeight = 0.45 + 0.55 * Math.sin(((index + 1) / (bars + 1)) * Math.PI);
+        const texture = 0.82 + ((index * 17) % 11) / 30;
+        return 6 + Math.max(0, Math.min(1, level)) * centerWeight * texture * 78;
+      }),
+    [level, live],
+  );
   return (
-    <div className="ob-meter" data-live={live ? "true" : "false"} ref={wrap}>
+    <div className="ob-meter" data-live={live ? "true" : "false"}>
       <span className="idle-note">microphone idle</span>
-      {Array.from({ length: bars }).map((_, i) => (
-        <span className="bar" key={i} />
+      {heights.map((height, i) => (
+        <span className="bar" key={i} style={{ height: `${height.toFixed(1)}px` }} />
       ))}
     </div>
   );
@@ -135,12 +129,15 @@ export function Onboarding(props: OnboardingProps) {
     shortcutStatus,
     shortcutTest,
     micCheck,
+    soundCheck,
     onStartMicCheck,
     onStopMicCheck,
+    onStartSoundCheck,
+    onFinishSoundCheck,
+    onOpenWindowsSoundSettings,
     onTestShortcut,
     pasteTest,
     onPasteTest,
-    onShowFloatingControl,
     onSelectModel,
     onDownloadModel,
     onCancelModelDownload,
@@ -148,10 +145,13 @@ export function Onboarding(props: OnboardingProps) {
   } = props;
 
   const [step, setStepRaw] = useState(0);
+  const [completionError, setCompletionError] = useState("");
+  const [completing, setCompleting] = useState(false);
   const setStep = (n: number) => setStepRaw(Math.max(0, Math.min(STEPS.length - 1, n)));
 
   const modelReady = modelStatus?.ready ?? false;
-  const modelChoices = modelInventory?.models.length ? modelInventory.models : FALLBACK_MODELS;
+  const inventoryChoices = modelInventory?.models.filter((model) => ONBOARDING_MODEL_IDS.has(model.id)) ?? [];
+  const modelChoices = inventoryChoices.length ? inventoryChoices : FALLBACK_MODELS;
   const activeModel =
     modelChoices.find((model) => model.id === settings.activeModelId) ??
     modelChoices.find((model) => model.id === modelInventory?.activeModelId) ??
@@ -161,11 +161,22 @@ export function Onboarding(props: OnboardingProps) {
   const canContinue = (() => {
     if (step === 1) return micCheck.passed;
     if (step === 2) return modelReady && selectedModelReady;
-    if (step === 4) return micCheck.passed;
+    if (step === 3) return shortcutTest.detected;
+    if (step === 4) return soundCheck.result?.passed ?? false;
     return true;
   })();
   const progressPct = (step / (STEPS.length - 1)) * 100;
   const hotkeyChips = settings.hotkey.split("+").map((part) => part.trim());
+  const completeSetup = async () => {
+    setCompleting(true);
+    setCompletionError("");
+    try {
+      await onComplete();
+    } catch (error) {
+      setCompletionError(error instanceof Error ? error.message : String(error));
+      setCompleting(false);
+    }
+  };
 
   return (
     <div className="ob-stage">
@@ -205,7 +216,7 @@ export function Onboarding(props: OnboardingProps) {
             {step === 0 && (
               <div className="ob-fade">
                 <div className="ob-hero-aura"><Aura size={132} active /></div>
-                <div className="ob-kick">Welcome · v2.4 Edition</div>
+                <div className="ob-kick">Welcome · v0.3.1 Recovery</div>
                 <h1 className="ob-h">Speak. It listens.<br />It sets the words <em>down.</em></h1>
                 <p className="ob-lede">
                   Atmospeak turns your voice into clean text wherever your cursor rests — transcribed entirely
@@ -232,7 +243,6 @@ export function Onboarding(props: OnboardingProps) {
                       setSettings({ ...settings, microphoneName: e.currentTarget.value || null })
                     }
                   >
-                    <option value="">System default</option>
                     {microphones.map((m) => (
                       <option key={m.name} value={m.name}>{m.name}{m.isDefault ? " (default)" : ""}</option>
                     ))}
@@ -241,13 +251,23 @@ export function Onboarding(props: OnboardingProps) {
                 <MicMeter live={micCheck.active} level={micCheck.level} />
                 {!micCheck.passed && !micCheck.active ? (
                   <button className="pill-btn" onClick={() => void onStartMicCheck()} disabled={microphones.length === 0}>
-                    <Glyph d={ICONS.mic} size={16} /> Grant microphone access
+                    <Glyph d={ICONS.mic} size={16} /> Check selected microphone
                   </button>
                 ) : micCheck.active ? (
                   <button className="pill-btn ghost" onClick={() => void onStopMicCheck()}>Stop mic check</button>
                 ) : (
                   <div className="ob-statline"><span className="ok"><Glyph d={ICONS.check} size={14} /></span> {micCheck.message}</div>
                 )}
+                <div className="ob-device-actions">
+                  <span>{micCheck.message || "Choose the microphone you intend to dictate with."}</span>
+                  <button
+                    type="button"
+                    className="ob-preset"
+                    onClick={() => void onOpenWindowsSoundSettings()}
+                  >
+                    Windows sound settings
+                  </button>
+                </div>
                 <div className="ob-priv">
                   <Glyph d={ICONS.lock} size={18} sw={1.8} />
                   <div><b>Private by design.</b> Audio is processed locally and discarded the moment your words are written. It never touches a server.</div>
@@ -394,26 +414,37 @@ export function Onboarding(props: OnboardingProps) {
                 <div>
                   <div className="ob-kick">Step 04 · Sound check</div>
                   <h1 className="ob-h">Say this <em>line.</em></h1>
-                  <p className="ob-lede">A quick read so Atmospeak can tune to your voice and your room.</p>
+                  <p className="ob-lede">
+                    A real local transcription confirms the microphone, model, and resident host together.
+                  </p>
                 </div>
                 <div className="ob-sc-card">
                   <div className="strip"><span>READ ALOUD</span><span>◇ CALIBRATION</span></div>
-                  <span className={`ob-sc-target${micCheck.passed ? " is-pass" : ""}`}>{SC_TARGET}</span>
+                  <span className={`ob-sc-target${soundCheck.result?.passed ? " is-pass" : ""}`}>
+                    {soundCheck.result?.transcript || SC_TARGET}
+                  </span>
                 </div>
                 <div className="ob-sc-row">
-                  {!micCheck.passed ? (
+                  {!soundCheck.result?.passed ? (
                     <button
-                      className={`ob-hold${micCheck.active ? " holding" : ""}`}
-                      onPointerDown={() => void onStartMicCheck()}
-                      onPointerUp={() => void onStopMicCheck()}
-                      onPointerLeave={() => micCheck.active && void onStopMicCheck()}
+                      className={`ob-hold${soundCheck.active ? " holding" : ""}`}
+                      onPointerDown={(event) => {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        void onStartSoundCheck();
+                      }}
+                      onPointerUp={() => void onFinishSoundCheck()}
+                      onPointerCancel={() => void onFinishSoundCheck()}
                     >
-                      <span className="dot" />{micCheck.active ? "Listening…" : "Hold to read"}
+                      <span className="dot" />{soundCheck.active ? "Listening…" : "Hold to read"}
                     </button>
                   ) : (
-                    <div className="ob-sc-pass"><span className="ok"><Glyph d={ICONS.check} size={13} /></span> Heard you clearly — your voice is tuned.</div>
+                    <div className="ob-sc-pass">
+                      <span className="ok"><Glyph d={ICONS.check} size={13} /></span>
+                      Heard clearly · host ASR {soundCheck.result.asrMs}ms
+                    </div>
                   )}
                 </div>
+                {soundCheck.message ? <p className="ob-keyhint">{soundCheck.message}</p> : null}
               </div>
             )}
 
@@ -427,7 +458,8 @@ export function Onboarding(props: OnboardingProps) {
                   and your words are set down.
                 </p>
                 <div className="ob-ready-summary">
-                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{micCheck.passed ? "connected" : "not checked"}</b></div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{soundCheck.result?.deviceName ?? "not checked"}</b></div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Resident ASR <b>{soundCheck.result?.asrBackend ?? "not checked"}</b> · SNR {soundCheck.result?.snrDb.toFixed(1) ?? "—"} dB</div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> <b>{activeModel?.label ?? "Balanced"}</b> model · runs offline</div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{hotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "hold to talk" : "tap to toggle"}</div>
                 </div>
@@ -435,11 +467,11 @@ export function Onboarding(props: OnboardingProps) {
                   <button className="ob-preset" onClick={() => void onPasteTest()} disabled={pasteTest.running}>
                     {pasteTest.running ? "Testing paste…" : "Run paste test"}
                   </button>
-                  <button className="ob-preset" onClick={() => void onShowFloatingControl()}>Show the companion</button>
                 </div>
                 {pasteTest.message && pasteTest.message !== "Paste test has not run yet." ? (
                   <p className="ob-keyhint">{pasteTest.message}</p>
                 ) : null}
+                {completionError ? <p className="ob-keyhint ob-error">{completionError}</p> : null}
               </div>
             )}
           </div>
@@ -449,7 +481,6 @@ export function Onboarding(props: OnboardingProps) {
             <div className="ob-progress"><i style={{ width: `${progressPct}%` }} /></div>
             {step < STEPS.length - 1 ? (
               <>
-                {step === 0 && <button className="ob-skip" onClick={() => setStep(STEPS.length - 1)}>Skip setup</button>}
                 <button
                   className={`pill-btn${canContinue ? "" : " ghost"}`}
                   disabled={!canContinue}
@@ -460,7 +491,13 @@ export function Onboarding(props: OnboardingProps) {
                 </button>
               </>
             ) : (
-              <button className="pill-btn accent big" onClick={() => void onComplete()}>◇ Enter Atmospeak</button>
+              <button
+                className="pill-btn accent big"
+                disabled={completing}
+                onClick={() => void completeSetup()}
+              >
+                {completing ? "Finishing setup…" : "◇ Enter Atmospeak"}
+              </button>
             )}
           </div>
         </main>

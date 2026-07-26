@@ -1,50 +1,119 @@
 import { expect, test } from "@playwright/test";
 
-test("loads onboarding, enters the redesigned hub, and exercises browser mock actions", async ({ page }) => {
-  await page.goto("/");
+async function waitForStableFonts(page: import("@playwright/test").Page) {
+  await page.evaluate(() => document.fonts.ready);
+}
+
+test("fresh browser fixture exposes setup v2 without a skip path", async ({ page }) => {
+  await page.goto("/?view=setup");
 
   await expect(
     page.getByRole("heading", { name: "Speak. It listens. It sets the words down." }),
   ).toBeVisible();
   await expect(page.getByText("First run")).toBeVisible();
-
-  await page.getByRole("button", { name: "Skip setup" }).click();
-  await page.getByRole("button", { name: /Enter Atmospeak/ }).click();
-
-  await expect(page.getByRole("navigation", { name: "Atmospeak sections" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start dictation" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Start dictation" }).click();
-  await expect(page.getByText(/Recording from/)).toBeVisible();
-  await page.getByRole("button", { name: "Start dictation" }).click();
-
-  await expect(page.getByRole("heading", { name: "Transcript history" })).toBeVisible();
-  await page.getByRole("button", { name: "Copy transcript" }).click();
-  await expect(page.getByText("Transcript copied to clipboard.")).toBeVisible();
-  await page.getByRole("button", { name: "Paste transcript again" }).click();
-  await expect(page.getByText("Mock transcript copied to the focused application.")).toBeVisible();
-
-  await page.getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByLabel("Shortcut")).toHaveValue("Ctrl+Win");
-  await page.getByLabel("Shortcut").selectOption("Ctrl+Alt+Space");
-  await expect(page.getByLabel("Shortcut")).toHaveValue("Ctrl+Alt+Space");
-  await page.locator('label:has(span:text-is("Mode")) select').selectOption("toggle");
-  await page.getByRole("button", { name: "Pause shortcuts" }).click();
-  await expect(page.getByRole("button", { name: "Resume shortcuts" })).toBeVisible();
-  await page.getByRole("button", { name: "Test active shortcut" }).click();
-  await expect(page.getByText("Shortcuts are paused. Resume shortcuts and test again.")).toBeVisible();
-
-  await page.getByRole("button", { name: "Run onboarding" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Speak. It listens. It sets the words down." }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /skip setup/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /begin/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Atmospeak companion/i })).toHaveCount(0);
 });
 
-test("loads the redesigned floating companion overlay in browser mock mode", async ({ page }) => {
-  await page.goto("/?view=overlay");
+test.describe("canonical editorial hub", () => {
+  test.use({ viewport: { width: 1000, height: 660 } });
 
-  await expect(
-    page.getByRole("button", { name: /Atmospeak companion/i }),
-  ).toBeVisible();
-  await expect(page.getByText(/hold/i)).toBeVisible();
+  test("Home matches the checked-in visual baseline", async ({ page }) => {
+    await page.goto("/?view=hub&fixture=hub");
+    await waitForStableFonts(page);
+
+    await expect(page.getByRole("navigation", { name: "Atmospeak sections" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Hold, speak/ })).toBeVisible();
+    await expect(page).toHaveScreenshot("hub-home-1000x660.png", {
+      animations: "disabled",
+      maxDiffPixels: 2,
+    });
+  });
+
+  test("History matches the checked-in visual baseline and exposes real actions", async ({
+    page,
+  }) => {
+    await page.goto("/?view=hub&fixture=hub");
+    await page.getByRole("button", { name: "History" }).click();
+    await waitForStableFonts(page);
+
+    await expect(page.getByRole("heading", { name: /Said & set down/ })).toBeVisible();
+    await expect(page.getByText("Letters")).toBeVisible();
+    await page.getByRole("button", { expanded: false }).first().click();
+    await expect(page.getByRole("button", { name: "Copy" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete" })).toBeVisible();
+    await expect(page).toHaveScreenshot("hub-history-1000x660.png", {
+      animations: "disabled",
+      maxDiffPixels: 2,
+    });
+  });
+
+  test("Advanced diagnostics remain inside Settings", async ({ page }) => {
+    await page.goto("/?view=hub&fixture=hub");
+    await page.getByRole("button", { name: "Settings" }).click();
+    const disclosure = page.getByText("Advanced diagnostics", { exact: true });
+    await expect(disclosure).toBeVisible();
+    await disclosure.click();
+    await expect(page.getByText("Advanced runtime", { exact: true })).toBeVisible();
+  });
+
+  test("dictionary and snippet records can be edited rather than duplicated", async ({ page }) => {
+    await page.goto("/?view=hub&fixture=hub");
+    await page.getByRole("button", { name: "Dictionary" }).click();
+    await page.getByRole("button", { name: /Edit wind speak/i }).click();
+    await expect(page.getByPlaceholder("heard phrase")).toHaveValue("wind speak");
+    await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    await page.getByRole("button", { name: "Snippets" }).click();
+    await page.getByRole("button", { name: /Edit ship note/i }).click();
+    await expect(page.getByPlaceholder("spoken trigger")).toHaveValue("ship note");
+    await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+  });
+});
+
+for (const deviceScaleFactor of [1.25, 1.5]) {
+  test(`hub has no overflow at ${deviceScaleFactor * 100}% scale`, async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 1000, height: 660 },
+      deviceScaleFactor,
+    });
+    const page = await context.newPage();
+    await page.goto("/?view=hub&fixture=hub");
+    await waitForStableFonts(page);
+    const dimensions = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+      documentHeight: document.documentElement.scrollHeight,
+      viewportHeight: document.documentElement.clientHeight,
+    }));
+    expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+    expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewportHeight);
+    await context.close();
+  });
+}
+
+test("hub reflows at 360px without horizontal overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.goto("/?view=hub&fixture=hub");
+  await waitForStableFonts(page);
+  const dimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+  }));
+  expect(dimensions.documentWidth).toBe(dimensions.viewportWidth);
+  await expect(page.getByRole("button", { name: "History" })).toBeVisible();
+});
+
+test("idle overlay owns no animation frame loop or waveform canvas", async ({ page }) => {
+  await page.goto("/?view=overlay");
+  await expect(page.getByRole("button", { name: /Atmospeak companion/i })).toBeVisible();
+  const idleState = await page.evaluate(() => ({
+    canvases: document.querySelectorAll("canvas").length,
+    runningAnimations: document
+      .getAnimations()
+      .filter((animation) => animation.playState === "running").length,
+  }));
+  expect(idleState).toEqual({ canvases: 0, runningAnimations: 0 });
 });

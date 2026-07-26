@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::{
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
 };
 
 use tauri::{AppHandle, Manager};
@@ -25,6 +28,7 @@ pub struct AppState {
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
     pub retention_sweeper_cancel: Arc<AtomicBool>,
     pub model_download_cancel: Arc<AtomicBool>,
+    level_stream_generation: AtomicU64,
     model_download_active: Mutex<Option<String>>,
     engine: Mutex<Option<EngineHandle>>,
     last_metrics: Mutex<Option<StageMetrics>>,
@@ -40,10 +44,21 @@ impl AppState {
         let recordings_dir = app_dir.join("recordings");
         std::fs::create_dir_all(&recordings_dir)
             .context("failed to create recordings directory")?;
+        let database = Database::open(app_dir.clone())?;
+        let retention_days = database
+            .load_settings()
+            .map(|settings| settings.transcript_retention_days)
+            .unwrap_or(0);
+        for raw_path in database.prune_sessions(retention_days)? {
+            let path = PathBuf::from(raw_path);
+            if path.starts_with(&recordings_dir) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
 
         Ok(Self {
             app_dir: app_dir.clone(),
-            database: Mutex::new(Database::open(app_dir.clone())?),
+            database: Mutex::new(database),
             recorder: RecorderService::new(recordings_dir),
             shortcut_status: Arc::new(Mutex::new(ShortcutStatus::default())),
             shortcuts_paused: Arc::new(Mutex::new(false)),
@@ -52,6 +67,7 @@ impl AppState {
             runtime_events: Arc::new(Mutex::new(Vec::new())),
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
             model_download_cancel: Arc::new(AtomicBool::new(false)),
+            level_stream_generation: AtomicU64::new(0),
             model_download_active: Mutex::new(None),
             engine: Mutex::new(None),
             last_metrics: Mutex::new(None),
@@ -165,6 +181,18 @@ impl AppState {
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
         active
+    }
+
+    pub fn begin_level_stream(&self) -> u64 {
+        self.level_stream_generation.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub fn end_level_stream(&self) {
+        self.level_stream_generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn level_stream_is_current(&self, generation: u64) -> bool {
+        self.level_stream_generation.load(Ordering::Relaxed) == generation
     }
 }
 

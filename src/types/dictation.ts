@@ -8,8 +8,10 @@ export interface AppSettings {
   autoInject: boolean;
   cleanupEnabled: boolean;
   startAtLogin: boolean;
+  transcriptRetentionDays: number;
   onboardingComplete: boolean;
   onboardingVersion: string;
+  audioCalibration: AudioCalibrationRecord | null;
   activeModelId: string;
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
@@ -52,6 +54,7 @@ export interface TranscriptSession {
   durationMs: number;
   wordCount: number;
   injected: boolean;
+  sourceApplication: string | null;
   createdAt: string;
 }
 
@@ -127,6 +130,48 @@ export interface DictationResult {
 export interface MicrophoneInfo {
   name: string;
   isDefault: boolean;
+  isSelected: boolean;
+  available: boolean;
+}
+
+export interface MicLevel {
+  rmsDbfs: number;
+  peakDbfs: number;
+  noiseFloorDbfs: number;
+  clippingRatio: number;
+  timestampMs: number;
+}
+
+export interface AudioCalibrationRecord {
+  deviceName: string;
+  checkedAt: string;
+  rmsDbfs: number;
+  peakDbfs: number;
+  snrDb: number;
+  modelId: string;
+  asrBackend: string;
+}
+
+export interface SoundCheckResult {
+  passed: boolean;
+  failureCode: string | null;
+  deviceName: string;
+  captureFormat: string;
+  durationMs: number;
+  activeSpeechMs: number;
+  rmsDbfs: number;
+  peakDbfs: number;
+  noiseFloorDbfs: number;
+  snrDb: number;
+  clippingRatio: number;
+  transcript: string;
+  expectedPhrase: string;
+  tokenSimilarity: number;
+  asrBackend: string;
+  modelId: string;
+  captureMs: number;
+  asrMs: number;
+  totalMs: number;
 }
 
 export interface ModelStatus {
@@ -199,7 +244,6 @@ export type HubTab =
   | "history"
   | "dictionary"
   | "snippets"
-  | "advanced"
   | "settings";
 
 export interface AppNotice {
@@ -210,7 +254,7 @@ export interface AppNotice {
 // "warning" is allowed for soft UX notices (e.g. shortcuts paused).
 
 /** Shared onboarding contract — must match Rust `ONBOARDING_VERSION`. */
-export const ONBOARDING_VERSION = "phase-a-honest-mvp-v1";
+export const ONBOARDING_VERSION = "atmospeak-setup-v2";
 
 export function defaultSettings(): AppSettings {
   return {
@@ -221,8 +265,10 @@ export function defaultSettings(): AppSettings {
     autoInject: true,
     cleanupEnabled: true,
     startAtLogin: false,
+    transcriptRetentionDays: 0,
     onboardingComplete: false,
     onboardingVersion: "",
+    audioCalibration: null,
     activeModelId: "base.en",
     advancedRuntimeEnabled: false,
     advancedModelPath: "",

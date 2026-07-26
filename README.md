@@ -2,7 +2,7 @@
 
 Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQLite, and `whisper.cpp`.
 
-**Version:** 0.3.0 (Phase B — resident ASR host). See
+**Version:** 0.3.1 recovery candidate (setup v2, native sound check, and lazy windows). See
 [`docs/PHASE_A_HONEST_MVP.md`](docs/PHASE_A_HONEST_MVP.md) and
 [`docs/PHASE_B_ASR_HOST.md`](docs/PHASE_B_ASR_HOST.md).
 
@@ -18,7 +18,7 @@ Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQL
 - Injection: clipboard + Ctrl+V with **last external window restore** and soft-fail “left on clipboard”
 - SQLite settings/history/dictionary/snippets under `%LOCALAPPDATA%\Atmospeak`
 - Stage metrics (log + events) for production validation
-- Desktop onboarding (version `phase-a-honest-mvp-v1`)
+- Six-step desktop setup (version `atmospeak-setup-v2`) with host-backed microphone calibration
 - Browser mock mode for UI without Tauri
 
 ## What is *not* claimed

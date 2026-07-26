@@ -9,7 +9,7 @@ from pathlib import Path
 APP_DIR = Path.home() / "AppData" / "Local" / "Atmospeak"
 DB_PATH = APP_DIR / "wind-speak.sqlite3"
 EXE_PATH = Path(__file__).resolve().parents[1] / "src-tauri" / "target" / "debug" / "atmospeak.exe"
-ONBOARDING_VERSION = "phase-a-honest-mvp-v1"
+ONBOARDING_VERSION = "atmospeak-setup-v2"
 
 
 def base_settings(mode: str) -> dict:

@@ -14,7 +14,7 @@ use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::models::{MicrophoneInfo, RecordingStarted};
+use crate::models::{MicLevel, MicrophoneInfo, RecordingStarted};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -45,6 +45,16 @@ pub struct CapturedRecording {
     pub samples: Vec<f32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AudioAnalysis {
+    pub active_speech_ms: u64,
+    pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
+    pub noise_floor_dbfs: f32,
+    pub snr_db: f32,
+    pub clipping_ratio: f32,
+}
+
 impl RecorderService {
     pub fn new(recordings_dir: PathBuf) -> Self {
         Self {
@@ -53,7 +63,7 @@ impl RecorderService {
         }
     }
 
-    pub fn list_microphones(&self) -> Result<Vec<MicrophoneInfo>> {
+    pub fn list_microphones(&self, selected: Option<&str>) -> Result<Vec<MicrophoneInfo>> {
         let host = cpal::default_host();
         let default_name = host
             .default_input_device()
@@ -69,6 +79,8 @@ impl RecorderService {
                 .unwrap_or_else(|_| "Unknown microphone".to_string());
             microphones.push(MicrophoneInfo {
                 is_default: default_name.as_ref() == Some(&name),
+                is_selected: selected == Some(name.as_str()),
+                available: true,
                 name,
             });
         }
@@ -108,7 +120,7 @@ impl RecorderService {
         let stream_config = supported_config.clone().into();
         let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
         let capture_samples = Arc::clone(&samples);
-        let error_callback = |error| eprintln!("Wind Speak audio stream error: {error}");
+        let error_callback = |error| eprintln!("Atmospeak audio stream error: {error}");
 
         let stream = match supported_config.sample_format() {
             SampleFormat::F32 => device.build_input_stream(
@@ -215,6 +227,175 @@ impl RecorderService {
 
         (rms * 4.0).clamp(0.0, 1.0)
     }
+
+    pub fn mic_level(&self) -> MicLevel {
+        let active = self.active.lock();
+        let Some(active) = active.as_ref() else {
+            return MicLevel {
+                rms_dbfs: -96.0,
+                peak_dbfs: -96.0,
+                noise_floor_dbfs: -96.0,
+                clipping_ratio: 0.0,
+                timestamp_ms: Utc::now().timestamp_millis(),
+            };
+        };
+        let samples = active.samples.lock();
+        let sample_count = ((active.sample_rate as usize) / 2).clamp(512, 24_000);
+        let start = samples.len().saturating_sub(sample_count);
+        let window = &samples[start..];
+        if window.is_empty() {
+            return MicLevel {
+                rms_dbfs: -96.0,
+                peak_dbfs: -96.0,
+                noise_floor_dbfs: -96.0,
+                clipping_ratio: 0.0,
+                timestamp_ms: Utc::now().timestamp_millis(),
+            };
+        }
+        let analysis = analyze_samples(window, active.sample_rate);
+        MicLevel {
+            rms_dbfs: analysis.rms_dbfs,
+            peak_dbfs: analysis.peak_dbfs,
+            noise_floor_dbfs: analysis.noise_floor_dbfs,
+            clipping_ratio: analysis.clipping_ratio,
+            timestamp_ms: Utc::now().timestamp_millis(),
+        }
+    }
+}
+
+pub fn analyze_samples(samples: &[f32], sample_rate: u32) -> AudioAnalysis {
+    if samples.is_empty() || sample_rate == 0 {
+        return AudioAnalysis {
+            active_speech_ms: 0,
+            rms_dbfs: -96.0,
+            peak_dbfs: -96.0,
+            noise_floor_dbfs: -96.0,
+            snr_db: 0.0,
+            clipping_ratio: 0.0,
+        };
+    }
+
+    let mean = samples.iter().copied().sum::<f32>() / samples.len() as f32;
+    let centered = samples
+        .iter()
+        .map(|sample| sample - mean)
+        .collect::<Vec<_>>();
+    let peak = centered
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0_f32, f32::max);
+    let clipping_ratio = centered
+        .iter()
+        .filter(|sample| sample.abs() >= 0.99)
+        .count() as f32
+        / centered.len() as f32;
+
+    let frame_len = ((sample_rate as usize * 20) / 1_000).max(1);
+    let mut frame_rms = centered
+        .chunks(frame_len)
+        .filter(|frame| !frame.is_empty())
+        .map(rms)
+        .collect::<Vec<_>>();
+    frame_rms.sort_by(|a, b| a.total_cmp(b));
+    let quiet_count = (frame_rms.len() / 4).max(1);
+    let noise_rms = median(&frame_rms[..quiet_count]).max(1.0e-6);
+    let noise_floor_dbfs = amplitude_dbfs(noise_rms);
+    let active_threshold_dbfs = (noise_floor_dbfs + 10.0).max(-50.0);
+    let active_threshold = 10.0_f32.powf(active_threshold_dbfs / 20.0);
+
+    let mut active_energy = 0.0_f64;
+    let mut active_samples = 0_usize;
+    let mut active_frames = 0_u64;
+    for frame in centered.chunks(frame_len) {
+        if frame.is_empty() || rms(frame) < active_threshold {
+            continue;
+        }
+        active_frames += 1;
+        active_samples += frame.len();
+        active_energy += frame
+            .iter()
+            .map(|sample| (*sample as f64) * (*sample as f64))
+            .sum::<f64>();
+    }
+    let active_rms = if active_samples > 0 {
+        (active_energy / active_samples as f64).sqrt() as f32
+    } else {
+        rms(&centered)
+    };
+    let rms_dbfs = amplitude_dbfs(active_rms);
+
+    AudioAnalysis {
+        active_speech_ms: active_frames * 20,
+        rms_dbfs,
+        peak_dbfs: amplitude_dbfs(peak),
+        noise_floor_dbfs,
+        snr_db: (rms_dbfs - noise_floor_dbfs).max(0.0),
+        clipping_ratio,
+    }
+}
+
+pub fn normal_dictation_failure(analysis: &AudioAnalysis) -> Option<&'static str> {
+    if analysis.active_speech_ms < 250 {
+        Some("No clear speech was detected. Check the selected microphone and try again.")
+    } else if analysis.rms_dbfs < -48.0 {
+        Some("The microphone signal is too quiet. Move closer or increase its Windows input level.")
+    } else if analysis.clipping_ratio > 0.001 || analysis.peak_dbfs >= -1.0 {
+        Some("The microphone is clipping. Lower its Windows input level and try again.")
+    } else if analysis.snr_db < 8.0 {
+        Some(
+            "Speech is being masked by background noise. Reduce the noise or choose another microphone.",
+        )
+    } else {
+        None
+    }
+}
+
+pub fn prepare_for_dictation(captured: &mut CapturedRecording) -> Result<AudioAnalysis> {
+    let analysis = analyze_samples(&captured.samples, captured.sample_rate);
+    if let Some(message) = normal_dictation_failure(&analysis) {
+        return Err(anyhow!(message));
+    }
+
+    let mean = captured.samples.iter().copied().sum::<f32>() / captured.samples.len() as f32;
+    for sample in &mut captured.samples {
+        *sample -= mean;
+    }
+    let peak = captured
+        .samples
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0_f32, f32::max);
+    if peak > 0.0 {
+        let target_peak = 10.0_f32.powf(-3.0 / 20.0);
+        let gain = (target_peak / peak).min(10.0_f32.powf(18.0 / 20.0));
+        for sample in &mut captured.samples {
+            *sample = (*sample * gain).clamp(-1.0, 1.0);
+        }
+    }
+    Ok(analysis)
+}
+
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+fn amplitude_dbfs(amplitude: f32) -> f32 {
+    if amplitude <= 1.0e-6 {
+        -96.0
+    } else {
+        (20.0 * amplitude.log10()).clamp(-96.0, 6.0)
+    }
+}
+
+fn median(sorted: &[f32]) -> f32 {
+    match sorted.len() {
+        0 => 0.0,
+        len if len % 2 == 1 => sorted[len / 2],
+        len => (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0,
+    }
 }
 
 pub fn finish_recording(captured: CapturedRecording) -> Result<FinishedRecording> {
@@ -299,7 +480,10 @@ fn write_wav(path: &PathBuf, samples: &[f32]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturedRecording, TARGET_SAMPLE_RATE, finish_recording};
+    use super::{
+        AudioAnalysis, CapturedRecording, TARGET_SAMPLE_RATE, analyze_samples, finish_recording,
+        normal_dictation_failure, prepare_for_dictation,
+    };
     use tempfile::tempdir;
 
     #[test]
@@ -327,5 +511,71 @@ mod tests {
         assert_eq!(spec.channels, 1);
         assert_eq!(spec.sample_rate, TARGET_SAMPLE_RATE);
         assert_eq!(spec.bits_per_sample, 16);
+    }
+
+    #[test]
+    fn quiet_capture_is_rejected_before_asr() {
+        let samples = (0..48_000)
+            .map(|index| (index as f32 / 18.0).sin() * 0.0008)
+            .collect::<Vec<_>>();
+        let analysis = analyze_samples(&samples, 48_000);
+        assert!(analysis.rms_dbfs < -48.0);
+        assert!(normal_dictation_failure(&analysis).is_some());
+    }
+
+    #[test]
+    fn noisy_and_clipped_captures_are_rejected_before_asr() {
+        let noisy = AudioAnalysis {
+            active_speech_ms: 800,
+            rms_dbfs: -24.0,
+            peak_dbfs: -8.0,
+            noise_floor_dbfs: -27.0,
+            snr_db: 3.0,
+            clipping_ratio: 0.0,
+        };
+        assert!(
+            normal_dictation_failure(&noisy)
+                .expect("noisy rejection")
+                .contains("background noise")
+        );
+
+        let clipped = AudioAnalysis {
+            active_speech_ms: 800,
+            rms_dbfs: -12.0,
+            peak_dbfs: -0.2,
+            noise_floor_dbfs: -50.0,
+            snr_db: 38.0,
+            clipping_ratio: 0.01,
+        };
+        assert!(
+            normal_dictation_failure(&clipped)
+                .expect("clipping rejection")
+                .contains("clipping")
+        );
+    }
+
+    #[test]
+    fn valid_speech_is_dc_removed_and_normalized_with_a_gain_cap() {
+        let temp = tempdir().expect("tempdir");
+        let mut samples = vec![0.0002; 24_000];
+        samples.extend((0..72_000).map(|index| (index as f32 / 18.0).sin() * 0.08));
+        let mut captured = CapturedRecording {
+            id: "quality".to_string(),
+            path: temp.path().join("quality.wav"),
+            duration_ms: 2_000,
+            sample_rate: 48_000,
+            samples,
+        };
+        let analysis = prepare_for_dictation(&mut captured).expect("valid speech");
+        let mean = captured.samples.iter().copied().sum::<f32>() / captured.samples.len() as f32;
+        let peak = captured
+            .samples
+            .iter()
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max);
+        assert!(analysis.active_speech_ms >= 250);
+        assert!(mean.abs() < 0.001);
+        assert!(peak <= 0.709);
+        assert!(peak > 0.60);
     }
 }

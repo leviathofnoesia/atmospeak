@@ -2,6 +2,45 @@
 
 This file tracks evidence for the 100-test production matrix in `tests/manual/production-100.md`.
 
+## 2026-07-26 - 0.3.1 recovery candidate (not approved for publication)
+
+- Public containment:
+  - v0.3.0 release and tag withdrawn; source commit and local artifact hashes preserved.
+  - Website download CTAs replaced by the temporary repair notice.
+  - Direct v0.3.0 artifact and `latest.json` URLs return 404.
+- Automated recovery evidence:
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **41 passed**
+  - `bun run test`: **16 passed**
+  - `bun run e2e`: **9 passed**, including canonical 1000x660 Home/History
+    screenshots with a maximum two-pixel difference, 125%/150% scaling, 360px
+    overflow, setup-without-skip, nested diagnostics, editable hub records, and
+    a motionless idle overlay.
+  - `bun run build` and `bun run site:build`: **pass**
+  - `bun run release:build`: **pass**, producing the 0.3.1 NSIS installer,
+    MSI, portable ZIP, signatures, checksums, and updater metadata locally.
+  - `bun run release:test-install`: **pass**; the installed release candidate
+    exposed one setup page with Welcome visible and no overlay, then uninstalled.
+  - Native fresh-profile WebView2 inspection: exactly one setup WebView, Welcome
+    visible, no overlay, no setup skip.
+  - Native completed-profile inspection: exactly one overlay WebView, no idle
+    canvas or running Web animation.
+  - Native steady-state release overlay CPU: **0% process-tree delta over 30s**
+    in the observed sample; hidden debug overlay: **0% over 10s**.
+  - Native move/restart check: `(140,160)` persisted exactly; deliberate reset
+    removed the saved-position file without the move event recreating it.
+- Real hardware discovery:
+  - `Microphone (Elgato Wave:3)` was enumerated by the native app.
+  - Ambient input measured about -47.8 dBFS RMS and correctly failed the speech
+    gate. This is not a substitute for deliberate speech.
+- Existing profile preservation audit:
+  - 3 transcript rows and all 3 referenced WAV files remain present.
+  - Only the additive `source_application` database column was migrated.
+  - Retention defaults to **Keep until deleted** for legacy and new profiles.
+- **Human gates still pending:** speak the required porcelain-moon phrase through
+  the Elgato Wave:3, then run production tests 001 and 005. Record session IDs,
+  transcript/output, `capture_ms`, `asr_ms`, `total_ms`, RMS, peak, SNR, and
+  `asr_backend: host`. The candidate remains a draft until both pass.
+
 ## 2026-07-26 - 0.3.0 daily-driver and release shell
 
 - Automated verification (no microphone involved):

@@ -54,10 +54,24 @@ impl Database {
                 duration_ms integer not null,
                 word_count integer not null,
                 injected integer not null,
+                source_application text,
                 created_at text not null
             );
             "#,
         )?;
+        let has_source_application = self
+            .connection
+            .prepare("pragma table_info(transcript_sessions)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .iter()
+            .any(|column| column == "source_application");
+        if !has_source_application {
+            self.connection.execute(
+                "alter table transcript_sessions add column source_application text",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -196,8 +210,8 @@ impl Database {
     pub fn insert_session(&self, session: &TranscriptSession) -> Result<()> {
         self.connection.execute(
             "insert into transcript_sessions
-             (id, raw_text, cleaned_text, audio_path, duration_ms, word_count, injected, created_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (id, raw_text, cleaned_text, audio_path, duration_ms, word_count, injected, source_application, created_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 session.id,
                 session.raw_text,
@@ -206,6 +220,7 @@ impl Database {
                 session.duration_ms as i64,
                 session.word_count as i64,
                 bool_to_i64(session.injected),
+                session.source_application,
                 session.created_at.to_rfc3339()
             ],
         )?;
@@ -214,7 +229,7 @@ impl Database {
 
     pub fn list_sessions(&self) -> Result<Vec<TranscriptSession>> {
         let mut statement = self.connection.prepare(
-            "select id, raw_text, cleaned_text, audio_path, duration_ms, word_count, injected, created_at
+            "select id, raw_text, cleaned_text, audio_path, duration_ms, word_count, injected, source_application, created_at
              from transcript_sessions
              order by created_at desc
              limit 100",
@@ -228,12 +243,45 @@ impl Database {
                 duration_ms: row.get::<_, i64>(4)? as u64,
                 word_count: row.get::<_, i64>(5)? as usize,
                 injected: row.get::<_, i64>(6)? == 1,
-                created_at: parse_datetime(row.get::<_, String>(7)?),
+                source_application: row.get(7)?,
+                created_at: parse_datetime(row.get::<_, String>(8)?),
             })
         })?;
 
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("failed to load transcript sessions")
+    }
+
+    pub fn delete_session(&self, id: &str) -> Result<Option<String>> {
+        let audio_path = self
+            .connection
+            .query_row(
+                "select audio_path from transcript_sessions where id = ?1",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        self.connection
+            .execute("delete from transcript_sessions where id = ?1", params![id])?;
+        Ok(audio_path)
+    }
+
+    pub fn prune_sessions(&self, retention_days: u32) -> Result<Vec<String>> {
+        if retention_days == 0 {
+            return Ok(Vec::new());
+        }
+        let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
+        let mut statement = self
+            .connection
+            .prepare("select audio_path from transcript_sessions where created_at < ?1")?;
+        let audio_paths = statement
+            .query_map(params![cutoff.to_rfc3339()], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        self.connection.execute(
+            "delete from transcript_sessions where created_at < ?1",
+            params![cutoff.to_rfc3339()],
+        )?;
+        Ok(audio_paths)
     }
 }
 
@@ -376,5 +424,34 @@ mod tests {
 
         let loaded = database.load_settings().expect("load settings");
         assert_eq!(loaded.hotkey, "Ctrl+Win");
+    }
+
+    #[test]
+    fn session_source_application_round_trips_and_retention_prunes() {
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        let session = TranscriptSession {
+            id: "old-session".to_string(),
+            raw_text: "hello".to_string(),
+            cleaned_text: "Hello.".to_string(),
+            audio_path: temp.path().join("old.wav").to_string_lossy().to_string(),
+            duration_ms: 1_000,
+            word_count: 1,
+            injected: true,
+            source_application: Some("Notepad".to_string()),
+            created_at: Utc::now() - chrono::Duration::days(40),
+        };
+        database.insert_session(&session).expect("insert session");
+        let loaded = database.list_sessions().expect("list sessions");
+        assert_eq!(loaded[0].source_application.as_deref(), Some("Notepad"));
+
+        let pruned = database.prune_sessions(30).expect("prune sessions");
+        assert_eq!(pruned, vec![session.audio_path]);
+        assert!(
+            database
+                .list_sessions()
+                .expect("list after prune")
+                .is_empty()
+        );
     }
 }

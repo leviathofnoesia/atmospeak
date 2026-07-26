@@ -169,6 +169,8 @@
 .ob-statline { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: rgba(27,26,29,0.6); }
 .ob-statline .ok, .ob-sc-pass .ok, .ob-ready-summary .ok { background: var(--c-teal, #689689); color: #fff; display: grid; place-items: center; border-radius: 50%; }
 .ob-statline .ok { width: 22px; height: 22px; flex: none; }
+.ob-device-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: rgba(27,26,29,0.58); font-size: 12px; }
+.ob-error { color: #9f3f38; }
 .ob-priv { display: flex; gap: 11px; align-items: flex-start; padding: 14px 16px; background: rgba(72,86,150,0.06); border-left: 2px solid var(--accent); font-size: 13px; line-height: 1.5; color: rgba(27,26,29,0.7); }
 .ob-priv b { color: var(--ink); font-weight: 600; }
 

@@ -1,4 +1,4 @@
-import { Clipboard, Copy } from "lucide-react";
+import { Clipboard, Copy, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { TranscriptSession } from "../types/dictation";
 import { EmptyState } from "./EmptyState";
@@ -7,6 +7,7 @@ interface HistoryPanelProps {
   sessions: TranscriptSession[];
   onCopy: (session: TranscriptSession) => Promise<void>;
   onInject: (session: TranscriptSession) => Promise<void>;
+  onDelete: (session: TranscriptSession) => Promise<void>;
 }
 
 function formatDuration(durationMs: number) {
@@ -23,7 +24,7 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
-export function HistoryPanel({ sessions, onCopy, onInject }: HistoryPanelProps) {
+export function HistoryPanel({ sessions, onCopy, onInject, onDelete }: HistoryPanelProps) {
   const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -64,6 +65,7 @@ export function HistoryPanel({ sessions, onCopy, onInject }: HistoryPanelProps) 
                     {String(filtered.length - index).padStart(2, "0")}
                   </div>
                   <div className="tx__txt">
+                    <span className="app">{session.sourceApplication ?? "Local dictation"}</span>
                     <button
                       type="button"
                       className="tx__open"
@@ -95,6 +97,14 @@ export function HistoryPanel({ sessions, onCopy, onInject }: HistoryPanelProps) 
                           >
                             <Clipboard size={14} />
                             Paste again
+                          </button>
+                          <button
+                            type="button"
+                            className="pill-btn ghost"
+                            onClick={() => void onDelete(session)}
+                          >
+                            <Trash2 size={14} />
+                            Delete
                           </button>
                         </div>
                       </div>

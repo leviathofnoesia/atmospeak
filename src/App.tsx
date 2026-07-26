@@ -3,11 +3,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
 import {
   BookOpen,
-  Cpu,
   History,
+  Home,
   Radio,
   Scissors,
   Settings,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
@@ -20,18 +21,20 @@ import { DictionaryPanel } from "./components/DictionaryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { HomePanel } from "./components/HomePanel";
 import { Onboarding } from "./components/Onboarding";
+import { ModelManagement } from "./components/ModelManagement";
 import { RecorderOverlay } from "./components/RecorderOverlay";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SnippetPanel } from "./components/SnippetPanel";
 import type { RecorderPhase } from "./components/RecorderOverlay";
-import { StatusLed } from "./components/StatusLed";
 import {
-  cancelRecording,
   cancelModelDownload,
+  cancelSoundCheck,
   checkForUpdates,
+  completeOnboarding as completeOnboardingNative,
   copyText,
   deleteDictionaryEntry,
   deleteModel,
+  deleteSession,
   deleteSnippet,
   downloadAndInstallUpdate,
   downloadModel,
@@ -39,23 +42,23 @@ import {
   getLastStageMetrics,
   getModelInventory,
   getModelStatus,
-  getRecordingLevel,
   getRuntimeEvents,
   getShortcutStatus,
   handleDictationAction,
   hasTauriRuntime,
   injectText,
   listMicrophones,
-  micCheckStart,
-  micCheckStop,
+  openWindowsSoundSettings,
+  registerSetupShortcut,
+  resetOverlayPosition,
   saveOverlayPosition,
   saveSettings,
   setShortcutTestActive,
   setShortcutsPaused,
   showFloatingControl,
   showMainWindow,
-  startRecording,
-  stopRecording,
+  startSoundCheck,
+  finishSoundCheck,
   upsertDictionaryEntry,
   upsertSnippet,
 } from "./lib/api";
@@ -65,6 +68,7 @@ import type {
   AppSnapshot,
   DictionaryEntry,
   HubTab,
+  MicLevel,
   MicrophoneInfo,
   ModelInventory,
   ModelDownloadProgress,
@@ -74,23 +78,19 @@ import type {
   RuntimeEvent,
   ShortcutStatus,
   Snippet,
+  SoundCheckResult,
   StageMetrics,
   UpdateCheckResult,
   UpdateStatus,
 } from "./types/dictation";
 import { ONBOARDING_VERSION } from "./types/dictation";
 
-const recordingLevelPollMs = 250;
-const recordingLevelCommitMs = 400;
-const recordingLevelDelta = 0.03;
-
 const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
-  { id: "home", label: "Home", icon: Radio },
+  { id: "home", label: "Home", icon: Home },
   { id: "history", label: "History", icon: History },
   { id: "dictionary", label: "Dictionary", icon: BookOpen },
   { id: "snippets", label: "Snippets", icon: Scissors },
   { id: "settings", label: "Settings", icon: Settings },
-  { id: "advanced", label: "Advanced", icon: Cpu },
 ];
 
 interface ShortcutTestState {
@@ -112,8 +112,35 @@ interface MicCheckState {
   message: string;
 }
 
+interface SoundCheckState {
+  active: boolean;
+  result: SoundCheckResult | null;
+  message: string;
+}
+
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function soundCheckFailureMessage(code: string | null): string {
+  switch (code) {
+    case "too_short":
+      return "Keep holding while you read the complete line.";
+    case "too_long":
+      return "The check ran too long. Release after the line.";
+    case "too_quiet":
+      return "Your voice is too quiet. Move closer or raise the Windows input level.";
+    case "excessive_noise":
+      return "Background noise is masking your voice.";
+    case "clipping":
+      return "The input is clipping. Lower the Windows input level.";
+    case "backend_unavailable":
+      return "The resident transcription host is still warming. Wait a moment and retry.";
+    case "unintelligible_phrase":
+      return "The words did not match the line clearly enough. Try again.";
+    default:
+      return "The sound check did not pass.";
+  }
 }
 
 function AppShell() {
@@ -133,9 +160,7 @@ function AppShell() {
   });
   const [recording, setRecording] = useState<RecordingStarted | null>(null);
   const [recorderPhase, setRecorderPhase] = useState<RecorderPhase>("idle");
-  const [busy, setBusy] = useState(false);
   const [, setElapsedSeconds] = useState(0);
-  const [, setRecordingLevel] = useState(0);
   const [shortcutTest, setShortcutTest] = useState<ShortcutTestState>({
     active: false,
     detected: false,
@@ -147,6 +172,12 @@ function AppShell() {
     level: 0,
     message: "",
   });
+  const [, setMicLevel] = useState<MicLevel | null>(null);
+  const [soundCheck, setSoundCheck] = useState<SoundCheckState>({
+    active: false,
+    result: null,
+    message: "",
+  });
   const [pasteTest, setPasteTest] = useState<PasteTestState>({
     running: false,
     passed: false,
@@ -154,16 +185,22 @@ function AppShell() {
   });
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
-  const [dictEntry, setDictEntry] = useState({ phrase: "", replacement: "" });
-  const [snippetDraft, setSnippetDraft] = useState({ trigger: "", body: "" });
+  const [dictEntry, setDictEntry] = useState({
+    id: null as string | null,
+    phrase: "",
+    replacement: "",
+  });
+  const [snippetDraft, setSnippetDraft] = useState({
+    id: null as string | null,
+    trigger: "",
+    body: "",
+  });
 
   const busyRef = useRef(false);
   const recordingRef = useRef<RecordingStarted | null>(null);
   const settingsRef = useRef<AppSettings | null>(null);
   const shortcutTestRef = useRef(shortcutTest);
-  const micCheckLevelRef = useRef(0);
-  const micCheckPassedRef = useRef(false);
-  const lastMicCheckLevelCommitRef = useRef(0);
+  const shortcutTestTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -177,7 +214,6 @@ function AppShell() {
 
   const setBusyState = useCallback((nextBusy: boolean) => {
     busyRef.current = nextBusy;
-    setBusy(nextBusy);
   }, []);
 
   const refreshSnapshotOnly = useCallback(async () => {
@@ -198,7 +234,12 @@ function AppShell() {
       getLastStageMetrics(),
     ]);
     setSnapshot(next);
-    setSettingsDraft(next.settings);
+    const preferredMicrophone =
+      next.settings.microphoneName ??
+      mics.find((microphone) => microphone.isDefault)?.name ??
+      mics[0]?.name ??
+      null;
+    setSettingsDraft({ ...next.settings, microphoneName: preferredMicrophone });
     setMicrophones(mics);
     setModelStatus(status);
     setModelInventory(inventory);
@@ -225,27 +266,6 @@ function AppShell() {
     }, 1000);
     return () => window.clearInterval(interval);
   }, [recording]);
-
-  useEffect(() => {
-    if (recorderPhase !== "listening" && !micCheck.active) {
-      setRecordingLevel(0);
-      return undefined;
-    }
-    let cancelled = false;
-    const poll = () => {
-      void getRecordingLevel()
-        .then((level) => {
-          if (!cancelled) setRecordingLevel(Math.max(0, Math.min(1, level)));
-        })
-        .catch(() => undefined);
-    };
-    poll();
-    const interval = window.setInterval(poll, recordingLevelPollMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [micCheck.active, recorderPhase]);
 
   const applyNativeDictation = useCallback(
     (payload: NativeDictationEvent) => {
@@ -299,6 +319,10 @@ function AppShell() {
               return;
             }
             if (action === "pressed" || action === "toggle" || action === "released") {
+              if (shortcutTestTimerRef.current !== null) {
+                window.clearTimeout(shortcutTestTimerRef.current);
+                shortcutTestTimerRef.current = null;
+              }
               const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "shortcut";
               void setShortcutTestActive(false);
               setShortcutTest({
@@ -338,6 +362,38 @@ function AppShell() {
           (payload) => setModelDownload(payload as ModelDownloadProgress),
         ],
         [
+          "atmospeak://mic-level",
+          (payload) => {
+            const level = payload as MicLevel;
+            setMicLevel(level);
+            setMicCheck((current) => {
+              if (!current.active) return current;
+              const healthy = level.rmsDbfs >= -48 && level.peakDbfs >= -30;
+              return {
+                ...current,
+                passed: current.passed || healthy,
+                level: Math.max(0, Math.min(1, (level.peakDbfs + 60) / 60)),
+                message: healthy
+                  ? `Healthy signal · ${level.rmsDbfs.toFixed(1)} dBFS RMS`
+                  : `Too quiet · ${level.rmsDbfs.toFixed(1)} dBFS RMS`,
+              };
+            });
+          },
+        ],
+        [
+          "atmospeak://sound-check",
+          (payload) => {
+            const result = payload as SoundCheckResult;
+            setSoundCheck({
+              active: false,
+              result,
+              message: result.passed
+                ? `Heard clearly in ${result.asrMs}ms on the resident host.`
+                : soundCheckFailureMessage(result.failureCode),
+            });
+          },
+        ],
+        [
           "wind-speak://overlay-visibility",
           (payload) =>
             setNotice({ tone: "neutral", message: String(payload) }),
@@ -357,112 +413,12 @@ function AppShell() {
     return () => {
       cancelled = true;
       for (const unlisten of unlisteners) unlisten();
+      if (shortcutTestTimerRef.current !== null) {
+        window.clearTimeout(shortcutTestTimerRef.current);
+        shortcutTestTimerRef.current = null;
+      }
     };
   }, [applyNativeDictation, shortcutStatus?.hotkey, shortcutStatus?.paused]);
-
-  const handleToggleRecording = useCallback(async () => {
-    if (busyRef.current) return;
-    setBusyState(true);
-    try {
-      // Browser mock / blocking IPC path (engine events drive Tauri after A3).
-      if (recordingRef.current === null) {
-        if (hasTauriRuntime()) {
-          try {
-            await handleDictationAction("start");
-            // Native events update phase; keep a soft notice for UX.
-            setNotice({ tone: "neutral", message: "Listening…" });
-            return;
-          } catch {
-            // fall through
-          }
-        }
-        const started = await startRecording();
-        setRecording(started);
-        setRecorderPhase("listening");
-        setNotice({
-          tone: "success",
-          message: `Recording from ${started.microphoneName}.`,
-        });
-      } else {
-        setRecorderPhase("processing");
-        setNotice({ tone: "neutral", message: "Transcribing locally…" });
-        if (hasTauriRuntime()) {
-          try {
-            await handleDictationAction("stop");
-            await refreshSnapshotOnly();
-            setActiveTab("history");
-            return;
-          } catch {
-            // fall through to blocking stop
-          }
-        }
-        const result = await stopRecording();
-        await refreshSnapshotOnly();
-        setRecording(null);
-        setRecorderPhase(result.injection?.injected ? "pasted" : "idle");
-        setNotice({
-          tone: result.injection?.injected ? "success" : "neutral",
-          message: result.injection?.message ?? "Transcript saved to history.",
-        });
-        setActiveTab("history");
-      }
-    } catch (error: unknown) {
-      setRecording(null);
-      setRecorderPhase("error");
-      setNotice({ tone: "error", message: stringifyError(error) });
-      await refresh().catch(() => undefined);
-    } finally {
-      setBusyState(false);
-    }
-  }, [refresh, refreshSnapshotOnly, setBusyState]);
-
-  useEffect(() => {
-    if (!micCheck.active) return undefined;
-    let cancelled = false;
-    const pollLevel = () => {
-      getRecordingLevel()
-        .then((level) => {
-          if (cancelled) return;
-          const normalized = Math.max(0, Math.min(1, level));
-          const previous = micCheckLevelRef.current;
-          const now = window.performance.now();
-          const justPassed = normalized > 0.06 && !micCheckPassedRef.current;
-          if (
-            !justPassed &&
-            now - lastMicCheckLevelCommitRef.current < recordingLevelCommitMs &&
-            Math.abs(normalized - previous) < recordingLevelDelta
-          ) {
-            return;
-          }
-          micCheckLevelRef.current = normalized;
-          if (normalized > 0.06) micCheckPassedRef.current = true;
-          lastMicCheckLevelCommitRef.current = now;
-          setMicCheck((current) => ({
-            ...current,
-            level: normalized,
-            passed: current.passed || normalized > 0.06,
-            message:
-              normalized > 0.06
-                ? "Microphone signal detected."
-                : "Listening for microphone signal...",
-          }));
-        })
-        .catch((error: unknown) => {
-          if (!cancelled) {
-            setMicCheck((current) => ({
-              ...current,
-              message: stringifyError(error),
-            }));
-          }
-        });
-    };
-    pollLevel();
-    const interval = window.setInterval(pollLevel, 250);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [micCheck.active]);
 
   const startMicCheck = useCallback(async () => {
     if (busyRef.current || recordingRef.current !== null) {
@@ -474,61 +430,86 @@ function AppShell() {
     }
     setBusyState(true);
     try {
-      await micCheckStart();
-      micCheckLevelRef.current = 0;
-      micCheckPassedRef.current = false;
-      lastMicCheckLevelCommitRef.current = window.performance.now() - recordingLevelCommitMs;
+      const deviceName = settingsRef.current?.microphoneName;
+      if (!deviceName) throw new Error("Choose a microphone before checking its signal.");
+      await startSoundCheck(deviceName);
       setMicCheck({
         active: true,
         passed: false,
         level: 0,
-        message: "Listening for microphone signal...",
+        message: `Listening through ${deviceName}...`,
       });
       setNotice({ tone: "neutral", message: "Microphone check is listening." });
     } catch (error: unknown) {
-      // Browser mock / older path: try recording-based check.
-      try {
-        const started = await startRecording();
-        setRecording(started);
-        setRecorderPhase("listening");
-        setMicCheck({
-          active: true,
-          passed: false,
-          level: 0,
-          message: `Listening through ${started.microphoneName}.`,
-        });
-      } catch (inner: unknown) {
-        setMicCheck({
-          active: false,
-          passed: false,
-          level: 0,
-          message: stringifyError(inner ?? error),
-        });
-        setNotice({ tone: "error", message: stringifyError(inner ?? error) });
-      }
+      setMicCheck({
+        active: false,
+        passed: false,
+        level: 0,
+        message: stringifyError(error),
+      });
+      setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
       setBusyState(false);
     }
   }, [setBusyState]);
 
   const stopMicCheck = useCallback(async () => {
-    try {
-      await micCheckStop();
-    } catch {
-      try {
-        await cancelRecording();
-      } catch {
-        /* ignore */
-      }
-      setRecording(null);
-      setRecorderPhase("idle");
-    }
+    await cancelSoundCheck().catch(() => false);
     setMicCheck((current) => ({
       ...current,
       active: false,
-      message: current.passed ? "Microphone check passed." : "Microphone check stopped.",
+      message: current.passed
+        ? "Healthy microphone signal confirmed."
+        : "No healthy signal was confirmed.",
     }));
   }, []);
+
+  const startPhraseCheck = useCallback(async () => {
+    const currentSettings = settingsRef.current;
+    const deviceName = currentSettings?.microphoneName;
+    if (!deviceName) {
+      setSoundCheck({ active: false, result: null, message: "Choose a microphone first." });
+      return;
+    }
+    try {
+      // Persist the selected device and model before capture so the resident
+      // host used by the mandatory check is the one the user actually chose.
+      if (currentSettings) {
+        const prepared = await saveSettings({
+          ...currentSettings,
+          onboardingComplete: false,
+          onboardingVersion: "",
+          audioCalibration: null,
+        });
+        setSnapshot(prepared);
+        setSettingsDraft(prepared.settings);
+      }
+      await startSoundCheck(deviceName);
+      setSoundCheck({ active: true, result: null, message: "Listening..." });
+    } catch (error: unknown) {
+      setSoundCheck({ active: false, result: null, message: stringifyError(error) });
+    }
+  }, []);
+
+  const finishPhraseCheck = useCallback(async () => {
+    setSoundCheck((current) => ({ ...current, active: false, message: "Transcribing locally..." }));
+    try {
+      const result = await finishSoundCheck("The porcelain moon hums over the studio.");
+      setSoundCheck({
+        active: false,
+        result,
+        message: result.passed
+          ? `Heard clearly in ${result.asrMs}ms on the resident host.`
+          : soundCheckFailureMessage(result.failureCode),
+      });
+      if (result.passed) {
+        const next = await refreshSnapshotOnly();
+        setSettingsDraft(next.settings);
+      }
+    } catch (error: unknown) {
+      setSoundCheck({ active: false, result: null, message: stringifyError(error) });
+    }
+  }, [refreshSnapshotOnly]);
 
   const onSaveSettings = useCallback(async () => {
     if (!settingsDraft) return;
@@ -593,22 +574,21 @@ function AppShell() {
     if (!snapshot) return false;
     return (
       !snapshot.settings.onboardingComplete ||
-      snapshot.settings.onboardingVersion !== ONBOARDING_VERSION
+      snapshot.settings.onboardingVersion !== ONBOARDING_VERSION ||
+      snapshot.settings.audioCalibration?.asrBackend !== "host"
     );
   }, [snapshot]);
 
   const completeOnboarding = useCallback(async () => {
     if (!settingsDraft) return;
-    const nextSettings: AppSettings = {
-      ...settingsDraft,
-      onboardingComplete: true,
-      onboardingVersion: ONBOARDING_VERSION,
-    };
-    const next = await saveSettings(nextSettings);
+    if (!soundCheck.result?.passed) {
+      throw new Error("Complete the sound check before entering Atmospeak.");
+    }
+    const next = await completeOnboardingNative(settingsDraft);
     setSnapshot(next);
     setSettingsDraft(next.settings);
     setNotice({ tone: "success", message: "Onboarding complete. Atmospeak is armed." });
-  }, [settingsDraft]);
+  }, [settingsDraft, soundCheck.result]);
 
   const recentSession = snapshot?.sessions[0] ?? null;
 
@@ -633,15 +613,43 @@ function AppShell() {
         shortcutStatus={shortcutStatus}
         shortcutTest={shortcutTest}
         micCheck={micCheck}
+        soundCheck={soundCheck}
         onStartMicCheck={startMicCheck}
         onStopMicCheck={stopMicCheck}
+        onStartSoundCheck={startPhraseCheck}
+        onFinishSoundCheck={finishPhraseCheck}
+        onOpenWindowsSoundSettings={openWindowsSoundSettings}
         onTestShortcut={() => {
-          void setShortcutTestActive(true);
-          setShortcutTest({
-            active: true,
-            detected: false,
-            message: "Press your dictation shortcut…",
-          });
+          void registerSetupShortcut(settingsDraft.hotkey)
+            .then((status) => {
+              setShortcutStatus(status);
+              setShortcutTest({
+                active: status.registered,
+                detected: false,
+                message: status.registered ? "Press your dictation shortcut…" : status.message,
+              });
+              if (shortcutTestTimerRef.current !== null) {
+                window.clearTimeout(shortcutTestTimerRef.current);
+              }
+              if (status.registered) {
+                shortcutTestTimerRef.current = window.setTimeout(() => {
+                  shortcutTestTimerRef.current = null;
+                  void setShortcutTestActive(false);
+                  setShortcutTest({
+                    active: false,
+                    detected: false,
+                    message: "Shortcut was not detected. Choose another chord and retry.",
+                  });
+                }, 10_000);
+              }
+            })
+            .catch((error: unknown) => {
+              setShortcutTest({
+                active: false,
+                detected: false,
+                message: stringifyError(error),
+              });
+            });
         }}
         pasteTest={pasteTest}
         onPasteTest={async () => {
@@ -661,9 +669,6 @@ function AppShell() {
             });
           }
         }}
-        onShowFloatingControl={async () => {
-          await showFloatingControl();
-        }}
         onSelectModel={(modelId) =>
           setSettingsDraft((current) =>
             current ? { ...current, activeModelId: modelId } : current,
@@ -679,53 +684,72 @@ function AppShell() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <Aura size={36} active={recorderPhase === "listening"} />
-          <div>
+    <div className="hub-shell">
+      <aside className="hub__nav">
+        <div className="hub__brand">
+          <span className="brand-aura">
+            <Aura size={30} active={recorderPhase === "listening"} />
+          </span>
+          <span className="wm">
             <strong>Atmospeak</strong>
-            <span>Local dictation · resident ASR</span>
-          </div>
+            <span>Local · {settingsDraft.accent}</span>
+          </span>
         </div>
         <nav aria-label="Atmospeak sections">
           {tabs.map((tab) => {
             const Icon = tab.icon;
+            const count =
+              tab.id === "history"
+                ? snapshot.sessions.length
+                : tab.id === "dictionary"
+                  ? snapshot.dictionary.length
+                  : tab.id === "snippets"
+                    ? snapshot.snippets.length
+                    : null;
             return (
               <button
                 key={tab.id}
                 type="button"
-                className={clsx("nav-item", activeTab === tab.id && "nav-item--active")}
+                aria-label={tab.label}
+                className={clsx("hub__navitem", activeTab === tab.id && "active")}
                 onClick={() => setActiveTab(tab.id)}
               >
                 <Icon size={18} />
-                {tab.label}
+                <span className="lab">{tab.label}</span>
+                {count !== null ? <span className="ct">{count}</span> : null}
               </button>
             );
           })}
         </nav>
-        <StatusLed
-          tone={
-            recorderPhase === "error"
-              ? "hot"
-              : recorderPhase === "listening" || recorderPhase === "processing"
-                ? "warn"
-                : modelStatus?.ready
-                  ? "good"
-                  : "warn"
-          }
-          label={notice.message}
-        />
+        <div className="marquee-foot">
+          + ON DEVICE · NO CLOUD · WHISPER · {modelInventory?.activeModelId ?? "BASE.EN"} +
+        </div>
       </aside>
-      <main className="main-panel">
+      <main className="hub__main">
+        <button
+          type="button"
+          className="hub__close"
+          aria-label="Close hub"
+          onClick={() => {
+            if (hasTauriRuntime()) void getCurrentWindow().close();
+          }}
+        >
+          <X size={16} />
+        </button>
+        {notice.tone !== "neutral" ? (
+          <div className={`notice-rail notice-rail--${notice.tone}`} role="status">
+            <span className={`notice-rail__tone notice-rail__tone--${notice.tone}`} />
+            <p>{notice.message}</p>
+          </div>
+        ) : null}
         {activeTab === "home" ? (
           <HomePanel
             snapshot={snapshot}
-            modelStatus={modelStatus}
             recentSession={recentSession}
-            lastMetrics={lastMetrics}
-            onStart={() => void handleToggleRecording()}
-            busy={busy}
+            onCopyRecent={async (session) => {
+              const message = await copyText(session.cleanedText);
+              setNotice({ tone: "success", message });
+            }}
           />
         ) : null}
         {activeTab === "history" ? (
@@ -742,6 +766,11 @@ function AppShell() {
                 message: result.message,
               });
             }}
+            onDelete={async (session) => {
+              const next = await deleteSession(session.id);
+              setSnapshot(next);
+              setNotice({ tone: "success", message: "Transcript deleted." });
+            }}
           />
         ) : null}
         {activeTab === "dictionary" ? (
@@ -752,14 +781,14 @@ function AppShell() {
             onSubmit={async (event: FormEvent) => {
               event.preventDefault();
               const next = await upsertDictionaryEntry({
-                id: "",
+                id: dictEntry.id ?? "",
                 phrase: dictEntry.phrase,
                 replacement: dictEntry.replacement,
                 enabled: true,
                 createdAt: new Date().toISOString(),
               });
               setSnapshot(next);
-              setDictEntry({ phrase: "", replacement: "" });
+              setDictEntry({ id: null, phrase: "", replacement: "" });
             }}
             onToggle={async (entry: DictionaryEntry) => {
               const next = await upsertDictionaryEntry({
@@ -782,14 +811,14 @@ function AppShell() {
             onSubmit={async (event: FormEvent) => {
               event.preventDefault();
               const next = await upsertSnippet({
-                id: "",
+                id: snippetDraft.id ?? "",
                 trigger: snippetDraft.trigger,
                 body: snippetDraft.body,
                 enabled: true,
                 createdAt: new Date().toISOString(),
               });
               setSnapshot(next);
-              setSnippetDraft({ trigger: "", body: "" });
+              setSnippetDraft({ id: null, trigger: "", body: "" });
             }}
             onToggle={async (snippet: Snippet) => {
               const next = await upsertSnippet({
@@ -811,7 +840,6 @@ function AppShell() {
             microphones={microphones}
             shortcutStatus={shortcutStatus}
             shortcutTest={shortcutTest}
-            runtimeEvents={runtimeEvents}
             onTestShortcut={() => {
               if (shortcutStatus?.paused) {
                 setShortcutTest({
@@ -840,11 +868,16 @@ function AppShell() {
               await showFloatingControl();
               setNotice({ tone: "success", message: "Floating control shown." });
             }}
+            onResetDockPosition={async () => {
+              await resetOverlayPosition();
+              setNotice({ tone: "success", message: "Dock position reset." });
+            }}
             onRerunOnboarding={async () => {
               const next = await saveSettings({
                 ...settingsDraft,
                 onboardingComplete: false,
                 onboardingVersion: "",
+                audioCalibration: null,
               });
               setSnapshot(next);
               setSettingsDraft(next.settings);
@@ -874,27 +907,43 @@ function AppShell() {
                 setNotice({ tone: "error", message: stringifyError(error) });
               }
             }}
-          />
-        ) : null}
-        {activeTab === "advanced" ? (
-          <AdvancedPanel
-            settings={settingsDraft}
-            setSettings={setSettingsDraft}
-            modelStatus={modelStatus}
-            modelInventory={modelInventory}
-            modelDownload={modelDownload}
-            lastMetrics={lastMetrics}
-            onSelectModel={(modelId) =>
-              setSettingsDraft((current) =>
-                current ? { ...current, activeModelId: modelId } : current,
-              )
+            advanced={
+              <AdvancedPanel
+                settings={settingsDraft}
+                setSettings={setSettingsDraft}
+                modelStatus={modelStatus}
+                lastMetrics={lastMetrics}
+                runtimeEvents={runtimeEvents}
+                onRunDiagnosticSoundCheck={async () => {
+                  const next = await saveSettings({
+                    ...settingsDraft,
+                    onboardingComplete: false,
+                    onboardingVersion: "",
+                    audioCalibration: null,
+                  });
+                  setSnapshot(next);
+                  setSettingsDraft(next.settings);
+                }}
+                onSave={onSaveSettings}
+              />
             }
-            onDownloadModel={onDownloadModel}
-            onCancelModelDownload={async () => {
-              await cancelModelDownload();
-            }}
-            onDeleteModel={onDeleteModel}
-            onSave={onSaveSettings}
+            modelManagement={
+              <ModelManagement
+                settings={settingsDraft}
+                inventory={modelInventory}
+                download={modelDownload}
+                onSelect={(modelId) =>
+                  setSettingsDraft((current) =>
+                    current ? { ...current, activeModelId: modelId } : current,
+                  )
+                }
+                onDownload={onDownloadModel}
+                onCancelDownload={async () => {
+                  await cancelModelDownload();
+                }}
+                onDelete={onDeleteModel}
+              />
+            }
           />
         ) : null}
       </main>
@@ -906,6 +955,8 @@ function OverlayShell() {
   const [phase, setPhase] = useState<RecorderPhase>("idle");
   const [message, setMessage] = useState("Ready");
   const [level, setLevel] = useState(0);
+  const [dragDiagnostic, setDragDiagnostic] = useState("");
+  const suppressPositionSaveRef = useRef(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [recording, setRecording] = useState<RecordingStarted | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -955,10 +1006,39 @@ function OverlayShell() {
       if (cancelled) unlistenSettings();
       else unlisteners.push(unlistenSettings);
 
+      const unlistenLevel = await listen<MicLevel>(
+        "atmospeak://mic-level",
+        (event) => {
+          const normalizedPeak = (event.payload.peakDbfs + 60) / 60;
+          setLevel(Math.max(0, Math.min(1, normalizedPeak)));
+        },
+      );
+      if (cancelled) unlistenLevel();
+      else unlisteners.push(unlistenLevel);
+
+      let resetTimer: number | undefined;
+      const unlistenReset = await listen(
+        "atmospeak://overlay-position-resetting",
+        () => {
+          suppressPositionSaveRef.current = true;
+          window.clearTimeout(resetTimer);
+          resetTimer = window.setTimeout(() => {
+            suppressPositionSaveRef.current = false;
+          }, 1_000);
+        },
+      );
+      if (cancelled) unlistenReset();
+      else
+        unlisteners.push(() => {
+          window.clearTimeout(resetTimer);
+          unlistenReset();
+        });
+
       // Remember where the companion was dropped. onMoved fires throughout the OS
       // drag, so settle briefly before writing.
       let moveTimer: number | undefined;
       const unlistenMoved = await getCurrentWindow().onMoved(({ payload }) => {
+        if (suppressPositionSaveRef.current) return;
         window.clearTimeout(moveTimer);
         moveTimer = window.setTimeout(() => {
           void saveOverlayPosition(payload.x, payload.y).catch(() => undefined);
@@ -978,14 +1058,7 @@ function OverlayShell() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "listening") {
-      setLevel(0);
-      return undefined;
-    }
-    const interval = window.setInterval(() => {
-      void getRecordingLevel().then((value) => setLevel(value));
-    }, recordingLevelPollMs);
-    return () => window.clearInterval(interval);
+    if (phase !== "listening") setLevel(0);
   }, [phase]);
 
   useEffect(() => {
@@ -1007,7 +1080,7 @@ function OverlayShell() {
       busy={phase === "processing"}
       phase={phase}
       modelStatus={modelStatus}
-      notice={message}
+      notice={dragDiagnostic || message}
       inputLevel={level}
       inputBands={[]}
       bubbleSize="medium"
@@ -1036,11 +1109,18 @@ function OverlayShell() {
         // as a target.
         if (!hasTauriRuntime()) return;
         const overlay = getCurrentWindow();
+        setDragDiagnostic("");
         void overlay
           .setFocus()
           .then(() => overlay.startDragging())
-          .catch(() => {
-            /* window closed mid-drag */
+          .catch((error: unknown) => {
+            console.error("Atmospeak dock drag failed", {
+              window: overlay.label,
+              error,
+            });
+            if (import.meta.env.DEV) {
+              setDragDiagnostic("Dock drag failed — see the developer console.");
+            }
           });
       }}
       onOpenHub={() => {

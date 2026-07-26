@@ -5,12 +5,13 @@ use crate::{
     models::{
         AppSettings, AppSnapshot, DictationResult, DictionaryEntry, InjectionResult,
         MicrophoneInfo, ModelInventory, ModelStatus, RecordingStarted, RuntimeEvent,
-        ShortcutStatus, Snippet, StageMetrics,
+        ShortcutStatus, Snippet, SoundCheckResult, StageMetrics,
     },
     services::{
         app_state::AppState,
         dictation_engine::{self, DispatchResult, EngineAction},
-        injection, model_downloader, overlay_window, runtime, shortcuts, startup,
+        injection, model_downloader, overlay_window, proc, runtime, shortcuts, sound_check,
+        startup, window_manager,
     },
 };
 
@@ -39,7 +40,16 @@ pub fn get_recording_level(state: State<'_, AppState>) -> f32 {
 
 #[tauri::command]
 pub fn list_microphones(state: State<'_, AppState>) -> CommandResult<Vec<MicrophoneInfo>> {
-    state.recorder.list_microphones().map_err(|e| e.to_string())
+    let selected = state
+        .database
+        .lock()
+        .load_settings()
+        .ok()
+        .and_then(|settings| settings.microphone_name);
+    state
+        .recorder
+        .list_microphones(selected.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -53,6 +63,34 @@ pub fn save_settings(
         .lock()
         .load_settings()
         .map_err(|e| e.to_string())?;
+    if settings.onboarding_complete
+        && settings.onboarding_version == crate::ONBOARDING_VERSION
+        && previous_settings.audio_calibration.is_none()
+    {
+        return Err(
+            "A successful host-backed sound check is required before setup can complete."
+                .to_string(),
+        );
+    }
+    if previous_settings.audio_calibration.is_some()
+        && settings.audio_calibration.is_none()
+        && settings.onboarding_complete
+    {
+        return Err("Audio calibration cannot be cleared while setup is complete.".to_string());
+    }
+    if settings.onboarding_complete
+        && settings
+            .audio_calibration
+            .as_ref()
+            .is_some_and(|calibration| {
+                settings.microphone_name.as_deref() != Some(calibration.device_name.as_str())
+            })
+    {
+        return Err(
+            "The selected microphone has not been calibrated. Run the diagnostic sound check before saving it."
+                .to_string(),
+        );
+    }
     let runtime_changed = previous_settings.active_model_id != settings.active_model_id
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
@@ -61,6 +99,9 @@ pub fn save_settings(
     let database = state.database.lock();
     database
         .save_settings(&settings)
+        .map_err(|e| e.to_string())?;
+    let expired_audio = database
+        .prune_sessions(settings.transcript_retention_days)
         .map_err(|e| e.to_string())?;
     let _ = runtime::model_status(&app, &settings);
     shortcuts::register_shortcut(
@@ -76,6 +117,7 @@ pub fn save_settings(
     let _ = app.emit("atmospeak://settings-changed", settings.clone());
     let snapshot = database.snapshot().map_err(|e| e.to_string())?;
     drop(database);
+    remove_managed_recordings(&state.app_dir, expired_audio);
     if runtime_changed {
         state.shutdown_asr_host();
         crate::start_asr_host(&app);
@@ -99,17 +141,15 @@ pub fn set_shortcuts_paused(
 
 #[tauri::command]
 pub fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
-    overlay_window::show(&app).map_err(|e| e.to_string())
+    window_manager::show_overlay(&app, crate::ONBOARDING_VERSION).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn show_main_window(app: AppHandle) -> CommandResult<()> {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-    Ok(())
+    let setup = !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION);
+    window_manager::ensure_main(&app, setup)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -118,8 +158,32 @@ pub fn save_overlay_position(app: AppHandle, x: i32, y: i32) {
 }
 
 #[tauri::command]
-pub fn set_shortcut_test_active(state: State<'_, AppState>, active: bool) {
+pub fn set_shortcut_test_active(app: AppHandle, state: State<'_, AppState>, active: bool) {
     state.set_shortcut_test_active(active);
+    if !active && !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION) {
+        shortcuts::set_paused(
+            &app,
+            state.shortcut_status.clone(),
+            state.shortcuts_paused.clone(),
+            true,
+        );
+    }
+}
+
+#[tauri::command]
+pub fn register_setup_shortcut(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hotkey: String,
+) -> ShortcutStatus {
+    state.set_shortcut_test_active(true);
+    shortcuts::register_shortcut(
+        &app,
+        state.shortcut_status.clone(),
+        state.shortcuts_paused.clone(),
+        &hotkey,
+        false,
+    )
 }
 
 #[tauri::command]
@@ -180,6 +244,109 @@ pub fn mic_check_start(state: State<'_, AppState>) -> CommandResult<()> {
 #[tauri::command]
 pub fn mic_check_stop(state: State<'_, AppState>) -> CommandResult<()> {
     engine(&state)?.mic_check_stop()
+}
+
+#[tauri::command]
+pub fn start_sound_check(app: AppHandle, device_name: String) -> CommandResult<()> {
+    sound_check::start(&app, device_name).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn finish_sound_check(
+    app: AppHandle,
+    expected_phrase: String,
+) -> CommandResult<SoundCheckResult> {
+    tauri::async_runtime::spawn_blocking(move || sound_check::finish(&app, expected_phrase))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn cancel_sound_check(app: AppHandle) -> bool {
+    sound_check::cancel(&app)
+}
+
+#[tauri::command]
+pub fn open_windows_sound_settings() -> CommandResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = std::process::Command::new("explorer.exe");
+        command.arg("ms-settings:sound");
+        proc::hide_console(&mut command);
+        command.spawn().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn complete_onboarding(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut settings: AppSettings,
+) -> CommandResult<AppSnapshot> {
+    let persisted = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|error| error.to_string())?;
+    let calibration = persisted
+        .audio_calibration
+        .filter(|calibration| calibration.asr_backend == "host")
+        .ok_or_else(|| {
+            "Complete the host-backed sound check before entering Atmospeak.".to_string()
+        })?;
+    if settings.microphone_name.as_deref() != Some(calibration.device_name.as_str()) {
+        return Err(
+            "The selected microphone changed after calibration. Run the sound check again."
+                .to_string(),
+        );
+    }
+    if settings.active_model_id != calibration.model_id {
+        return Err(
+            "The selected voice model changed after calibration. Run the sound check again."
+                .to_string(),
+        );
+    }
+    settings.audio_calibration = Some(calibration);
+    settings.onboarding_complete = true;
+    settings.onboarding_version = crate::ONBOARDING_VERSION.to_string();
+    startup::set_start_at_login(settings.start_at_login).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .save_settings(&settings)
+        .map_err(|error| error.to_string())?;
+    let shortcut = shortcuts::register_shortcut(
+        &app,
+        state.shortcut_status.clone(),
+        state.shortcuts_paused.clone(),
+        &settings.hotkey,
+        false,
+    );
+    if !shortcut.registered {
+        settings.onboarding_complete = false;
+        settings.onboarding_version.clear();
+        state
+            .database
+            .lock()
+            .save_settings(&settings)
+            .map_err(|error| error.to_string())?;
+        return Err(shortcut.message);
+    }
+    let _ = app.emit("atmospeak://settings-changed", settings.clone());
+    let _ = app.emit("wind-speak://settings-changed", settings);
+    window_manager::finish_setup(&app).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .snapshot()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn reset_overlay_position(app: AppHandle) -> CommandResult<()> {
+    overlay_window::show_and_reset(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -245,6 +412,26 @@ pub fn delete_snippet(state: State<'_, AppState>, id: String) -> CommandResult<A
     let database = state.database.lock();
     database.delete_snippet(&id).map_err(|e| e.to_string())?;
     database.snapshot().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_session(state: State<'_, AppState>, id: String) -> CommandResult<AppSnapshot> {
+    let database = state.database.lock();
+    let audio_path = database.delete_session(&id).map_err(|e| e.to_string())?;
+    let snapshot = database.snapshot().map_err(|e| e.to_string())?;
+    drop(database);
+    remove_managed_recordings(&state.app_dir, audio_path.into_iter().collect());
+    Ok(snapshot)
+}
+
+fn remove_managed_recordings(app_dir: &std::path::Path, paths: Vec<String>) {
+    let recordings_dir = app_dir.join("recordings");
+    for raw_path in paths {
+        let path = std::path::PathBuf::from(raw_path);
+        if path.starts_with(&recordings_dir) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 #[tauri::command]

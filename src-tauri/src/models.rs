@@ -12,8 +12,10 @@ pub struct AppSettings {
     pub auto_inject: bool,
     pub cleanup_enabled: bool,
     pub start_at_login: bool,
+    pub transcript_retention_days: u32,
     pub onboarding_complete: bool,
     pub onboarding_version: String,
+    pub audio_calibration: Option<AudioCalibrationRecord>,
     pub active_model_id: String,
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
@@ -80,8 +82,10 @@ impl Default for AppSettings {
             auto_inject: true,
             cleanup_enabled: true,
             start_at_login: false,
+            transcript_retention_days: 0,
             onboarding_complete: false,
             onboarding_version: String::new(),
+            audio_calibration: None,
             active_model_id: "base.en".to_string(),
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
@@ -162,6 +166,7 @@ pub struct TranscriptSession {
     pub duration_ms: u64,
     pub word_count: usize,
     pub injected: bool,
+    pub source_application: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -222,6 +227,54 @@ pub struct InjectionResult {
 pub struct MicrophoneInfo {
     pub name: String,
     pub is_default: bool,
+    pub is_selected: bool,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicLevel {
+    pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
+    pub noise_floor_dbfs: f32,
+    pub clipping_ratio: f32,
+    pub timestamp_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioCalibrationRecord {
+    pub device_name: String,
+    pub checked_at: DateTime<Utc>,
+    pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
+    pub snr_db: f32,
+    pub model_id: String,
+    pub asr_backend: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundCheckResult {
+    pub passed: bool,
+    pub failure_code: Option<String>,
+    pub device_name: String,
+    pub capture_format: String,
+    pub duration_ms: u64,
+    pub active_speech_ms: u64,
+    pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
+    pub noise_floor_dbfs: f32,
+    pub snr_db: f32,
+    pub clipping_ratio: f32,
+    pub transcript: String,
+    pub expected_phrase: String,
+    pub token_similarity: f32,
+    pub asr_backend: String,
+    pub model_id: String,
+    pub capture_ms: u64,
+    pub asr_ms: u64,
+    pub total_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

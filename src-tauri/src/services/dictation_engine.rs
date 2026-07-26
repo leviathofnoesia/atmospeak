@@ -17,7 +17,7 @@ use crate::{
         app_state::AppState,
         cleanup, injection,
         metrics::{self, StageTimer},
-        recorder, transcriber,
+        recorder, sound_check, transcriber,
     },
 };
 
@@ -312,13 +312,7 @@ impl Worker {
                     self.state = EngineState::Idle;
                     self.active_recording = None;
                     self.settle_deadline = None;
-                    self.emit_phase(
-                        DictationPhase::Idle,
-                        None,
-                        "Ready.",
-                        None,
-                        None,
-                    );
+                    self.emit_phase(DictationPhase::Idle, None, "Ready.", None, None);
                 }
             }
         }
@@ -373,13 +367,7 @@ impl Worker {
             Err(error) => {
                 self.state = EngineState::Error;
                 self.settle_from_terminal();
-                self.emit_phase(
-                    DictationPhase::Error,
-                    None,
-                    error.clone(),
-                    None,
-                    None,
-                );
+                self.emit_phase(DictationPhase::Error, None, error.clone(), None, None);
                 DispatchResult::Rejected { reason: error }
             }
         }
@@ -453,6 +441,7 @@ impl Worker {
         match self.state {
             EngineState::Listening => {
                 let state = self.app.state::<AppState>();
+                state.end_level_stream();
                 let _ = state.recorder.cancel();
                 self.state = EngineState::Idle;
                 self.active_recording = None;
@@ -468,6 +457,7 @@ impl Worker {
             }
             EngineState::MicCheck => {
                 let state = self.app.state::<AppState>();
+                state.end_level_stream();
                 let _ = state.recorder.cancel();
                 self.state = EngineState::Idle;
                 Ok(())
@@ -494,6 +484,7 @@ impl Worker {
             .recorder
             .start(settings.microphone_name)
             .map_err(|e| e.to_string())?;
+        sound_check::start_level_events(&self.app);
         self.state = EngineState::MicCheck;
         // No native-dictation emit for mic-check (D12).
         Ok(())
@@ -504,6 +495,7 @@ impl Worker {
             return Err("microphone check is not active".to_string());
         }
         let state = self.app.state::<AppState>();
+        state.end_level_stream();
         let _ = state.recorder.cancel();
         self.state = EngineState::Idle;
         Ok(())
@@ -516,10 +508,12 @@ impl Worker {
             .lock()
             .load_settings()
             .map_err(|e| e.to_string())?;
-        state
+        let started = state
             .recorder
             .start(settings.microphone_name)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        sound_check::start_level_events(&self.app);
+        Ok(started)
     }
 
     fn capture_target_on_listen(&self) {
@@ -541,9 +535,21 @@ impl Worker {
         );
 
         let state = self.app.state::<AppState>();
+        state.end_level_stream();
         let capture_started = Instant::now();
-        let captured = state.recorder.stop().map_err(|e| e.to_string())?;
+        let mut captured = state.recorder.stop().map_err(|e| e.to_string())?;
         let capture_stop_ms = capture_started.elapsed().as_millis() as u64;
+        if let Err(error) = recorder::prepare_for_dictation(&mut captured) {
+            metrics::emit_runtime(
+                &self.app,
+                "audio-quality-rejected",
+                format!(
+                    "session={} duration={}ms reason={error}",
+                    captured.id, captured.duration_ms
+                ),
+            );
+            return Err(error.to_string());
+        }
 
         let snapshot = state
             .database
@@ -604,6 +610,9 @@ impl Worker {
                     .as_ref()
                     .map(|result| result.injected)
                     .unwrap_or(false),
+                source_application: injection_result
+                    .as_ref()
+                    .and_then(|result| result.target_process_name.clone()),
                 created_at: Utc::now(),
             };
 
@@ -714,7 +723,9 @@ impl Worker {
             result,
             metrics,
         };
-        let _ = self.app.emit("wind-speak://native-dictation", event.clone());
+        let _ = self
+            .app
+            .emit("wind-speak://native-dictation", event.clone());
         let _ = self.app.emit("atmospeak://native-dictation", event);
     }
 }
@@ -885,11 +896,7 @@ mod tests {
         // An already-expired deadline wakes the worker immediately rather than
         // underflowing into a very long wait.
         assert_eq!(
-            settle_wait(
-                EngineState::Pasted,
-                Some(now - Duration::from_secs(1)),
-                now
-            ),
+            settle_wait(EngineState::Pasted, Some(now - Duration::from_secs(1)), now),
             Some(Duration::ZERO)
         );
 

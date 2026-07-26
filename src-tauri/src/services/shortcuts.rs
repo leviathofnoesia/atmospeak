@@ -282,7 +282,7 @@ mod windows_keyboard_hook {
         thread,
         time::Duration,
     };
-    use tauri::{AppHandle, Emitter};
+    use tauri::{AppHandle, Emitter, Manager};
     use windows::Win32::{
         Foundation::{LPARAM, LRESULT, WPARAM},
         System::Threading::GetCurrentThreadId,
@@ -539,8 +539,14 @@ mod windows_keyboard_hook {
                 ShortcutSignal::Cancel => "cancel",
             };
             let _ = app.emit("wind-speak://shortcut", payload);
-            // Single path: hook → engine (emit is observability / shortcut-test only).
-            crate::services::dictation_engine::route_shortcut_payload(&app, payload);
+            // Setup validates the hook with the real chord, but must never start
+            // dictation or create an overlay before calibration is complete.
+            let testing_only = app
+                .try_state::<crate::services::app_state::AppState>()
+                .is_some_and(|state| state.shortcut_test_active());
+            if !testing_only {
+                crate::services::dictation_engine::route_shortcut_payload(&app, payload);
+            }
         }
         outcome.consume
     }

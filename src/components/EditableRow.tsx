@@ -1,15 +1,23 @@
 import clsx from "clsx";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 
 interface EditableRowProps {
   title: string;
   body: string;
   enabled: boolean;
+  onEdit: () => void;
   onToggle: () => void;
   onDelete: () => void;
 }
 
-export function EditableRow({ title, body, enabled, onToggle, onDelete }: EditableRowProps) {
+export function EditableRow({
+  title,
+  body,
+  enabled,
+  onEdit,
+  onToggle,
+  onDelete,
+}: EditableRowProps) {
   return (
     <article className={clsx("editable-row", !enabled && "is-muted")}>
       <div>
@@ -17,6 +25,15 @@ export function EditableRow({ title, body, enabled, onToggle, onDelete }: Editab
         <p>{body}</p>
       </div>
       <div className="row-actions">
+        <button
+          className="button button--ghost button--square"
+          type="button"
+          onClick={onEdit}
+          aria-label={`Edit ${title}`}
+          title="Edit"
+        >
+          <Pencil size={16} />
+        </button>
         <button className="button button--ghost" type="button" onClick={onToggle}>
           {enabled ? "On" : "Off"}
         </button>

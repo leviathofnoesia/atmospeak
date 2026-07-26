@@ -1,5 +1,21 @@
 # Changelog
 
+# 0.3.1 — Recovery candidate (unpublished)
+
+- Withdraws the defective 0.3.0 release and keeps public downloads paused.
+- Forces setup v2 for every legacy profile until a host-backed microphone phrase
+  check produces a valid calibration.
+- Creates setup, hub, and overlay WebViews lazily according to lifecycle state.
+- Adds real microphone discovery, capture metrics, speech-quality rejection,
+  conservative normalization, and actionable sound-check failures.
+- Restores the supplied six-step setup, editorial hub, native dock dragging,
+  position persistence, model management, and motionless idle dock.
+- Replaces title-only installer smoke testing with WebView2 DOM assertions and
+  adds canonical Home/History screenshot regression coverage.
+
+This build is not approved for publication until the Elgato Wave:3 phrase check,
+production tests 001 and 005, and the seven-day daily-driver gate are complete.
+
 ## 0.3.0 — Phase B resident ASR host (2026-07-25)
 
 ### Added
