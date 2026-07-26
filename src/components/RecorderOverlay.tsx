@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { memo, useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
-import type { ModelStatus, RecordingStarted } from "../types/dictation";
+import type { DictationMode, ModelStatus, RecordingStarted } from "../types/dictation";
 import { Aura } from "./Aura";
 import { attachLiquidGlass } from "../lib/liquidGlass";
 import "./RecorderOverlay.css";
@@ -27,6 +27,7 @@ interface RecorderOverlayProps {
   phase?: RecorderPhase;
   modelStatus: ModelStatus | null;
   hotkeyLabel?: string;
+  mode?: DictationMode;
   notice?: string;
   liveTranscript?: LiveTranscript;
   inputLevel?: number;
@@ -238,6 +239,8 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     bubbleOpacity,
     bubbleSize = "medium",
     hostApp = "your cursor",
+    hotkeyLabel = "your shortcut",
+    mode = "pushToTalk",
     accent = "dusk",
     theme = "dark",
     waveStyle = "ribbon",
@@ -333,7 +336,9 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   const timer = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(
     Math.floor(elapsedSeconds % 60),
   ).padStart(2, "0")}`;
-  const tip = "hold ⌥space";
+  // The handoff hardcodes "hold ⌥space"; this is Windows-only and the chord is
+  // user-configurable, so the tip has to follow the real settings.
+  const tip = mode === "toggle" ? "tap to speak" : `hold ${hotkeyLabel}`;
   const auraSize = state === "rest" ? 34 : 40;
 
   const wrapStyle: CSSProperties = {

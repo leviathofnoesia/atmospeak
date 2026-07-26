@@ -836,6 +836,25 @@ function OverlayShell() {
   const [level, setLevel] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [recording, setRecording] = useState<RecordingStarted | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [hostApp, setHostApp] = useState("your cursor");
+
+  // The rest tip names the real chord and gesture, so it has to follow settings.
+  // Model status greys the tip out when the speech runtime is missing, so the dock
+  // never invites a dictation that cannot run.
+  useEffect(() => {
+    void getAppSnapshot()
+      .then((snapshot) => setSettings(snapshot.settings))
+      .catch(() => {
+        /* overlay still renders without it */
+      });
+    void getModelStatus()
+      .then(setModelStatus)
+      .catch(() => {
+        /* treated as ready; the engine reports the real error on use */
+      });
+  }, []);
 
   useEffect(() => {
     if (!hasTauriRuntime()) return undefined;
@@ -848,6 +867,9 @@ function OverlayShell() {
           setPhase(event.payload.phase);
           setMessage(event.payload.message);
           setRecording(event.payload.recording);
+          // "Set down in Notepad" — named from where the text actually landed.
+          const target = event.payload.result?.injection?.targetProcessName;
+          if (target) setHostApp(target);
         },
       );
       if (cancelled) unlisten();
@@ -888,12 +910,15 @@ function OverlayShell() {
       elapsedSeconds={elapsedSeconds}
       busy={phase === "processing"}
       phase={phase}
-      modelStatus={null}
+      modelStatus={modelStatus}
       notice={message}
       inputLevel={level}
       inputBands={[]}
       bubbleSize="medium"
       bubbleOpacity={1}
+      hostApp={hostApp}
+      hotkeyLabel={settings?.hotkey ?? "your shortcut"}
+      mode={settings?.mode ?? "pushToTalk"}
       onToggle={() => {
         void handleDictationAction("toggle");
       }}

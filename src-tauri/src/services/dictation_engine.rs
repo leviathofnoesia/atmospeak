@@ -578,7 +578,7 @@ impl Worker {
 
             let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
                 hwnd,
-                process_name: None,
+                process_name: injection::process_name_for(hwnd),
             });
 
             let inject_started = Instant::now();

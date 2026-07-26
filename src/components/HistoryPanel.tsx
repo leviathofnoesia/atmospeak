@@ -1,8 +1,7 @@
-import { Clipboard, Copy, History } from "lucide-react";
+import { Clipboard, Copy } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { TranscriptSession } from "../types/dictation";
 import { EmptyState } from "./EmptyState";
-import { PanelTitle } from "./PanelTitle";
 
 interface HistoryPanelProps {
   sessions: TranscriptSession[];
@@ -15,7 +14,7 @@ function formatDuration(durationMs: number) {
   return `${seconds}s`;
 }
 
-function formatDate(value: string) {
+function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
@@ -35,70 +34,83 @@ export function HistoryPanel({ sessions, onCopy, onInject }: HistoryPanelProps) 
   }, [query, sessions]);
 
   return (
-    <section className="history-panel">
-      <PanelTitle icon={<History size={22} />} title="Transcript history" />
-      <label>
-        <span>Filter</span>
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Search transcripts…"
-        />
-      </label>
-      {filtered.length === 0 ? (
-        <EmptyState text="No transcripts yet. Dictations appear here after a successful session." />
-      ) : (
-        <ul className="history-list">
-          {filtered.map((session) => {
-            const expanded = expandedId === session.id;
-            return (
-              <li key={session.id} className="history-row">
-                <button
-                  type="button"
-                  className="history-row__main"
-                  onClick={() => setExpandedId(expanded ? null : session.id)}
-                >
-                  <strong>{session.cleanedText.slice(0, 140)}</strong>
-                  <span>
-                    {formatDate(session.createdAt)} · {session.wordCount} words ·{" "}
-                    {formatDuration(session.durationMs)}
-                  </span>
-                </button>
-                <div className="history-row__actions">
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    aria-label="Copy transcript"
-                    onClick={() => void onCopy(session)}
-                  >
-                    <Copy size={16} />
-                    Copy
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    aria-label="Paste transcript again"
-                    onClick={() => void onInject(session)}
-                  >
-                    <Clipboard size={16} />
-                    Paste
-                  </button>
-                </div>
-                {expanded ? (
-                  <div className="history-row__detail">
-                    <p>{session.cleanedText}</p>
-                    {session.audioPath ? (
-                      <audio controls src={session.audioPath.startsWith("mock") ? undefined : session.audioPath}>
-                        <track kind="captions" />
-                      </audio>
+    <div>
+      <div className="hub__head">
+        <div className="kick">P.02 / History — everything you&rsquo;ve said</div>
+        <h1>
+          Said &amp; <em>set down.</em>
+        </h1>
+      </div>
+
+      <div className="hub__section" style={{ paddingTop: 18 }}>
+        <label className="history-filter">
+          <span className="kick">Filter</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Search transcripts…"
+          />
+        </label>
+
+        {filtered.length === 0 ? (
+          <EmptyState text="No transcripts yet. Dictations appear here after a successful session." />
+        ) : (
+          <div className="tx-list">
+            {filtered.map((session, index) => {
+              const expanded = expandedId === session.id;
+              return (
+                <div className="tx" key={session.id}>
+                  <div className="tx__idx">
+                    {String(filtered.length - index).padStart(2, "0")}
+                  </div>
+                  <div className="tx__txt">
+                    <button
+                      type="button"
+                      className="tx__open"
+                      onClick={() => setExpandedId(expanded ? null : session.id)}
+                      aria-expanded={expanded}
+                    >
+                      {expanded ? session.cleanedText : session.cleanedText.slice(0, 140)}
+                    </button>
+                    {expanded ? (
+                      <div className="tx__detail">
+                        {session.audioPath && !session.audioPath.startsWith("mock") ? (
+                          <audio controls src={session.audioPath}>
+                            <track kind="captions" />
+                          </audio>
+                        ) : null}
+                        <div className="tx__actions">
+                          <button
+                            type="button"
+                            className="pill-btn ghost"
+                            onClick={() => void onCopy(session)}
+                          >
+                            <Copy size={14} />
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="pill-btn ghost"
+                            onClick={() => void onInject(session)}
+                          >
+                            <Clipboard size={14} />
+                            Paste again
+                          </button>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
+                  <div className="tx__meta">
+                    {formatTime(session.createdAt)}
+                    <br />
+                    {session.wordCount} w · {formatDuration(session.durationMs)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

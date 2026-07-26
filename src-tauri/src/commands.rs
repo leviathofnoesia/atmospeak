@@ -174,7 +174,7 @@ pub fn inject_text(state: State<'_, AppState>, text: String) -> CommandResult<In
         .last_target_window()
         .map(|hwnd| injection::InjectionTarget {
             hwnd,
-            process_name: None,
+            process_name: injection::process_name_for(hwnd),
         });
     injection::inject_text(&text, settings.restore_clipboard, preferred).map_err(|e| e.to_string())
 }
