@@ -10,6 +10,8 @@ export type RecorderPhase = "idle" | "listening" | "processing" | "pasted" | "er
 export type RecorderAccent = "dusk" | "teal" | "lilac";
 export type RecorderTheme = "dark" | "light";
 export type RecorderWaveStyle = "ribbon" | "bars" | "pulse";
+export type RecorderDockShape = "orb" | "capsule" | "tape";
+export type RecorderMotion = "lively" | "calm";
 export type BubbleSize = "small" | "medium" | "large";
 
 // Kept for back-compat with callers that still import these names.
@@ -38,11 +40,19 @@ interface RecorderOverlayProps {
   accent?: RecorderAccent;
   theme?: RecorderTheme;
   waveStyle?: RecorderWaveStyle;
+  /**
+   * Fired once the press passes the drag threshold, with the originating event so
+   * the host can track screen coordinates. The host owns moving the window.
+   */
+  onMoveStart?: (event: React.PointerEvent) => void;
+  /** Resting silhouette; the dock always morphs to a capsule while active. */
+  dockShape?: RecorderDockShape;
+  /** Animation tempo — `calm` lengthens the breath cycle. */
+  motion?: RecorderMotion;
   onToggle: () => void;
   onCancel: () => void;
   onPressStart?: () => void;
   onPressEnd?: () => void;
-  onMoveStart?: () => void;
   onOpenHub?: () => void;
 }
 
@@ -244,6 +254,8 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     accent = "dusk",
     theme = "dark",
     waveStyle = "ribbon",
+    dockShape = "orb",
+    motion = "lively",
     onToggle,
     onCancel,
     onMoveStart,
@@ -314,6 +326,13 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button != null && e.button !== 0) return;
     drag.current = { sx: e.clientX, sy: e.clientY, moved: false };
+    // Without capture, a quick drag leaves the 66px orb before the 4px threshold
+    // registers and the move is lost entirely.
+    try {
+      dockRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture is best-effort */
+    }
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const ds = drag.current;
@@ -321,13 +340,20 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     if (Math.hypot(e.clientX - ds.sx, e.clientY - ds.sy) > 4) {
       ds.moved = true;
       dockRef.current?.setAttribute("data-dragging", "");
-      onMoveStart?.(); // hand off to the OS window drag (Tauri startDragging)
+      // Capture is kept: the host drives the window itself from subsequent
+      // pointer events, so it needs them to keep arriving here.
+      onMoveStart?.(e);
     }
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
     const ds = drag.current;
     drag.current = null;
     dockRef.current?.removeAttribute("data-dragging");
+    try {
+      dockRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
     if (!ds) return;
     if (ds.moved) return; // it was a drag, not a tap
     if (state === "rest") onToggle(); // clean tap on the body → start dictation
@@ -339,7 +365,8 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   // The handoff hardcodes "hold ⌥space"; this is Windows-only and the chord is
   // user-configurable, so the tip has to follow the real settings.
   const tip = mode === "toggle" ? "tap to speak" : `hold ${hotkeyLabel}`;
-  const auraSize = state === "rest" ? 34 : 40;
+  // Per the handoff, the orb sits smaller at rest than the capsule's inline mark.
+  const auraSize = state === "rest" ? (dockShape === "orb" ? 34 : 28) : 40;
 
   const wrapStyle: CSSProperties = {
     "--accent": pigment.accent,
@@ -348,6 +375,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     "--accent-glow": pigment.glow,
     "--neon": pigment.neon,
     "--dock-scale": BUBBLE_SCALE[bubbleSize] ?? BUBBLE_SCALE.medium,
+    "--dur-breath": motion === "calm" ? "8s" : "5s",
     opacity: bubbleOpacity != null && bubbleOpacity > 0 ? bubbleOpacity : undefined,
   } as CSSProperties;
 
@@ -359,7 +387,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         className="dock"
         ref={dockRef}
         data-state={state}
-        data-shape={state === "rest" ? "orb" : "capsule"}
+        data-shape={dockShape}
         data-size={bubbleSize}
         data-theme={theme}
         onPointerDown={onPointerDown}
@@ -374,6 +402,10 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         <span className="dock__mark">
           <Aura size={auraSize} active={listening} />
         </span>
+
+        {state === "rest" && dockShape !== "orb" && (
+          <span className="dock__restlabel">{modelReady ? tip : "runtime offline"}</span>
+        )}
 
         {state !== "rest" && (
           <div className="dock__core">
@@ -442,7 +474,8 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         )}
       </div>
 
-      {state === "rest" && (
+      {/* The orb carries its tip underneath; the wider shapes carry it inline. */}
+      {state === "rest" && dockShape === "orb" && (
         <div className={clsx("dock-tip", !modelReady && "dock-tip--warn")}>{modelReady ? tip : "runtime offline"}</div>
       )}
     </div>

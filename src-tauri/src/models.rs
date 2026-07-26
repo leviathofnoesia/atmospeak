@@ -17,6 +17,56 @@ pub struct AppSettings {
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
     pub advanced_whisper_cli_path: String,
+    // Companion appearance. Phase A locked settings to the 12 fields above; these
+    // five were promoted from the design prototype's tweak panel into real,
+    // persisted settings. Container-level `serde(default)` keeps older setting
+    // blobs loadable.
+    pub accent: Accent,
+    pub dock_shape: DockShape,
+    pub wave_style: WaveStyle,
+    pub dock_theme: DockTheme,
+    pub motion: Motion,
+}
+
+/// Companion pigment. Drives `--accent*` and the neon listening glow.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Accent {
+    Dusk,
+    Teal,
+    Lilac,
+}
+
+/// Resting silhouette of the dock. It always morphs to a capsule while active.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DockShape {
+    Orb,
+    Capsule,
+    Tape,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WaveStyle {
+    Ribbon,
+    Bars,
+    Pulse,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DockTheme {
+    Dark,
+    Light,
+}
+
+/// Animation tempo. `Calm` lengthens the breath cycle for a quieter companion.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Motion {
+    Lively,
+    Calm,
 }
 
 impl Default for AppSettings {
@@ -34,6 +84,11 @@ impl Default for AppSettings {
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
             advanced_whisper_cli_path: String::new(),
+            accent: Accent::Dusk,
+            dock_shape: DockShape::Orb,
+            wave_style: WaveStyle::Ribbon,
+            dock_theme: DockTheme::Dark,
+            motion: Motion::Lively,
         }
     }
 }

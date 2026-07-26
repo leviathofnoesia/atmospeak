@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   Clipboard,
   Keyboard,
+  Palette,
   Radio,
   RotateCw,
 } from "lucide-react";
@@ -135,6 +136,72 @@ export function SettingsPanel({
         checked={settings.startAtLogin}
         onChange={(startAtLogin) => setSettings({ ...settings, startAtLogin })}
       />
+
+      <PanelTitle icon={<Palette size={22} />} title="Companion" />
+      <p className="muted">How the floating dock looks and moves. Changes apply on save.</p>
+      <label>
+        <span>Accent pigment</span>
+        <select
+          value={settings.accent}
+          onChange={(event) =>
+            setSettings({ ...settings, accent: event.currentTarget.value as AppSettings["accent"] })
+          }
+        >
+          <option value="dusk">Dusk</option>
+          <option value="teal">Teal</option>
+          <option value="lilac">Lilac</option>
+        </select>
+      </label>
+      <label>
+        <span>Resting shape</span>
+        <select
+          value={settings.dockShape}
+          onChange={(event) =>
+            setSettings({ ...settings, dockShape: event.currentTarget.value as AppSettings["dockShape"] })
+          }
+        >
+          <option value="orb">Orb</option>
+          <option value="capsule">Capsule</option>
+          <option value="tape">Tape</option>
+        </select>
+      </label>
+      <label>
+        <span>Voice wave</span>
+        <select
+          value={settings.waveStyle}
+          onChange={(event) =>
+            setSettings({ ...settings, waveStyle: event.currentTarget.value as AppSettings["waveStyle"] })
+          }
+        >
+          <option value="ribbon">Ribbon</option>
+          <option value="bars">Bars</option>
+          <option value="pulse">Pulse</option>
+        </select>
+      </label>
+      <label>
+        <span>Dock theme</span>
+        <select
+          value={settings.dockTheme}
+          onChange={(event) =>
+            setSettings({ ...settings, dockTheme: event.currentTarget.value as AppSettings["dockTheme"] })
+          }
+        >
+          <option value="dark">Smoked</option>
+          <option value="light">Clear</option>
+        </select>
+      </label>
+      <label>
+        <span>Motion</span>
+        <select
+          value={settings.motion}
+          onChange={(event) =>
+            setSettings({ ...settings, motion: event.currentTarget.value as AppSettings["motion"] })
+          }
+        >
+          <option value="lively">Lively</option>
+          <option value="calm">Calm</option>
+        </select>
+      </label>
 
       <div className="settings-actions">
         <button type="button" className="button button--primary" onClick={() => void onSave()}>

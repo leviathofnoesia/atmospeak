@@ -177,6 +177,34 @@
 .dock[data-state="rest"] .aura-ring.r3 { stroke: rgba(236,228,238,0.15); opacity: 1; }
 .dock[data-state="rest"] .aura-spark { fill: #fff; opacity: 0.42; }
 
+/* ── ALTERNATE RESTING SILHOUETTES ────────────────────────────────
+   The orb is the default; capsule and tape rest wider and carry their tip
+   inline instead of underneath. All three still morph to the same capsule
+   while active. */
+.dock[data-shape="capsule"][data-state="rest"] {
+  width: 168px; height: 52px; border-radius: 26px; padding: 0 8px 0 16px;
+  justify-content: flex-start; gap: 10px;
+}
+.dock[data-shape="tape"][data-state="rest"] {
+  width: 132px; height: 50px; border-radius: 14px; padding: 0 14px;
+  justify-content: flex-start; gap: 11px;
+}
+/* The chromatic rim and catchlight are circular masks, so they only read
+   correctly on the orb. (The handoff leaves them on; on a 168px capsule they
+   smear, so they are scoped here.) */
+.dock[data-shape="capsule"][data-state="rest"]::before,
+.dock[data-shape="tape"][data-state="rest"]::before,
+.dock[data-shape="capsule"][data-state="rest"]::after,
+.dock[data-shape="tape"][data-state="rest"]::after { content: none; }
+
+.dock__restlabel {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: rgba(247,247,242,0.6); white-space: nowrap;
+}
+.dock[data-shape="orb"][data-state="rest"] .dock__restlabel,
+.dock[data-shape="orb"][data-state="rest"] .dock__core,
+.dock[data-shape="orb"][data-state="rest"] .dock__right { display: none; }
+
 /* — LISTENING / PROCESSING / DELIVERED: capsule — */
 .dock[data-state="listening"],
 .dock[data-state="processing"],

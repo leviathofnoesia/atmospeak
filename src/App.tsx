@@ -874,6 +874,30 @@ function OverlayShell() {
       );
       if (cancelled) unlisten();
       else unlisteners.push(unlisten);
+
+      // Appearance and hotkey changes are made in the hub's window, not this one.
+      const unlistenSettings = await listen<AppSettings>(
+        "wind-speak://settings-changed",
+        (event) => setSettings(event.payload),
+      );
+      if (cancelled) unlistenSettings();
+      else unlisteners.push(unlistenSettings);
+
+      // Remember where the companion was dropped. onMoved fires throughout the OS
+      // drag, so settle briefly before writing.
+      let moveTimer: number | undefined;
+      const unlistenMoved = await getCurrentWindow().onMoved(({ payload }) => {
+        window.clearTimeout(moveTimer);
+        moveTimer = window.setTimeout(() => {
+          void saveOverlayPosition(payload.x, payload.y).catch(() => undefined);
+        }, 400);
+      });
+      if (cancelled) unlistenMoved();
+      else
+        unlisteners.push(() => {
+          window.clearTimeout(moveTimer);
+          unlistenMoved();
+        });
     })();
     return () => {
       cancelled = true;
@@ -919,6 +943,11 @@ function OverlayShell() {
       hostApp={hostApp}
       hotkeyLabel={settings?.hotkey ?? "your shortcut"}
       mode={settings?.mode ?? "pushToTalk"}
+      accent={settings?.accent ?? "dusk"}
+      dockShape={settings?.dockShape ?? "orb"}
+      waveStyle={settings?.waveStyle ?? "ribbon"}
+      theme={settings?.dockTheme ?? "dark"}
+      motion={settings?.motion ?? "lively"}
       onToggle={() => {
         void handleDictationAction("toggle");
       }}
@@ -926,14 +955,18 @@ function OverlayShell() {
         void handleDictationAction("cancel");
       }}
       onMoveStart={() => {
-        // Hand the gesture to the OS so the window follows the cursor, then
-        // remember where it was dropped.
+        // The dock is 66px, so the cursor leaves it almost immediately and the
+        // webview stops seeing pointer moves. The OS move loop is what handles
+        // that, but it ignores an inactive window — and the companion is
+        // deliberately `focus: false` so it never steals focus while you dictate.
+        // Activating it only for the drag is safe: the paste target is captured
+        // when listening starts and Atmospeak's own windows are never recorded
+        // as a target.
         if (!hasTauriRuntime()) return;
         const overlay = getCurrentWindow();
         void overlay
-          .startDragging()
-          .then(() => overlay.outerPosition())
-          .then((position) => saveOverlayPosition(position.x, position.y))
+          .setFocus()
+          .then(() => overlay.startDragging())
           .catch(() => {
             /* window closed mid-drag */
           });

@@ -25,11 +25,44 @@
 - An empty transcript is reported as "no speech" rather than provoking a redundant
   CLI retry of audio the host already handled correctly.
 
+### Companion dock (design handoff)
+- Imported the Claude Design project and closed the integration gaps. The dock port
+  itself was already faithful (`base.css`, Aura geometry, `atmoGlass` refraction,
+  `dock__right`/timer/insert/discard, `dock-tip`, wave styles); what was missing was
+  the app telling it anything.
+- The overlay rendered inside an opaque, scrolling box: `body.is-overlay-window` was
+  defined in `App.css` but never applied, so the window inherited `:root`'s opaque
+  background — defeating `transparent: true` — and a 640px `min-height` inside a 150px
+  window. Drag (`startDragging`) and open-hub were likewise never wired through.
+- Overlay position now persists (`overlay-position.json`); startup restores it and only
+  the tray action resets to bottom-centre.
+- `InjectionResult.targetProcessName` was hardcoded `None` everywhere; it is now resolved
+  via `GetWindowThreadProcessId` + `QueryFullProcessImageNameW`, so the dock reads
+  "Set down in Notepad" instead of "in your cursor".
+- Ported the `data-shape` rest silhouettes (capsule, tape) the earlier port had dropped.
+- The resting tip names the real chord ("hold Ctrl+Win"), not the handoff's macOS
+  `⌥space`, and greys to "runtime offline" when the speech runtime is missing.
+
+### Changed
+- **The Phase A 12-field settings contract lock is deliberately lifted.** `AppSettings`
+  gains five appearance fields — accent, resting shape, voice wave, dock theme, motion —
+  promoted from the design prototype's tweak panel into real persisted settings, with
+  controls in Settings → Companion. `docs/PHASE_A_HONEST_MVP.md` D4 describes the lock as
+  it stood for Phase A and is kept as a historical record. Container-level
+  `serde(default)` means blobs written before this change still load with the new fields
+  defaulted.
+- The prototype's `desktop.jsx` (a faux desktop to dictate into) and `tweaks-panel.jsx`
+  (a design exploration panel) are deliberately not ported. `hub.jsx`'s visual system was
+  already present in `hub.css`; its Polish button, privacy auto-delete and language rows
+  were **not** reinstated — those are the phantom capabilities Phase A removed.
+
 ### Tests
 - Replaced the tautological `dictation_engine` placeholder with real coverage of the
   frozen transition table: one `Pressed` → one `Listening`, re-entry while `Processing`
   is ignored, toggle ignores key-up, mic-check exclusion, cancel guards, settle bounds.
-  Rust suite: 16 → 25 tests.
+- Settings blobs written before the appearance fields still load (the contract-lift risk).
+- Dock tip placement per resting shape, real-chord/gesture wording, runtime-offline state.
+- Rust suite: 16 → 27 tests. Frontend: 8 → 11.
 
 ## 0.2.0 — Phase A Honest MVP (2026-07-25)
 

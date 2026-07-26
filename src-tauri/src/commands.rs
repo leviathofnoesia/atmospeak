@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::{
@@ -61,6 +61,10 @@ pub fn save_settings(
         &settings.hotkey,
         *state.shortcuts_paused.lock(),
     );
+    // The overlay lives in its own webview and reads settings once on mount, so
+    // appearance and hotkey changes have to be pushed to it.
+    let _ = app.emit("wind-speak://settings-changed", settings.clone());
+    let _ = app.emit("atmospeak://settings-changed", settings);
     database.snapshot().map_err(|e| e.to_string())
 }
 

@@ -13,7 +13,19 @@ export interface AppSettings {
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
   advancedWhisperCliPath: string;
+  /** Companion appearance — mirrors the Rust `AppSettings` appearance block. */
+  accent: Accent;
+  dockShape: DockShape;
+  waveStyle: WaveStyle;
+  dockTheme: DockTheme;
+  motion: Motion;
 }
+
+export type Accent = "dusk" | "teal" | "lilac";
+export type DockShape = "orb" | "capsule" | "tape";
+export type WaveStyle = "ribbon" | "bars" | "pulse";
+export type DockTheme = "dark" | "light";
+export type Motion = "lively" | "calm";
 
 export interface DictionaryEntry {
   id: string;
@@ -204,5 +216,10 @@ export function defaultSettings(): AppSettings {
     advancedRuntimeEnabled: false,
     advancedModelPath: "",
     advancedWhisperCliPath: "",
+    accent: "dusk",
+    dockShape: "orb",
+    waveStyle: "ribbon",
+    dockTheme: "dark",
+    motion: "lively",
   };
 }
