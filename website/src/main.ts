@@ -1,47 +1,6 @@
 import "./styles.css";
 import { APP_VERSION } from "./version";
 
-const releaseRepository = "leviathofnoesia/wind-speak";
-const releaseBaseUrl = `https://github.com/${releaseRepository}/releases/latest/download`;
-const versionedArtifact = (suffix: string) => `atmospeak_${APP_VERSION}_${suffix}`;
-
-const downloads = [
-  {
-    label: "Windows installer",
-    detail: "Recommended NSIS setup",
-    file: versionedArtifact("x64-setup.exe"),
-    primary: true,
-  },
-  {
-    label: "Windows MSI",
-    detail: "Enterprise-friendly fallback",
-    file: versionedArtifact("x64_en-US.msi"),
-    primary: false,
-  },
-  {
-    label: "Portable zip",
-    detail: "Unzip and run from a folder",
-    file: versionedArtifact("x64-portable.zip"),
-    primary: false,
-  },
-  {
-    label: "Checksums",
-    detail: "SHA-256 manifest",
-    file: "SHA256SUMS.txt",
-    primary: false,
-  },
-  {
-    label: "Updater metadata",
-    detail: "Tauri release manifest",
-    file: "latest.json",
-    primary: false,
-  },
-] as const;
-
-function linkFor(file: string) {
-  return `${releaseBaseUrl}/${file}`;
-}
-
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("Missing app root");
@@ -91,9 +50,13 @@ function hero() {
 
   const actions = document.createElement("div");
   actions.className = "actions";
+  const paused = document.createElement("a");
+  paused.className = "button button-primary";
+  paused.href = "#recovery-notice";
+  paused.textContent = "Downloads paused";
   actions.append(
-    downloadButton("Download for Windows", downloads[0].file, true),
-    downloadButton("Read install docs", "#docs", false, true),
+    paused,
+    siteButton("Read install docs", "#docs"),
   );
   content.append(actions);
 
@@ -134,34 +97,27 @@ function downloadSection() {
 
   const header = document.createElement("div");
   header.className = "section-head";
-  header.append(kicker("+ RELEASE FILES / GITHUB"));
+  header.append(kicker("+ RELEASE STATUS / RECOVERY"));
   const heading = document.createElement("h2");
   heading.id = "downloads-title";
-  heading.textContent = "Download Atmospeak";
+  heading.textContent = "Downloads temporarily paused";
   const copy = document.createElement("p");
   copy.textContent =
-    "Installers, the portable build, updater metadata, and checksums are published together as GitHub Release assets.";
+    "Version 0.3.0 did not meet Atmospeak's first-run, microphone, performance, or interface standards. It has been withdrawn while 0.3.1 is validated.";
   header.append(heading, copy);
   section.append(header);
 
-  const grid = document.createElement("div");
-  grid.className = "download-grid";
-  for (const download of downloads) {
-    const card = document.createElement("article");
-    card.className = download.primary ? "download-card is-primary" : "download-card";
-    card.append(kicker(download.primary ? "+ RECOMMENDED" : "+ ARTIFACT"));
-    const title = document.createElement("h3");
-    title.textContent = download.label;
-    const detail = document.createElement("p");
-    detail.textContent = download.detail;
-    const anchor = document.createElement("a");
-    anchor.href = linkFor(download.file);
-    anchor.rel = "noopener";
-    anchor.textContent = download.file;
-    card.append(title, detail, anchor);
-    grid.append(card);
-  }
-  section.append(grid);
+  const notice = document.createElement("article");
+  notice.id = "recovery-notice";
+  notice.className = "release-notice";
+  notice.append(kicker("+ WHAT HAPPENS NEXT"));
+  const title = document.createElement("h3");
+  title.textContent = "0.3.1 is being tested before publication.";
+  const detail = document.createElement("p");
+  detail.textContent =
+    "Downloads will return only after first-run setup, real-device dictation, dock interaction, installation, and a daily-driver test pass. No broken artifact is being offered in the meantime.";
+  notice.append(title, detail);
+  section.append(notice);
   return section;
 }
 
@@ -245,11 +201,10 @@ function footer() {
   return node;
 }
 
-function downloadButton(text: string, file: string, primary: boolean, direct = false) {
+function siteButton(text: string, href: string) {
   const anchor = document.createElement("a");
-  anchor.className = primary ? "button button-primary" : "button";
-  anchor.href = direct ? file : linkFor(file);
-  if (!direct) anchor.rel = "noopener";
+  anchor.className = "button";
+  anchor.href = href;
   anchor.textContent = text;
   return anchor;
 }
