@@ -174,7 +174,8 @@
 
 /* ── MODEL CARDS ── */
 .ob-models { display: flex; flex-direction: column; gap: 8px; }
-.ob-model { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 14px; padding: 12px 16px; border: 1px solid rgba(18,17,19,0.12); background: #fbfbf7; cursor: pointer; text-align: left; transition: border-color 0.2s, background 0.2s; }
+.ob-model { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 12px 16px; border: 1px solid rgba(18,17,19,0.12); background: #fbfbf7; cursor: pointer; text-align: left; transition: border-color 0.2s, background 0.2s; }
+.ob-model:not([role="button"]) { cursor: default; }
 .ob-model:hover { border-color: rgba(18,17,19,0.28); }
 .ob-model[aria-pressed="true"] { border-color: var(--accent); background: rgba(72,86,150,0.05); }
 .ob-model:disabled { cursor: not-allowed; opacity: 0.52; }
@@ -186,6 +187,9 @@
 .ob-model .mname .tag { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-left: 8px; }
 .ob-model .mdesc { display: block; font-size: 12.5px; color: rgba(27,26,29,0.55); margin-top: 3px; }
 .ob-model .msize { font-family: var(--font-mono); font-size: 11px; color: rgba(27,26,29,0.5); text-align: right; white-space: nowrap; }
+.ob-model-action { min-height: 30px; padding: 0 10px; border: 1px solid rgba(18,17,19,0.2); background: transparent; color: var(--ink); font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.ob-model-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ob-model-action:disabled { cursor: not-allowed; opacity: 0.45; }
 .ob-download { margin-top: 14px; }
 .ob-download .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .ob-download .lbl { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(27,26,29,0.55); }
@@ -379,5 +383,10 @@
   .ob-model .msize {
     grid-column: 2;
     text-align: left;
+  }
+
+  .ob-model-action {
+    grid-column: 2;
+    justify-self: start;
   }
 }

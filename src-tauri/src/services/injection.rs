@@ -83,6 +83,70 @@ pub fn inject_text(
     }
 }
 
+/// Friendly name of the app owning a window ("Notepad" from `notepad.exe`), used
+/// for the dock's "Set down in …" confirmation. Best-effort: a failure here must
+/// never affect injection itself.
+#[cfg(target_os = "windows")]
+fn process_name_for_hwnd(hwnd: isize) -> Option<String> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, HWND, MAX_PATH},
+        System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+            PROCESS_NAME_FORMAT,
+        },
+        UI::WindowsAndMessaging::GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(HWND(hwnd as _), Some(&mut pid));
+        if pid == 0 {
+            return None;
+        }
+
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buffer = [0u16; MAX_PATH as usize];
+        let mut len = buffer.len() as u32;
+        let query = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut len,
+        );
+        let _ = CloseHandle(handle);
+        query.ok()?;
+
+        let path = String::from_utf16_lossy(&buffer[..len as usize]);
+        let stem = std::path::Path::new(&path).file_stem()?.to_string_lossy();
+        if stem.is_empty() {
+            return None;
+        }
+        // "notepad" -> "Notepad"; leave names that already carry capitals alone.
+        Some(if stem.chars().any(char::is_uppercase) {
+            stem.to_string()
+        } else {
+            let mut chars = stem.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => return None,
+            }
+        })
+    }
+}
+
+/// Resolve an app name for callers that only kept an HWND.
+pub fn process_name_for(hwnd: isize) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        process_name_for_hwnd(hwnd)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = hwnd;
+        None
+    }
+}
+
 pub fn capture_foreground_target() -> Option<InjectionTarget> {
     #[cfg(target_os = "windows")]
     {
@@ -97,7 +161,7 @@ pub fn capture_foreground_target() -> Option<InjectionTarget> {
         }
         Some(InjectionTarget {
             hwnd: hwnd_value,
-            process_name: None,
+            process_name: process_name_for_hwnd(hwnd_value),
         })
     }
     #[cfg(not(target_os = "windows"))]
@@ -114,7 +178,7 @@ pub fn hwnd_is_valid(hwnd: isize) -> bool {
         if hwnd == 0 {
             return false;
         }
-        unsafe { IsWindow(HWND(hwnd as *mut _)).as_bool() }
+        unsafe { IsWindow(Some(HWND(hwnd as *mut _))).as_bool() }
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -162,7 +226,7 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
             return Ok(false);
         }
         let hwnd = HWND(target.hwnd as *mut _);
-        if !unsafe { IsWindow(hwnd).as_bool() } {
+        if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
             return Ok(false);
         }
         let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };

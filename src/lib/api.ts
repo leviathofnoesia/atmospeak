@@ -29,8 +29,9 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
-const releaseVersion = "0.2.0";
+const releaseBaseUrl = "https://github.com/leviathofnoesia/wind-speak/releases/latest/download";
+const releaseVersion = "0.3.0";
+const mockInstalledModels = new Set(["base.en"]);
 
 let mockSnapshot: AppSnapshot = {
   settings: defaultSettings(),
@@ -270,9 +271,8 @@ export function getModelStatus(): Promise<ModelStatus> {
 }
 
 export function getModelInventory(): Promise<ModelInventory> {
-  return command("get_model_inventory", undefined, () => ({
-    activeModelId: mockSnapshot.settings.advancedRuntimeEnabled ? "advanced-override" : "base.en",
-    models: [
+  return command("get_model_inventory", undefined, () => {
+    const models: ModelInventory["models"] = [
       {
         id: "base.en",
         label: "Base English",
@@ -284,21 +284,65 @@ export function getModelInventory(): Promise<ModelInventory> {
       {
         id: "tiny.en",
         label: "Tiny English",
-        installed: false,
+        installed: mockInstalledModels.has("tiny.en"),
         bundled: false,
-        path: null,
-        sizeMb: null,
+        path: mockInstalledModels.has("tiny.en") ? "mock://models/ggml-tiny.en.bin" : null,
+        sizeMb: 75,
       },
       {
         id: "small.en",
         label: "Small English",
-        installed: false,
+        installed: mockInstalledModels.has("small.en"),
         bundled: false,
-        path: null,
-        sizeMb: null,
+        path: mockInstalledModels.has("small.en") ? "mock://models/ggml-small.en.bin" : null,
+        sizeMb: 466,
       },
-    ],
-  }));
+      {
+        id: "medium.en",
+        label: "Medium English",
+        installed: mockInstalledModels.has("medium.en"),
+        bundled: false,
+        path: mockInstalledModels.has("medium.en") ? "mock://models/ggml-medium.en.bin" : null,
+        sizeMb: 1463,
+      },
+      {
+        id: "distil-large-v3",
+        label: "Distil Large v3",
+        installed: mockInstalledModels.has("distil-large-v3"),
+        bundled: false,
+        path: mockInstalledModels.has("distil-large-v3")
+          ? "mock://models/ggml-distil-large-v3.bin"
+          : null,
+        sizeMb: 1450,
+      },
+    ];
+    return {
+      activeModelId: mockSnapshot.settings.advancedRuntimeEnabled
+        ? "advanced-override"
+        : mockInstalledModels.has(mockSnapshot.settings.activeModelId)
+          ? mockSnapshot.settings.activeModelId
+          : "base.en",
+      models,
+    };
+  });
+}
+
+export function downloadModel(modelId: string): Promise<ModelInventory> {
+  return command("download_model", { modelId }, async () => {
+    mockInstalledModels.add(modelId);
+    return getModelInventory();
+  });
+}
+
+export function cancelModelDownload(): Promise<boolean> {
+  return command("cancel_model_download", undefined, () => false);
+}
+
+export function deleteModel(modelId: string): Promise<ModelInventory> {
+  return command("delete_model", { modelId }, async () => {
+    mockInstalledModels.delete(modelId);
+    return getModelInventory();
+  });
 }
 
 export async function checkForUpdates(): Promise<UpdateCheckResult> {
@@ -393,6 +437,10 @@ export function setShortcutTestActive(active: boolean): Promise<void> {
 
 export function showMainWindow(): Promise<void> {
   return command("show_main_window", undefined, () => undefined);
+}
+
+export function saveOverlayPosition(x: number, y: number): Promise<void> {
+  return command("save_overlay_position", { x, y }, () => undefined);
 }
 
 export function micCheckStart(): Promise<void> {

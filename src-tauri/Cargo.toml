@@ -1,6 +1,6 @@
 [package]
 name = "atmospeak"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first desktop dictation prototype"
 authors = ["Atmospeak"]
 edition = "2024"
@@ -26,6 +26,12 @@ dirs = "6"
 hound = "3"
 parking_lot = "0.12"
 regex = "1"
+# The ASR host is loopback-only; rustls is enabled for HTTPS model downloads.
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "multipart",
+  "rustls-tls",
+] }
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
@@ -35,9 +41,14 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 uuid = { version = "1", features = ["serde", "v4"] }
 windows = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_JobObjects",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",

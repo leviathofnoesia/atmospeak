@@ -25,6 +25,12 @@ body {
   background: var(--paper);
 }
 
+/* The overlay is a transparent, undecorated window. The class goes on <html> as
+   well as <body>: :root carries an opaque --paper background that would otherwise
+   paint the window canvas and defeat `transparent: true`, and the shared
+   `min-height: 640px` would overflow a 150px-tall window into a scrollbar. */
+html.is-overlay-window,
+html.is-overlay-window body,
 body.is-overlay-window {
   min-width: 0;
   min-height: 0;

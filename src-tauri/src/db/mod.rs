@@ -302,6 +302,69 @@ mod tests {
         assert!(!loaded.restore_clipboard);
     }
 
+    /// Phase A locked settings to 12 fields and shipped blobs with exactly those
+    /// keys. Adding the appearance block must not strand an existing profile.
+    #[test]
+    fn loads_settings_blobs_written_before_the_appearance_fields() {
+        use crate::models::{Accent, DockShape, DockTheme, Motion, WaveStyle};
+
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        let legacy = r#"{
+            "hotkey": "Ctrl+Win",
+            "mode": "toggle",
+            "microphoneName": null,
+            "restoreClipboard": true,
+            "autoInject": true,
+            "cleanupEnabled": true,
+            "startAtLogin": false,
+            "onboardingComplete": true,
+            "onboardingVersion": "phase-a-honest-mvp-v1",
+            "advancedRuntimeEnabled": false,
+            "advancedModelPath": "",
+            "advancedWhisperCliPath": ""
+        }"#;
+        database
+            .connection
+            .execute(
+                "insert into settings (key, value) values ('app', ?1)
+                 on conflict(key) do update set value = excluded.value",
+                [legacy],
+            )
+            .expect("seed legacy settings");
+
+        let loaded = database.load_settings().expect("load settings");
+
+        // The pre-existing choices survive.
+        assert_eq!(loaded.mode, DictationMode::Toggle);
+        assert!(loaded.onboarding_complete);
+        // The new fields fall back to their defaults rather than failing the parse.
+        assert_eq!(loaded.accent, Accent::Dusk);
+        assert_eq!(loaded.dock_shape, DockShape::Orb);
+        assert_eq!(loaded.wave_style, WaveStyle::Ribbon);
+        assert_eq!(loaded.dock_theme, DockTheme::Dark);
+        assert_eq!(loaded.motion, Motion::Lively);
+    }
+
+    #[test]
+    fn appearance_settings_round_trip() {
+        use crate::models::{Accent, DockShape, Motion};
+
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        let mut settings = AppSettings::default();
+        settings.accent = Accent::Lilac;
+        settings.dock_shape = DockShape::Tape;
+        settings.motion = Motion::Calm;
+
+        database.save_settings(&settings).expect("save settings");
+
+        let loaded = database.load_settings().expect("load settings");
+        assert_eq!(loaded.accent, Accent::Lilac);
+        assert_eq!(loaded.dock_shape, DockShape::Tape);
+        assert_eq!(loaded.motion, Motion::Calm);
+    }
+
     #[test]
     fn migrates_legacy_default_hotkey_to_modifier_chord() {
         let temp = tempdir().expect("tempdir");

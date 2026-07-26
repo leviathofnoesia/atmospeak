@@ -77,9 +77,15 @@ describe("RecorderOverlay", () => {
     );
 
     expect(screen.getByText("hello there")).toBeVisible();
+    // The active capsule geometry is driven by data-state; data-shape stays the
+    // user's chosen *resting* silhouette and must not be rewritten while listening.
+    expect(screen.getByRole("button", { name: /Atmospeak companion/i })).toHaveAttribute(
+      "data-state",
+      "listening",
+    );
     expect(screen.getByRole("button", { name: /Atmospeak companion/i })).toHaveAttribute(
       "data-shape",
-      "capsule",
+      "orb",
     );
 
     await userEvent.click(screen.getByRole("button", { name: /Insert text at the cursor/i }));
@@ -118,5 +124,69 @@ describe("RecorderOverlay", () => {
     );
 
     expect(screen.getByText(/Set down in Letters/i)).toBeVisible();
+  });
+
+  it("carries the resting tip underneath the orb and inline on wider shapes", () => {
+    const base = {
+      recording: null,
+      elapsedSeconds: 0,
+      busy: false,
+      phase: "idle" as const,
+      modelStatus: readyModel,
+      hotkeyLabel: "Ctrl+Win",
+      onToggle: vi.fn(),
+      onCancel: vi.fn(),
+    };
+
+    const orb = render(<RecorderOverlay {...base} dockShape="orb" />);
+    expect(document.querySelector(".dock")?.getAttribute("data-shape")).toBe("orb");
+    expect(document.querySelector(".dock-tip")?.textContent).toBe("hold Ctrl+Win");
+    expect(document.querySelector(".dock__restlabel")).toBeNull();
+    orb.unmount();
+
+    // Capsule and tape rest wider, so the tip moves inside the dock.
+    const tape = render(<RecorderOverlay {...base} dockShape="tape" />);
+    expect(document.querySelector(".dock")?.getAttribute("data-shape")).toBe("tape");
+    expect(document.querySelector(".dock__restlabel")?.textContent).toBe("hold Ctrl+Win");
+    expect(document.querySelector(".dock-tip")).toBeNull();
+    tape.unmount();
+  });
+
+  it("names the real chord and gesture rather than the handoff's macOS default", () => {
+    const base = {
+      recording: null,
+      elapsedSeconds: 0,
+      busy: false,
+      phase: "idle" as const,
+      modelStatus: readyModel,
+      onToggle: vi.fn(),
+      onCancel: vi.fn(),
+    };
+
+    const hold = render(<RecorderOverlay {...base} hotkeyLabel="Ctrl+Alt" mode="pushToTalk" />);
+    expect(screen.getByText("hold Ctrl+Alt")).toBeTruthy();
+    hold.unmount();
+
+    // Toggle mode has nothing to hold, so the tip changes verb.
+    const toggle = render(<RecorderOverlay {...base} hotkeyLabel="Ctrl+Win" mode="toggle" />);
+    expect(screen.getByText("tap to speak")).toBeTruthy();
+    toggle.unmount();
+  });
+
+  it("greys the tip out when the speech runtime is missing", () => {
+    render(
+      <RecorderOverlay
+        recording={null}
+        elapsedSeconds={0}
+        busy={false}
+        phase="idle"
+        modelStatus={{ ...readyModel, ready: false, message: "Model missing" }}
+        hotkeyLabel="Ctrl+Win"
+        onToggle={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    // It must not invite a dictation that cannot run.
+    expect(screen.getByText("runtime offline")).toBeTruthy();
   });
 });

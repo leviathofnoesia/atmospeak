@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   AppSettings,
   MicrophoneInfo,
+  ModelDownloadProgress,
   ModelInventory,
   ModelInventoryItem,
   ModelStatus,
@@ -34,6 +35,7 @@ interface OnboardingProps {
   microphones: MicrophoneInfo[];
   modelStatus: ModelStatus | null;
   modelInventory: ModelInventory | null;
+  modelDownload: ModelDownloadProgress | null;
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
   micCheck: MicCheckState;
@@ -43,6 +45,9 @@ interface OnboardingProps {
   pasteTest: PasteTestState;
   onPasteTest: () => Promise<void>;
   onShowFloatingControl: () => Promise<void>;
+  onSelectModel: (modelId: string) => void;
+  onDownloadModel: (modelId: string) => Promise<void>;
+  onCancelModelDownload: () => Promise<void>;
   onComplete: () => Promise<void>;
 }
 
@@ -59,6 +64,8 @@ const MODEL_COPY: Record<string, { tag: string; desc: string }> = {
   "tiny.en": { tag: "fast", desc: "Quick drafts, casual notes. Lightest footprint." },
   "base.en": { tag: "recommended", desc: "The everyday voice - accurate and responsive." },
   "small.en": { tag: "most accurate", desc: "Names, jargon, accents. Needs a little more room." },
+  "medium.en": { tag: "high accuracy", desc: "A larger English model for accuracy-first dictation." },
+  "distil-large-v3": { tag: "fast + accurate", desc: "Large-model accuracy distilled for faster English transcription." },
   "base": { tag: "multilingual", desc: "Auto-detect and non-English dictation with a local model." },
 };
 
@@ -124,6 +131,7 @@ export function Onboarding(props: OnboardingProps) {
     microphones,
     modelStatus,
     modelInventory,
+    modelDownload,
     shortcutStatus,
     shortcutTest,
     micCheck,
@@ -133,6 +141,9 @@ export function Onboarding(props: OnboardingProps) {
     pasteTest,
     onPasteTest,
     onShowFloatingControl,
+    onSelectModel,
+    onDownloadModel,
+    onCancelModelDownload,
     onComplete,
   } = props;
 
@@ -142,12 +153,14 @@ export function Onboarding(props: OnboardingProps) {
   const modelReady = modelStatus?.ready ?? false;
   const modelChoices = modelInventory?.models.length ? modelInventory.models : FALLBACK_MODELS;
   const activeModel =
+    modelChoices.find((model) => model.id === settings.activeModelId) ??
     modelChoices.find((model) => model.id === modelInventory?.activeModelId) ??
     modelChoices.find((model) => model.id === "base.en") ??
     modelChoices[0];
+  const selectedModelReady = activeModel?.installed ?? false;
   const canContinue = (() => {
     if (step === 1) return micCheck.passed;
-    if (step === 2) return modelReady;
+    if (step === 2) return modelReady && selectedModelReady;
     if (step === 4) return micCheck.passed;
     return true;
   })();
@@ -256,12 +269,26 @@ export function Onboarding(props: OnboardingProps) {
                         : "Visible in inventory; install it before selecting.",
                     };
                     const selected = activeModel?.id === m.id;
+                    const downloading =
+                      modelDownload?.modelId === m.id &&
+                      (modelDownload.status === "starting" ||
+                        modelDownload.status === "downloading" ||
+                        modelDownload.status === "verifying");
                     return (
                     <div
                       key={m.id}
                       className="ob-model"
                       aria-pressed={selected}
                       data-selected={selected ? "true" : "false"}
+                      role={m.installed ? "button" : undefined}
+                      tabIndex={m.installed ? 0 : undefined}
+                      onClick={() => m.installed && onSelectModel(m.id)}
+                      onKeyDown={(event) => {
+                        if (m.installed && (event.key === "Enter" || event.key === " ")) {
+                          event.preventDefault();
+                          onSelectModel(m.id);
+                        }
+                      }}
                     >
                       <span className="radio" />
                       <span>
@@ -269,16 +296,60 @@ export function Onboarding(props: OnboardingProps) {
                         <span className="mdesc">{copy.desc}</span>
                       </span>
                       <span className="msize">{m.sizeMb ? `${m.sizeMb} MB` : m.installed ? "local" : "not installed"}</span>
+                      {!m.bundled ? (
+                        <button
+                          type="button"
+                          className="ob-model-action"
+                          disabled={Boolean(
+                            modelDownload &&
+                            !downloading &&
+                            ["starting", "downloading", "verifying"].includes(modelDownload.status),
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (downloading) {
+                              void onCancelModelDownload();
+                            } else if (m.installed) {
+                              onSelectModel(m.id);
+                            } else {
+                              void onDownloadModel(m.id);
+                            }
+                          }}
+                        >
+                          {downloading ? "Cancel" : m.installed ? (selected ? "Selected" : "Use") : "Download"}
+                        </button>
+                      ) : null}
                     </div>
                     );
                   })}
                 </div>
                 <div className="ob-download">
                   <div className="row">
-                    <span className="lbl">{modelReady ? "Ready · runs offline forever" : modelStatus?.message ?? "Preparing engine…"}</span>
-                    <span className="pct">{modelReady ? "100%" : "…"}</span>
+                    <span className="lbl">
+                      {modelDownload?.message ??
+                        (selectedModelReady && modelReady
+                          ? "Ready · runs offline forever"
+                          : "Download the selected model to continue.")}
+                    </span>
+                    <span className="pct">
+                      {modelDownload?.percent != null
+                        ? `${Math.round(modelDownload.percent)}%`
+                        : selectedModelReady && modelReady
+                          ? "100%"
+                          : "…"}
+                    </span>
                   </div>
-                  <div className={`ob-dlbar${modelReady ? " done" : ""}`}><i style={{ width: modelReady ? "100%" : "12%" }} /></div>
+                  <div className={`ob-dlbar${selectedModelReady && modelReady ? " done" : ""}`}>
+                    <i
+                      style={{
+                        width: modelDownload?.percent != null
+                          ? `${modelDownload.percent}%`
+                          : selectedModelReady && modelReady
+                            ? "100%"
+                            : "0%",
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             )}

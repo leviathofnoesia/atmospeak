@@ -24,6 +24,7 @@ Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp "bin") -Force
 Copy-Item (Join-Path $release "whisper-cli.exe") (Join-Path $binaries "whisper-cli-x86_64-pc-windows-msvc.exe") -Force
 Copy-Item @(
   (Join-Path $release "whisper-cli.exe"),
+  (Join-Path $release "whisper-server.exe"),
   (Join-Path $release "whisper.dll"),
   (Join-Path $release "ggml.dll"),
   (Join-Path $release "ggml-base.dll"),

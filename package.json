@@ -1,7 +1,7 @@
 {
   "name": "atmospeak",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,7 @@
     "release:test-install": "powershell -ExecutionPolicy Bypass -File scripts/test-install-uninstall.ps1",
     "validation:production": "powershell -ExecutionPolicy Bypass -File scripts/production-validation.ps1",
     "site:dev": "vite --config website/vite.config.ts",
-    "site:build": "vite build --config website/vite.config.ts",
+    "site:build": "tsc --noEmit -p website/tsconfig.json && vite build --config website/vite.config.ts",
     "site:preview": "vite preview --config website/vite.config.ts"
   },
   "dependencies": {

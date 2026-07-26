@@ -9,14 +9,74 @@ use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
-    cancel_recording, delete_dictionary_entry, delete_snippet, get_app_snapshot,
-    get_last_stage_metrics, get_model_inventory, get_model_status, get_recording_level,
-    get_runtime_events, get_shortcut_status, handle_dictation_action, inject_text, list_microphones,
-    mic_check_start, mic_check_stop, save_settings, set_shortcut_test_active, set_shortcuts_paused,
+    cancel_model_download, cancel_recording, delete_dictionary_entry, delete_model, delete_snippet,
+    download_model, get_app_snapshot, get_last_stage_metrics, get_model_inventory,
+    get_model_status, get_recording_level, get_runtime_events, get_shortcut_status,
+    handle_dictation_action, inject_text, list_microphones, mic_check_start, mic_check_stop,
+    save_overlay_position, save_settings, set_shortcut_test_active, set_shortcuts_paused,
     show_main_window, show_overlay_window, start_recording, stop_recording,
     upsert_dictionary_entry, upsert_snippet,
 };
-use services::{app_state::AppState, dictation_engine, overlay_window, shortcuts};
+use services::{
+    app_state::AppState, asr_host, dictation_engine, metrics, overlay_window, runtime, shortcuts,
+};
+
+/// Bring up the resident ASR host in the background: loading the model takes
+/// seconds and must not delay the window. Dictation works off the CLI backend
+/// until the host is warm, and keeps working if it never comes up at all.
+pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
+    if asr_host::is_disabled() {
+        metrics::emit_runtime(
+            app,
+            "asr-host-disabled",
+            "ATMOSPEAK_WHISPER_HOST=0 — using the one-shot CLI backend.",
+        );
+        return;
+    }
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("atmospeak-asr-host-warmup".into())
+        .spawn(move || {
+            let Ok(settings) = app.state::<AppState>().database.lock().load_settings() else {
+                return;
+            };
+            let Some(server_exe) = runtime::resolve_server(&app, &settings) else {
+                metrics::emit_runtime(
+                    &app,
+                    "asr-host-unavailable",
+                    "whisper-server.exe is not bundled — using the one-shot CLI backend.",
+                );
+                return;
+            };
+            let Ok(resolved) = runtime::resolve_runtime(&app, &settings) else {
+                return;
+            };
+
+            let host = match asr_host::AsrHost::new(server_exe, resolved.model_path) {
+                Ok(host) => std::sync::Arc::new(host),
+                Err(error) => {
+                    metrics::emit_runtime(&app, "asr-host-error", error.to_string());
+                    return;
+                }
+            };
+
+            match host.ensure_running() {
+                Ok(_) => {
+                    app.state::<AppState>().set_asr_host(host);
+                    metrics::emit_runtime(&app, "asr-host-ready", "Resident speech model is warm.");
+                }
+                Err(error) => {
+                    metrics::emit_runtime(
+                        &app,
+                        "asr-host-error",
+                        format!("resident host unavailable, using CLI backend: {error}"),
+                    );
+                }
+            }
+        })
+        .expect("failed to spawn ASR host warmup thread");
+}
 
 /// Must match frontend `ONBOARDING_VERSION` in `src/types/dictation.ts`.
 const ONBOARDING_VERSION: &str = "phase-a-honest-mvp-v1";
@@ -89,6 +149,7 @@ pub fn run() {
         .setup(move |app| {
             let engine = dictation_engine::spawn(app.handle().clone());
             app.state::<AppState>().set_engine(engine);
+            start_asr_host(app.handle());
 
             install_global_shortcut(
                 app,
@@ -114,7 +175,8 @@ pub fn run() {
                     let _ = main.set_focus();
                 }
             }
-            let _ = overlay_window::show_and_reset(app.handle());
+            // Restore where the user parked it; only the tray action resets position.
+            let _ = overlay_window::show(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -148,6 +210,7 @@ pub fn run() {
             show_overlay_window,
             show_main_window,
             set_shortcut_test_active,
+            save_overlay_position,
             get_runtime_events,
             get_last_stage_metrics,
             start_recording,
@@ -162,8 +225,20 @@ pub fn run() {
             upsert_snippet,
             delete_snippet,
             get_model_status,
-            get_model_inventory
+            get_model_inventory,
+            download_model,
+            cancel_model_download,
+            delete_model
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Atmospeak");
+        .build(tauri::generate_context!())
+        .expect("error while building Atmospeak")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Stop the resident model before we go. The job object is the
+                // backstop for crashes; this is the clean path.
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.shutdown_asr_host();
+                }
+            }
+        });
 }

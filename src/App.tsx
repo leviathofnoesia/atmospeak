@@ -27,11 +27,14 @@ import type { RecorderPhase } from "./components/RecorderOverlay";
 import { StatusLed } from "./components/StatusLed";
 import {
   cancelRecording,
+  cancelModelDownload,
   checkForUpdates,
   copyText,
   deleteDictionaryEntry,
+  deleteModel,
   deleteSnippet,
   downloadAndInstallUpdate,
+  downloadModel,
   getAppSnapshot,
   getLastStageMetrics,
   getModelInventory,
@@ -45,10 +48,12 @@ import {
   listMicrophones,
   micCheckStart,
   micCheckStop,
+  saveOverlayPosition,
   saveSettings,
   setShortcutTestActive,
   setShortcutsPaused,
   showFloatingControl,
+  showMainWindow,
   startRecording,
   stopRecording,
   upsertDictionaryEntry,
@@ -62,6 +67,7 @@ import type {
   HubTab,
   MicrophoneInfo,
   ModelInventory,
+  ModelDownloadProgress,
   ModelStatus,
   NativeDictationEvent,
   RecordingStarted,
@@ -116,6 +122,7 @@ function AppShell() {
   const [microphones, setMicrophones] = useState<MicrophoneInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
+  const [modelDownload, setModelDownload] = useState<ModelDownloadProgress | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
   const [lastMetrics, setLastMetrics] = useState<StageMetrics | null>(null);
@@ -327,6 +334,10 @@ function AppShell() {
           (payload) => setLastMetrics(payload as StageMetrics),
         ],
         [
+          "atmospeak://model-download",
+          (payload) => setModelDownload(payload as ModelDownloadProgress),
+        ],
+        [
           "wind-speak://overlay-visibility",
           (payload) =>
             setNotice({ tone: "neutral", message: String(payload) }),
@@ -536,6 +547,48 @@ function AppShell() {
     }
   }, [setBusyState, settingsDraft]);
 
+  const onDownloadModel = useCallback(async (modelId: string) => {
+    setModelDownload({
+      modelId,
+      status: "starting",
+      bytesDownloaded: 0,
+      totalBytes: null,
+      percent: 0,
+      message: "Starting model download.",
+    });
+    try {
+      const inventory = await downloadModel(modelId);
+      setModelInventory(inventory);
+      setSettingsDraft((current) =>
+        current ? { ...current, activeModelId: modelId } : current,
+      );
+      setModelStatus(await getModelStatus());
+      setNotice({
+        tone: "success",
+        message: `${modelId} is installed. Save settings or finish setup to use it.`,
+      });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+      throw error;
+    }
+  }, []);
+
+  const onDeleteModel = useCallback(async (modelId: string) => {
+    try {
+      const inventory = await deleteModel(modelId);
+      setModelInventory(inventory);
+      setSettingsDraft((current) =>
+        current?.activeModelId === modelId
+          ? { ...current, activeModelId: "base.en" }
+          : current,
+      );
+      setModelStatus(await getModelStatus());
+      setNotice({ tone: "success", message: `${modelId} was removed.` });
+    } catch (error: unknown) {
+      setNotice({ tone: "error", message: stringifyError(error) });
+    }
+  }, []);
+
   const needsOnboarding = useMemo(() => {
     if (!snapshot) return false;
     return (
@@ -576,6 +629,7 @@ function AppShell() {
         microphones={microphones}
         modelStatus={modelStatus}
         modelInventory={modelInventory}
+        modelDownload={modelDownload}
         shortcutStatus={shortcutStatus}
         shortcutTest={shortcutTest}
         micCheck={micCheck}
@@ -610,6 +664,15 @@ function AppShell() {
         onShowFloatingControl={async () => {
           await showFloatingControl();
         }}
+        onSelectModel={(modelId) =>
+          setSettingsDraft((current) =>
+            current ? { ...current, activeModelId: modelId } : current,
+          )
+        }
+        onDownloadModel={onDownloadModel}
+        onCancelModelDownload={async () => {
+          await cancelModelDownload();
+        }}
         onComplete={completeOnboarding}
       />
     );
@@ -622,7 +685,7 @@ function AppShell() {
           <Aura size={36} active={recorderPhase === "listening"} />
           <div>
             <strong>Atmospeak</strong>
-            <span>Local dictation · CLI ASR</span>
+            <span>Local dictation · resident ASR</span>
           </div>
         </div>
         <nav aria-label="Atmospeak sections">
@@ -819,7 +882,18 @@ function AppShell() {
             setSettings={setSettingsDraft}
             modelStatus={modelStatus}
             modelInventory={modelInventory}
+            modelDownload={modelDownload}
             lastMetrics={lastMetrics}
+            onSelectModel={(modelId) =>
+              setSettingsDraft((current) =>
+                current ? { ...current, activeModelId: modelId } : current,
+              )
+            }
+            onDownloadModel={onDownloadModel}
+            onCancelModelDownload={async () => {
+              await cancelModelDownload();
+            }}
+            onDeleteModel={onDeleteModel}
             onSave={onSaveSettings}
           />
         ) : null}
@@ -834,6 +908,25 @@ function OverlayShell() {
   const [level, setLevel] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [recording, setRecording] = useState<RecordingStarted | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [hostApp, setHostApp] = useState("your cursor");
+
+  // The rest tip names the real chord and gesture, so it has to follow settings.
+  // Model status greys the tip out when the speech runtime is missing, so the dock
+  // never invites a dictation that cannot run.
+  useEffect(() => {
+    void getAppSnapshot()
+      .then((snapshot) => setSettings(snapshot.settings))
+      .catch(() => {
+        /* overlay still renders without it */
+      });
+    void getModelStatus()
+      .then(setModelStatus)
+      .catch(() => {
+        /* treated as ready; the engine reports the real error on use */
+      });
+  }, []);
 
   useEffect(() => {
     if (!hasTauriRuntime()) return undefined;
@@ -846,10 +939,37 @@ function OverlayShell() {
           setPhase(event.payload.phase);
           setMessage(event.payload.message);
           setRecording(event.payload.recording);
+          // "Set down in Notepad" — named from where the text actually landed.
+          const target = event.payload.result?.injection?.targetProcessName;
+          if (target) setHostApp(target);
         },
       );
       if (cancelled) unlisten();
       else unlisteners.push(unlisten);
+
+      // Appearance and hotkey changes are made in the hub's window, not this one.
+      const unlistenSettings = await listen<AppSettings>(
+        "wind-speak://settings-changed",
+        (event) => setSettings(event.payload),
+      );
+      if (cancelled) unlistenSettings();
+      else unlisteners.push(unlistenSettings);
+
+      // Remember where the companion was dropped. onMoved fires throughout the OS
+      // drag, so settle briefly before writing.
+      let moveTimer: number | undefined;
+      const unlistenMoved = await getCurrentWindow().onMoved(({ payload }) => {
+        window.clearTimeout(moveTimer);
+        moveTimer = window.setTimeout(() => {
+          void saveOverlayPosition(payload.x, payload.y).catch(() => undefined);
+        }, 400);
+      });
+      if (cancelled) unlistenMoved();
+      else
+        unlisteners.push(() => {
+          window.clearTimeout(moveTimer);
+          unlistenMoved();
+        });
     })();
     return () => {
       cancelled = true;
@@ -886,20 +1006,55 @@ function OverlayShell() {
       elapsedSeconds={elapsedSeconds}
       busy={phase === "processing"}
       phase={phase}
-      modelStatus={null}
+      modelStatus={modelStatus}
       notice={message}
       inputLevel={level}
       inputBands={[]}
       bubbleSize="medium"
       bubbleOpacity={1}
+      hostApp={hostApp}
+      hotkeyLabel={settings?.hotkey ?? "your shortcut"}
+      mode={settings?.mode ?? "pushToTalk"}
+      accent={settings?.accent ?? "dusk"}
+      dockShape={settings?.dockShape ?? "orb"}
+      waveStyle={settings?.waveStyle ?? "ribbon"}
+      theme={settings?.dockTheme ?? "dark"}
+      motion={settings?.motion ?? "lively"}
       onToggle={() => {
         void handleDictationAction("toggle");
       }}
       onCancel={() => {
         void handleDictationAction("cancel");
       }}
+      onMoveStart={() => {
+        // The dock is 66px, so the cursor leaves it almost immediately and the
+        // webview stops seeing pointer moves. The OS move loop is what handles
+        // that, but it ignores an inactive window — and the companion is
+        // deliberately `focus: false` so it never steals focus while you dictate.
+        // Activating it only for the drag is safe: the paste target is captured
+        // when listening starts and Atmospeak's own windows are never recorded
+        // as a target.
+        if (!hasTauriRuntime()) return;
+        const overlay = getCurrentWindow();
+        void overlay
+          .setFocus()
+          .then(() => overlay.startDragging())
+          .catch(() => {
+            /* window closed mid-drag */
+          });
+      }}
+      onOpenHub={() => {
+        void showMainWindow();
+      }}
     />
   );
+}
+
+/// Marks the document as the transparent overlay window. Exported so `main.tsx`
+/// can apply it before first paint; also called on the window-label fallback path.
+export function markOverlayDocument() {
+  document.documentElement.classList.add("is-overlay-window");
+  document.body.classList.add("is-overlay-window");
 }
 
 export default function App() {
@@ -908,13 +1063,17 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("view") === "overlay") {
+      markOverlayDocument();
       setIsOverlay(true);
       return;
     }
     if (hasTauriRuntime()) {
       try {
         const label = getCurrentWindow().label;
-        if (label === "overlay") setIsOverlay(true);
+        if (label === "overlay") {
+          markOverlayDocument();
+          setIsOverlay(true);
+        }
       } catch {
         /* browser mock */
       }

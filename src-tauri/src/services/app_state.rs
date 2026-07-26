@@ -2,13 +2,15 @@ use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::{
     path::PathBuf,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
 };
+
+use tauri::{AppHandle, Manager};
 
 use crate::{
     db::Database,
     models::{RuntimeEvent, ShortcutStatus, StageMetrics},
-    services::{dictation_engine::EngineHandle, recorder::RecorderService},
+    services::{asr_host::AsrHost, dictation_engine::EngineHandle, recorder::RecorderService},
 };
 
 /// The application's data plane: every long-lived piece of state lives here.
@@ -22,8 +24,11 @@ pub struct AppState {
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
     pub retention_sweeper_cancel: Arc<AtomicBool>,
+    pub model_download_cancel: Arc<AtomicBool>,
+    model_download_active: Mutex<Option<String>>,
     engine: Mutex<Option<EngineHandle>>,
     last_metrics: Mutex<Option<StageMetrics>>,
+    asr_host: Mutex<Option<Arc<AsrHost>>>,
 }
 
 impl AppState {
@@ -46,9 +51,31 @@ impl AppState {
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(Vec::new())),
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
+            model_download_cancel: Arc::new(AtomicBool::new(false)),
+            model_download_active: Mutex::new(None),
             engine: Mutex::new(None),
             last_metrics: Mutex::new(None),
+            asr_host: Mutex::new(None),
         })
+    }
+
+    pub fn set_asr_host(&self, host: Arc<AsrHost>) {
+        *self.asr_host.lock() = Some(host);
+    }
+
+    pub fn asr_host(&self) -> Option<Arc<AsrHost>> {
+        self.asr_host.lock().clone()
+    }
+
+    /// Convenience for call sites that only hold an `AppHandle`.
+    pub fn asr_host_from(app: &AppHandle) -> Option<Arc<AsrHost>> {
+        app.try_state::<AppState>()?.asr_host()
+    }
+
+    pub fn shutdown_asr_host(&self) {
+        if let Some(host) = self.asr_host.lock().take() {
+            host.shutdown();
+        }
     }
 
     pub fn set_engine(&self, handle: EngineHandle) {
@@ -112,6 +139,32 @@ impl AppState {
     pub fn cancel_retention_sweeper(&self) {
         self.retention_sweeper_cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn begin_model_download(&self, model_id: &str) -> Result<()> {
+        let mut active = self.model_download_active.lock();
+        if let Some(current) = active.as_ref() {
+            anyhow::bail!("model download already in progress: {current}");
+        }
+        self.model_download_cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        *active = Some(model_id.to_string());
+        Ok(())
+    }
+
+    pub fn finish_model_download(&self) {
+        *self.model_download_active.lock() = None;
+        self.model_download_cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn cancel_model_download(&self) -> bool {
+        let active = self.model_download_active.lock().is_some();
+        if active {
+            self.model_download_cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        active
     }
 }
 

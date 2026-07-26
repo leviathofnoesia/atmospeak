@@ -14,9 +14,60 @@ pub struct AppSettings {
     pub start_at_login: bool,
     pub onboarding_complete: bool,
     pub onboarding_version: String,
+    pub active_model_id: String,
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
     pub advanced_whisper_cli_path: String,
+    // Companion appearance. Phase A locked settings to the 12 fields above; these
+    // five were promoted from the design prototype's tweak panel into real,
+    // persisted settings. Container-level `serde(default)` keeps older setting
+    // blobs loadable.
+    pub accent: Accent,
+    pub dock_shape: DockShape,
+    pub wave_style: WaveStyle,
+    pub dock_theme: DockTheme,
+    pub motion: Motion,
+}
+
+/// Companion pigment. Drives `--accent*` and the neon listening glow.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Accent {
+    Dusk,
+    Teal,
+    Lilac,
+}
+
+/// Resting silhouette of the dock. It always morphs to a capsule while active.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DockShape {
+    Orb,
+    Capsule,
+    Tape,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WaveStyle {
+    Ribbon,
+    Bars,
+    Pulse,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DockTheme {
+    Dark,
+    Light,
+}
+
+/// Animation tempo. `Calm` lengthens the breath cycle for a quieter companion.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Motion {
+    Lively,
+    Calm,
 }
 
 impl Default for AppSettings {
@@ -31,9 +82,15 @@ impl Default for AppSettings {
             start_at_login: false,
             onboarding_complete: false,
             onboarding_version: String::new(),
+            active_model_id: "base.en".to_string(),
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
             advanced_whisper_cli_path: String::new(),
+            accent: Accent::Dusk,
+            dock_shape: DockShape::Orb,
+            wave_style: WaveStyle::Ribbon,
+            dock_theme: DockTheme::Dark,
+            motion: Motion::Lively,
         }
     }
 }
@@ -58,7 +115,7 @@ impl Default for ShortcutStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum DictationMode {
     Toggle,
@@ -183,6 +240,7 @@ pub struct ModelStatus {
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeSource {
     Bundled,
+    ManagedModel,
     AdvancedOverride,
 }
 
@@ -202,6 +260,17 @@ pub struct ModelInventoryItem {
     pub bundled: bool,
     pub path: Option<String>,
     pub size_mb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadProgress {
+    pub model_id: String,
+    pub status: String,
+    pub bytes_downloaded: u64,
+    pub total_bytes: Option<u64>,
+    pub percent: Option<f64>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

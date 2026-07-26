@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
     services::{
         app_state::AppState,
         dictation_engine::{self, DispatchResult, EngineAction},
-        injection, overlay_window, runtime, shortcuts, startup,
+        injection, model_downloader, overlay_window, runtime, shortcuts, startup,
     },
 };
 
@@ -48,6 +48,15 @@ pub fn save_settings(
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> CommandResult<AppSnapshot> {
+    let previous_settings = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|e| e.to_string())?;
+    let runtime_changed = previous_settings.active_model_id != settings.active_model_id
+        || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
+        || previous_settings.advanced_model_path != settings.advanced_model_path
+        || previous_settings.advanced_whisper_cli_path != settings.advanced_whisper_cli_path;
     startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
     let database = state.database.lock();
     database
@@ -61,7 +70,17 @@ pub fn save_settings(
         &settings.hotkey,
         *state.shortcuts_paused.lock(),
     );
-    database.snapshot().map_err(|e| e.to_string())
+    // The overlay lives in its own webview and reads settings once on mount, so
+    // appearance and hotkey changes have to be pushed to it.
+    let _ = app.emit("wind-speak://settings-changed", settings.clone());
+    let _ = app.emit("atmospeak://settings-changed", settings.clone());
+    let snapshot = database.snapshot().map_err(|e| e.to_string())?;
+    drop(database);
+    if runtime_changed {
+        state.shutdown_asr_host();
+        crate::start_asr_host(&app);
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -80,7 +99,7 @@ pub fn set_shortcuts_paused(
 
 #[tauri::command]
 pub fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
-    overlay_window::show_and_reset(&app).map_err(|e| e.to_string())
+    overlay_window::show(&app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -91,6 +110,11 @@ pub fn show_main_window(app: AppHandle) -> CommandResult<()> {
         let _ = window.set_focus();
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn save_overlay_position(app: AppHandle, x: i32, y: i32) {
+    overlay_window::save_position(&app, x, y);
 }
 
 #[tauri::command]
@@ -129,9 +153,14 @@ pub fn handle_dictation_action(
     action: String,
 ) -> CommandResult<String> {
     let engine = engine(&state)?;
+    // "pressed"/"released" are hotkey-shaped edges and must go through the mode-aware
+    // arms, so the overlay behaves identically to the hook (D10). "start"/"stop" stay
+    // explicit and mode-independent for direct UI buttons.
     let engine_action = match action.as_str() {
-        "pressed" | "start" => EngineAction::Start,
-        "released" | "stop" => EngineAction::Stop,
+        "pressed" => EngineAction::Pressed,
+        "released" => EngineAction::Released,
+        "start" => EngineAction::Start,
+        "stop" => EngineAction::Stop,
         "toggle" => EngineAction::Toggle,
         "cancel" => EngineAction::Cancel,
         other => return Err(format!("unknown dictation action: {other}")),
@@ -164,7 +193,7 @@ pub fn inject_text(state: State<'_, AppState>, text: String) -> CommandResult<In
         .last_target_window()
         .map(|hwnd| injection::InjectionTarget {
             hwnd,
-            process_name: None,
+            process_name: injection::process_name_for(hwnd),
         });
     injection::inject_text(&text, settings.restore_clipboard, preferred).map_err(|e| e.to_string())
 }
@@ -205,7 +234,9 @@ pub fn upsert_snippet(
         snippet.id = Uuid::new_v4().to_string();
     }
     let database = state.database.lock();
-    database.upsert_snippet(&snippet).map_err(|e| e.to_string())?;
+    database
+        .upsert_snippet(&snippet)
+        .map_err(|e| e.to_string())?;
     database.snapshot().map_err(|e| e.to_string())
 }
 
@@ -236,5 +267,46 @@ pub fn get_model_inventory(
         .lock()
         .load_settings()
         .map_err(|e| e.to_string())?;
+    Ok(runtime::model_inventory(&app, &settings))
+}
+
+#[tauri::command]
+pub async fn download_model(app: AppHandle, model_id: String) -> CommandResult<ModelInventory> {
+    let download_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        model_downloader::download(&download_app, &model_id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+
+    let state = app.state::<AppState>();
+    state.shutdown_asr_host();
+    crate::start_asr_host(&app);
+    let settings = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|error| error.to_string())?;
+    Ok(runtime::model_inventory(&app, &settings))
+}
+
+#[tauri::command]
+pub fn cancel_model_download(state: State<'_, AppState>) -> bool {
+    model_downloader::cancel(&state)
+}
+
+#[tauri::command]
+pub fn delete_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+) -> CommandResult<ModelInventory> {
+    model_downloader::delete(&app, &model_id).map_err(|error| error.to_string())?;
+    let settings = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|error| error.to_string())?;
     Ok(runtime::model_inventory(&app, &settings))
 }

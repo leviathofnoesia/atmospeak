@@ -2,13 +2,58 @@
 
 This file tracks evidence for the 100-test production matrix in `tests/manual/production-100.md`.
 
+## 2026-07-26 - 0.3.0 daily-driver and release shell
+
+- Automated verification (no microphone involved):
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **32 passed**
+  - `bun run build`: **pass**
+  - `bun run test`: **11 passed**
+  - `bun run site:build`: **pass**, including the website TypeScript check
+  - Downloader coverage includes managed-model path resolution, checksum rejection
+    without damaging an installed model, and verified atomic replacement.
+- Browser QA:
+  - Landing page checked at 1280 px and 360 px widths.
+  - Version-derived release filenames, install docs, SmartScreen instructions,
+    shared assets/tokens, and responsive stacking render correctly.
+- **Operator gate remains pending:** run 001 and 005 with deliberate speech and
+  record the real session id, target output, and Advanced → Last stage metrics.
+  Confirm `asr_backend: host` and compare that run's `asr_ms` with the synthetic
+  CLI/host timings below. No host claim is promoted from synthetic evidence.
+
+## 2026-07-25 - Phase B 0.3.0 resident ASR host
+
+- Automated verification (no microphone involved):
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **25 passed** (was 16)
+  - `bun run build`, `bun run test` (8 passed): pass
+  - `whisper-server.exe` confirmed present in upstream `whisper-bin-x64.zip` v1.8.4
+  - Host lifecycle in the real app: launched `atmospeak.exe`, confirmed a
+    `whisper-server` process resident at ~206 MB (model loaded); hard-killed
+    `atmospeak.exe` and confirmed **0 orphaned** `whisper-server` processes
+- Backend comparison on 6.42 s of **synthesized** speech (`base.en`, CPU), which is a
+  plumbing check, not a product measurement:
+
+  | Backend | ASR time (3 runs) |
+  |---|---|
+  | `cli` (cold model each run) | 2.57 / 2.62 / 1.98 s |
+  | `host` (warm) | 1.93 / 1.82 / 1.55 s |
+
+  Model load ≈ 0.7 s per utterance is what the host removes. Transcript identical on
+  both paths.
+- **Still operator-pending — the actual gate.** 001 and 005 with a real microphone,
+  recording session id, audio path, target-app output, and `asr_backend` per run.
+  Nothing above substitutes for this.
+
 ## 2026-07-25 - Phase A 0.2.0 implementation
 
 - App version target: **0.2.0**
 - Design: `docs/PHASE_A_HONEST_MVP.md` implemented (DictationEngine, contract lock, injection restore, metrics, app data migrate, honest UI).
 - ASR backend label: `cli` (stock whisper-cli per utterance).
 - Automated: frontend `bun run build` / `bun run test` re-verified after honesty pass.
-- Native `cargo test` / real mic runs **require MSVC Build Tools** on this machine; mic evidence for 001–012 still pending operator dogfood.
+- **MSVC Build Tools installed** — native verification completed:
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **16 passed**
+  - `cargo build --manifest-path src-tauri/Cargo.toml`: **pass**
+  - Compile fixes: `IsWindow(Some(hwnd))` for windows-0.61; `use tauri::Manager` for `try_state` in metrics
+- Mic evidence for 001–012 still pending operator dogfood (`bun run tauri dev`).
 - Hard gate remains: **001** and **005** with session id, audio path, stage metrics (`capture_stop_ms`, `write_ms`, `asr_ms`, `cleanup_ms`, `inject_ms`, `total_ms`).
 
 ## 2026-06-16 - Baseline Automation And Matrix Setup

@@ -1,6 +1,6 @@
 # Advanced Runtime Overrides
 
-Wind Speak now bundles the Windows x64 CPU `whisper.cpp` runtime and
+Atmospeak bundles the Windows x64 CPU `whisper.cpp` runtime and
 `ggml-base.en.bin` model. Fresh installs should not ask users to download a
 model or paste runtime paths.
 
@@ -26,7 +26,7 @@ The Tauri bundle also includes `resources/ACKNOWLEDGEMENTS.md`.
 4. Set a compatible GGML model path.
 5. Save runtime settings.
 
-Wind Speak returns to bundled defaults as soon as the override toggle is off.
+Atmospeak returns to bundled defaults as soon as the override toggle is off.
 
 ## Refreshing Bundled Assets
 
