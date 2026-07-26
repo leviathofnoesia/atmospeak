@@ -143,6 +143,13 @@ function soundCheckFailureMessage(code: string | null): string {
   }
 }
 
+// Browser/native-debug fixture for exercising the shortcut step without
+// weakening the production microphone or transcription gates.
+const DEV_SHORTCUT_FIXTURE =
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("fixture") === "shortcut";
+
 function AppShell() {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
@@ -168,9 +175,9 @@ function AppShell() {
   });
   const [micCheck, setMicCheck] = useState<MicCheckState>({
     active: false,
-    passed: false,
-    level: 0,
-    message: "",
+    passed: DEV_SHORTCUT_FIXTURE,
+    level: DEV_SHORTCUT_FIXTURE ? 0.72 : 0,
+    message: DEV_SHORTCUT_FIXTURE ? "Development shortcut fixture." : "",
   });
   const [, setMicLevel] = useState<MicLevel | null>(null);
   const [soundCheck, setSoundCheck] = useState<SoundCheckState>({
@@ -200,6 +207,7 @@ function AppShell() {
   const recordingRef = useRef<RecordingStarted | null>(null);
   const settingsRef = useRef<AppSettings | null>(null);
   const shortcutTestRef = useRef(shortcutTest);
+  const shortcutStatusRef = useRef<ShortcutStatus | null>(null);
   const shortcutTestTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -211,6 +219,9 @@ function AppShell() {
   useEffect(() => {
     shortcutTestRef.current = shortcutTest;
   }, [shortcutTest]);
+  useEffect(() => {
+    shortcutStatusRef.current = shortcutStatus;
+  }, [shortcutStatus]);
 
   const setBusyState = useCallback((nextBusy: boolean) => {
     busyRef.current = nextBusy;
@@ -310,7 +321,7 @@ function AppShell() {
               // Dictation is owned by Rust DictationEngine after Phase A3.
               return;
             }
-            if (shortcutStatus?.paused) {
+            if (shortcutStatusRef.current?.paused) {
               setShortcutTest({
                 active: false,
                 detected: false,
@@ -318,12 +329,22 @@ function AppShell() {
               });
               return;
             }
-            if (action === "pressed" || action === "toggle" || action === "released") {
+            if (action === "pressed") {
+              setShortcutTest((current) => ({
+                ...current,
+                message: "Chord detected. Release the keys to finish the test.",
+              }));
+              return;
+            }
+            if (action === "toggle" || action === "released") {
               if (shortcutTestTimerRef.current !== null) {
                 window.clearTimeout(shortcutTestTimerRef.current);
                 shortcutTestTimerRef.current = null;
               }
-              const label = shortcutStatus?.hotkey || settingsRef.current?.hotkey || "shortcut";
+              const label =
+                shortcutStatusRef.current?.hotkey ||
+                settingsRef.current?.hotkey ||
+                "shortcut";
               void setShortcutTestActive(false);
               setShortcutTest({
                 active: false,
@@ -336,7 +357,11 @@ function AppShell() {
         ],
         [
           "wind-speak://shortcut-status",
-          (payload) => setShortcutStatus(payload as ShortcutStatus),
+          (payload) => {
+            const next = payload as ShortcutStatus;
+            shortcutStatusRef.current = next;
+            setShortcutStatus(next);
+          },
         ],
         [
           "wind-speak://native-dictation",
@@ -418,7 +443,7 @@ function AppShell() {
         shortcutTestTimerRef.current = null;
       }
     };
-  }, [applyNativeDictation, shortcutStatus?.hotkey, shortcutStatus?.paused]);
+  }, [applyNativeDictation]);
 
   const startMicCheck = useCallback(async () => {
     if (busyRef.current || recordingRef.current !== null) {
@@ -620,8 +645,18 @@ function AppShell() {
         onFinishSoundCheck={finishPhraseCheck}
         onOpenWindowsSoundSettings={openWindowsSoundSettings}
         onTestShortcut={() => {
+          if (shortcutTestTimerRef.current !== null) {
+            window.clearTimeout(shortcutTestTimerRef.current);
+            shortcutTestTimerRef.current = null;
+          }
+          setShortcutTest({
+            active: true,
+            detected: false,
+            message: "Arming the Windows shortcut hook...",
+          });
           void registerSetupShortcut(settingsDraft.hotkey)
             .then((status) => {
+              shortcutStatusRef.current = status;
               setShortcutStatus(status);
               setShortcutTest({
                 active: status.registered,
@@ -640,16 +675,44 @@ function AppShell() {
                     detected: false,
                     message: "Shortcut was not detected. Choose another chord and retry.",
                   });
-                }, 10_000);
+                }, 15_000);
               }
             })
             .catch((error: unknown) => {
+              void setShortcutTestActive(false);
               setShortcutTest({
                 active: false,
                 detected: false,
                 message: stringifyError(error),
               });
             });
+        }}
+        onCancelShortcutTest={() => {
+          if (shortcutTestTimerRef.current !== null) {
+            window.clearTimeout(shortcutTestTimerRef.current);
+            shortcutTestTimerRef.current = null;
+          }
+          void setShortcutTestActive(false);
+          setShortcutTest((current) => ({
+            ...current,
+            active: false,
+            message: current.detected
+              ? current.message
+              : "Shortcut test cancelled. Test the selected chord to continue.",
+          }));
+        }}
+        onShortcutChange={(hotkey) => {
+          if (shortcutTestTimerRef.current !== null) {
+            window.clearTimeout(shortcutTestTimerRef.current);
+            shortcutTestTimerRef.current = null;
+          }
+          void setShortcutTestActive(false);
+          setShortcutTest({
+            active: false,
+            detected: false,
+            message: "Selection changed. Test this chord to continue.",
+          });
+          setSettingsDraft({ ...settingsDraft, hotkey });
         }}
         pasteTest={pasteTest}
         onPasteTest={async () => {

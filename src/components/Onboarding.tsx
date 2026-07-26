@@ -52,6 +52,8 @@ interface OnboardingProps {
   onFinishSoundCheck: () => Promise<void>;
   onOpenWindowsSoundSettings: () => Promise<void>;
   onTestShortcut: () => void;
+  onCancelShortcutTest: () => void;
+  onShortcutChange: (hotkey: string) => void;
   pasteTest: PasteTestState;
   onPasteTest: () => Promise<void>;
   onSelectModel: (modelId: string) => void;
@@ -136,6 +138,8 @@ export function Onboarding(props: OnboardingProps) {
     onFinishSoundCheck,
     onOpenWindowsSoundSettings,
     onTestShortcut,
+    onCancelShortcutTest,
+    onShortcutChange,
     pasteTest,
     onPasteTest,
     onSelectModel,
@@ -385,7 +389,18 @@ export function Onboarding(props: OnboardingProps) {
                   <span className="ob-keys">
                     {hotkeyChips.map((k, i) => <kbd key={i}>{k}</kbd>)}
                   </span>
-                  <button className="ob-preset" onClick={onTestShortcut}>Test shortcut</button>
+                  <button
+                    className="ob-preset"
+                    type="button"
+                    disabled={shortcutTest.active}
+                    onClick={onTestShortcut}
+                  >
+                    {shortcutTest.active
+                      ? "Listening for keys..."
+                      : shortcutTest.detected
+                        ? "Test again"
+                        : "Test shortcut"}
+                  </button>
                 </div>
                 <p className="ob-keyhint">{shortcutTest.message || shortcutStatus?.message || "Press your shortcut to confirm the desktop runtime hears it."}</p>
                 <div className="ob-presets">
@@ -393,7 +408,8 @@ export function Onboarding(props: OnboardingProps) {
                     <button
                       key={opt}
                       className={`ob-preset${settings.hotkey === opt ? " sel" : ""}`}
-                      onClick={() => setSettings({ ...settings, hotkey: opt })}
+                      type="button"
+                      onClick={() => onShortcutChange(opt)}
                     >
                       {opt}
                     </button>
@@ -477,14 +493,28 @@ export function Onboarding(props: OnboardingProps) {
           </div>
 
           <div className="ob-nav">
-            {step > 0 && <button className="pill-btn ghost" onClick={() => setStep(step - 1)}>Back</button>}
+            {step > 0 && (
+              <button
+                className="pill-btn ghost"
+                type="button"
+                onClick={() => {
+                  if (step === 3) onCancelShortcutTest();
+                  setStep(step - 1);
+                }}
+              >
+                Back
+              </button>
+            )}
             <div className="ob-progress"><i style={{ width: `${progressPct}%` }} /></div>
             {step < STEPS.length - 1 ? (
               <>
                 <button
                   className={`pill-btn${canContinue ? "" : " ghost"}`}
                   disabled={!canContinue}
-                  onClick={() => setStep(step + 1)}
+                  onClick={() => {
+                    if (step === 3) onCancelShortcutTest();
+                    setStep(step + 1);
+                  }}
                   style={canContinue ? {} : { opacity: 0.4, cursor: "not-allowed" }}
                 >
                   {step === 0 ? "◇ Begin" : "Continue"} {canContinue && step > 0 ? <Glyph d={ICONS.arrow} size={15} /> : null}

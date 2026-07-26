@@ -68,6 +68,8 @@ function onboardingProps(overrides: Record<string, unknown> = {}) {
     onFinishSoundCheck: vi.fn(async () => undefined),
     onOpenWindowsSoundSettings: vi.fn(async () => undefined),
     onTestShortcut: vi.fn(),
+    onCancelShortcutTest: vi.fn(),
+    onShortcutChange: vi.fn(),
     pasteTest: { running: false, passed: false, message: "" },
     onPasteTest: vi.fn(async () => undefined),
     onSelectModel: vi.fn(),
@@ -95,7 +97,8 @@ describe("Onboarding", () => {
 
   it("will not pass the shortcut step until the native chord is detected", async () => {
     const user = userEvent.setup();
-    render(<Onboarding {...onboardingProps()} />);
+    const props = onboardingProps();
+    render(<Onboarding {...props} />);
 
     await user.click(screen.getByRole("button", { name: /begin/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
@@ -104,7 +107,41 @@ describe("Onboarding", () => {
     const continueButton = screen.getByRole("button", { name: /continue/i });
     expect(continueButton).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /test shortcut/i }));
-    expect(onboardingProps().onComplete).not.toHaveBeenCalled();
+    expect(props.onTestShortcut).toHaveBeenCalledOnce();
+    expect(props.onComplete).not.toHaveBeenCalled();
+  });
+
+  it("shows an armed shortcut test and cancels it when leaving the step", async () => {
+    const user = userEvent.setup();
+    const props = onboardingProps({
+      shortcutTest: {
+        active: true,
+        detected: false,
+        message: "Press your dictation shortcut...",
+      },
+    });
+    render(<Onboarding {...props} />);
+
+    await user.click(screen.getByRole("button", { name: /begin/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(screen.getByRole("button", { name: /listening for keys/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /back/i }));
+    expect(props.onCancelShortcutTest).toHaveBeenCalledOnce();
+  });
+
+  it("invalidates the previous shortcut test when the selected chord changes", async () => {
+    const user = userEvent.setup();
+    const props = onboardingProps();
+    render(<Onboarding {...props} />);
+
+    await user.click(screen.getByRole("button", { name: /begin/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: "Ctrl+Alt+D" }));
+
+    expect(props.onShortcutChange).toHaveBeenCalledWith("Ctrl+Alt+D");
   });
 
   it("offers a real retry after a failed host-backed sound check", async () => {

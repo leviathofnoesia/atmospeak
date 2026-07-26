@@ -9,9 +9,9 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
   - Website download CTAs replaced by the temporary repair notice.
   - Direct v0.3.0 artifact and `latest.json` URLs return 404.
 - Automated recovery evidence:
-  - `cargo test --manifest-path src-tauri/Cargo.toml`: **41 passed**
-  - `bun run test`: **16 passed**
-  - `bun run e2e`: **9 passed**, including canonical 1000x660 Home/History
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **43 passed**
+  - `bun run test`: **18 passed**
+  - `bun run e2e`: **10 passed**, including canonical 1000x660 Home/History
     screenshots with a maximum two-pixel difference, 125%/150% scaling, 360px
     overflow, setup-without-skip, nested diagnostics, editable hub records, and
     a motionless idle overlay.
@@ -28,6 +28,8 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
     in the observed sample; hidden debug overlay: **0% over 10s**.
   - Native move/restart check: `(140,160)` persisted exactly; deliberate reset
     removed the saved-position file without the move event recreating it.
+  - Native setup shortcut probe: an OS-level injected `Ctrl+Alt+D` produced the
+    expected `pressed` then `released` Tauri events without entering dictation.
 - Real hardware discovery:
   - `Microphone (Elgato Wave:3)` was enumerated by the native app.
   - Ambient input measured about -47.8 dBFS RMS and correctly failed the speech

@@ -10,6 +10,9 @@
   conservative normalization, and actionable sound-check failures.
 - Restores the supplied six-step setup, editorial hub, native dock dragging,
   position persistence, model management, and motionless idle dock.
+- Repairs setup shortcut validation so its temporary Windows hook is genuinely
+  unpaused, keyed chords preserve modifier state, and completion waits for a
+  full press-and-release gesture.
 - Replaces title-only installer smoke testing with WebView2 DOM assertions and
   adds canonical Home/History screenshot regression coverage.
 

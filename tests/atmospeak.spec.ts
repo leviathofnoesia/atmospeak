@@ -16,6 +16,20 @@ test("fresh browser fixture exposes setup v2 without a skip path", async ({ page
   await expect(page.getByRole("button", { name: /Atmospeak companion/i })).toHaveCount(0);
 });
 
+test("shortcut step visibly arms and can be cancelled", async ({ page }) => {
+  await page.goto("/?view=setup&fixture=shortcut");
+  await page.getByRole("button", { name: /begin/i }).click();
+  await page.getByRole("button", { name: /continue/i }).click();
+  await page.getByRole("button", { name: /continue/i }).click();
+
+  const continueButton = page.getByRole("button", { name: /continue/i });
+  await expect(continueButton).toBeDisabled();
+  await page.getByRole("button", { name: /test shortcut/i }).click();
+  await expect(page.getByRole("button", { name: /listening for keys/i })).toBeDisabled();
+  await page.getByRole("button", { name: /back/i }).click();
+  await expect(page.getByRole("heading", { name: /A voice model/i })).toBeVisible();
+});
+
 test.describe("canonical editorial hub", () => {
   test.use({ viewport: { width: 1000, height: 660 } });
 

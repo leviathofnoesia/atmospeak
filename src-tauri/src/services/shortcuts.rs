@@ -28,6 +28,10 @@ enum ShortcutKey {
     D,
 }
 
+fn sync_runtime_pause_state(shortcuts_paused: &Arc<Mutex<bool>>, paused: bool) {
+    *shortcuts_paused.lock() = paused;
+}
+
 pub fn register_shortcut(
     app: &AppHandle,
     shortcut_status: Arc<Mutex<ShortcutStatus>>,
@@ -35,6 +39,12 @@ pub fn register_shortcut(
     requested_hotkey: &str,
     paused: bool,
 ) -> ShortcutStatus {
+    // Registration and the hook must agree about whether input is live. Setup
+    // starts globally paused, then temporarily arms the chosen chord for its
+    // mandatory test. Updating only ShortcutStatus leaves the Windows hook
+    // silently discarding every key event.
+    sync_runtime_pause_state(&shortcuts_paused, paused);
+
     #[cfg(target_os = "windows")]
     {
         windows_keyboard_hook::register_shortcut(
@@ -284,8 +294,8 @@ mod windows_keyboard_hook {
     };
     use tauri::{AppHandle, Emitter, Manager};
     use windows::Win32::{
-        Foundation::{LPARAM, LRESULT, WPARAM},
-        System::Threading::GetCurrentThreadId,
+        Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
+        System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
         UI::{
             Input::KeyboardAndMouse::{
                 GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_ESCAPE, VK_LCONTROL, VK_LMENU,
@@ -469,7 +479,15 @@ mod windows_keyboard_hook {
     fn run_hook_thread(ready_tx: mpsc::Sender<Result<u32, String>>) {
         unsafe {
             let thread_id = GetCurrentThreadId();
-            let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) {
+            let module = match GetModuleHandleW(None) {
+                Ok(module) => HINSTANCE(module.0),
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
+            let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), Some(module), 0)
+            {
                 Ok(hook) => hook,
                 Err(error) => {
                     let _ = ready_tx.send(Err(error.to_string()));
@@ -596,13 +614,16 @@ mod windows_keyboard_hook {
             if self.capturing && key_up && relevant && !modifiers_down {
                 self.capturing = false;
                 return ShortcutEventOutcome {
-                    consume: true,
+                    consume: false,
                     signal: None,
                 };
             }
 
             ShortcutEventOutcome {
-                consume: relevant && (combo_down || self.active || self.capturing),
+                // Do not consume a keyed chord's modifiers before its key is
+                // pressed. Consumed modifier-down events never enter Windows'
+                // async key state, so Space/D could not complete the chord.
+                consume: relevant && (combo_down || self.active),
                 signal: None,
             }
         }
@@ -743,7 +764,7 @@ mod windows_keyboard_hook {
         };
         use std::collections::HashSet;
         use windows::Win32::UI::Input::KeyboardAndMouse::{
-            VK_ESCAPE, VK_LCONTROL, VK_LWIN, VK_SPACE,
+            VK_D, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_SPACE,
         };
 
         #[test]
@@ -816,7 +837,7 @@ mod windows_keyboard_hook {
             assert_eq!(
                 send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), true),
                 ShortcutEventOutcome {
-                    consume: true,
+                    consume: false,
                     signal: None
                 }
             );
@@ -835,6 +856,41 @@ mod windows_keyboard_hook {
                     vk_value(VK_SPACE),
                     false
                 ),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Released)
+                }
+            );
+        }
+
+        #[test]
+        fn keyed_ctrl_alt_d_leaves_modifiers_live_until_d() {
+            let hotkey = parse_shortcut("Ctrl+Alt+D").expect("parse shortcut");
+            let mut runtime = ShortcutRuntimeState::default();
+            let mut pressed = HashSet::new();
+
+            assert!(
+                !send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_LCONTROL),
+                    true,
+                )
+                .consume
+            );
+            assert!(
+                !send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LMENU), true,).consume
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_D), true),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Pressed)
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_D), false),
                 ShortcutEventOutcome {
                     consume: true,
                     signal: Some(ShortcutSignal::Released)
@@ -891,21 +947,35 @@ mod windows_keyboard_hook {
             vk: u32,
             is_down: bool,
         ) -> ShortcutEventOutcome {
-            if is_down {
-                pressed.insert(vk);
-            } else {
-                pressed.remove(&vk);
-            }
-            runtime.handle_event(hotkey, vk, is_down, !is_down, |candidate| {
+            let outcome = runtime.handle_event(hotkey, vk, is_down, !is_down, |candidate| {
                 pressed.contains(&candidate)
-            })
+            });
+            // A low-level hook that consumes an event prevents Windows from
+            // updating GetAsyncKeyState for that key.
+            if !outcome.consume {
+                if is_down {
+                    pressed.insert(vk);
+                } else {
+                    pressed.remove(&vk);
+                }
+            }
+            outcome
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ShortcutKey, parse_shortcut, shortcut_candidates};
+    use super::{ShortcutKey, parse_shortcut, shortcut_candidates, sync_runtime_pause_state};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    #[test]
+    fn setup_registration_unpauses_the_runtime_hook_state() {
+        let paused = Arc::new(Mutex::new(true));
+        sync_runtime_pause_state(&paused, false);
+        assert!(!*paused.lock());
+    }
 
     #[test]
     fn requested_shortcut_is_first_and_deduplicated() {
