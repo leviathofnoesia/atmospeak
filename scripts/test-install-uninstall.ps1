@@ -101,6 +101,20 @@ function Wait-ForPathRemoval {
   throw "Path still exists after waiting for uninstall cleanup: $Path"
 }
 
+function Get-FreeTcpPort {
+  $listener = [System.Net.Sockets.TcpListener]::new(
+    [System.Net.IPAddress]::Loopback,
+    0
+  )
+  $listener.Start()
+  try {
+    return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+  }
+  finally {
+    $listener.Stop()
+  }
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
   $InstallerPath = Get-ChildItem (Join-Path $Root "release") -Filter "*_x64-setup.exe" -File |
@@ -141,7 +155,10 @@ if (Test-Path $ProfileDir) {
   Remove-Item $ProfileDir -Recurse -Force
 }
 $PreviousProfileOverride = $env:ATMOSPEAK_APP_DATA_DIR
+$PreviousWebViewArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+$DebugPort = Get-FreeTcpPort
 $env:ATMOSPEAK_APP_DATA_DIR = $ProfileDir
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$DebugPort"
 try {
   $process = Start-Process -FilePath $AppExe -PassThru
 } finally {
@@ -150,10 +167,23 @@ try {
   } else {
     $env:ATMOSPEAK_APP_DATA_DIR = $PreviousProfileOverride
   }
+  if ($null -eq $PreviousWebViewArguments) {
+    Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
+  } else {
+    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $PreviousWebViewArguments
+  }
 }
 try {
   Wait-ForInstalledWindow -ProcessId $process.Id -Title "Atmospeak"
-  Wait-ForInstalledWindow -ProcessId $process.Id -Title "Atmospeak Overlay"
+  $titles = Get-VisibleWindowTitlesForProcess -ProcessId $process.Id
+  if ($titles -contains "Atmospeak Overlay") {
+    throw "Fresh first launch incorrectly created the overlay before setup."
+  }
+  $Harness = Join-Path $Root "scripts\native-webview-harness.mjs"
+  & node $Harness "--port=$DebugPort" "--expect=setup"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Native WebView DOM harness failed with exit code $LASTEXITCODE."
+  }
   if ($process.HasExited) {
     throw "App exited during launch smoke with code $($process.ExitCode)"
   }

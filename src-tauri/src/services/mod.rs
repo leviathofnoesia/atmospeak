@@ -10,5 +10,7 @@ pub mod proc;
 pub mod recorder;
 pub mod runtime;
 pub mod shortcuts;
+pub mod sound_check;
 pub mod startup;
 pub mod transcriber;
+pub mod window_manager;

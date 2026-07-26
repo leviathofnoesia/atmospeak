@@ -1,10 +1,12 @@
 use tauri::{
+    Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
 };
 
-use crate::services::{app_state::AppState, dictation_engine, overlay_window, shortcuts};
+use crate::services::{
+    app_state::AppState, dictation_engine, overlay_window, shortcuts, window_manager,
+};
 
 pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Atmospeak").build(app)?;
@@ -24,7 +26,12 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
             "open" => show_main_window(app),
             "overlay" => toggle_overlay_window(app),
             "recenter" => {
-                let _ = overlay_window::show_and_reset(app);
+                if window_manager::setup_is_complete(app, crate::ONBOARDING_VERSION) {
+                    let _ = window_manager::ensure_overlay(app);
+                    let _ = overlay_window::show_and_reset(app);
+                } else {
+                    let _ = window_manager::ensure_main(app, true);
+                }
             }
             "pause" => toggle_shortcuts(app),
             "dictate" => {
@@ -61,14 +68,15 @@ fn toggle_shortcuts(app: &tauri::AppHandle) {
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    let setup = !window_manager::setup_is_complete(app, crate::ONBOARDING_VERSION);
+    let _ = window_manager::ensure_main(app, setup);
 }
 
 fn toggle_overlay_window(app: &tauri::AppHandle) {
+    if !window_manager::setup_is_complete(app, crate::ONBOARDING_VERSION) {
+        let _ = window_manager::ensure_main(app, true);
+        return;
+    }
     if let Some(window) = app.get_webview_window("overlay") {
         let is_visible = window.is_visible().unwrap_or(false);
         if is_visible {
@@ -78,5 +86,7 @@ fn toggle_overlay_window(app: &tauri::AppHandle) {
             // "Reset Dock Position" action, not a side effect of unhiding.
             let _ = overlay_window::show(app);
         }
+    } else if window_manager::ensure_overlay(app).is_ok() {
+        let _ = overlay_window::show(app);
     }
 }

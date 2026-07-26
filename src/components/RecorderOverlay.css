@@ -26,17 +26,15 @@
 .dock {
   position: relative;
   display: flex; align-items: center;
-  /* LIQUID GLASS — smoked (default). Translucent so the warm desktop refracts through. */
+  /* Static layered glass: rich at rest without a continuously sampled backdrop. */
   background:
-    linear-gradient(180deg, rgba(48,46,56,0.34), rgba(20,19,25,0.28)) padding-box;
+    radial-gradient(120% 90% at 34% 0%, rgba(255,255,255,0.18), transparent 45%),
+    linear-gradient(180deg, rgba(48,46,56,0.94), rgba(20,19,25,0.96)) padding-box;
   border: 1px solid rgba(255,255,255,0.18);
   color: var(--paper);
   border-radius: 999px;
   overflow: hidden;
   isolation: isolate;
-  backdrop-filter: blur(13px) saturate(185%) brightness(1.06); /* fallback (Safari/FF) */
-  -webkit-backdrop-filter: url(#atmoGlass) blur(2px) saturate(185%) brightness(1.04);
-          backdrop-filter: url(#atmoGlass) blur(2px) saturate(185%) brightness(1.04);
   box-shadow:
     inset 0 1px 0.5px rgba(255,255,255,0.50),
     inset 0 -14px 30px -10px rgba(0,0,0,0.40),
@@ -57,16 +55,21 @@
   mix-blend-mode: screen;
 }
 .dock::after {
-  /* slow liquid glint sweeping across the surface */
+  /* Glint is motionless at idle and plays once on direct interaction. */
   content: ""; position: absolute; top: -20%; left: -55%; width: 45%; height: 140%;
   pointer-events: none; z-index: 2;
   background: linear-gradient(105deg, transparent, rgba(255,255,255,0.22), transparent);
   transform: skewX(-16deg);
-  animation: glassGlint 8.5s ease-in-out infinite;
+  opacity: 0;
 }
 @keyframes glassGlint {
-  0%, 62% { left: -55%; }
-  82%, 100% { left: 125%; }
+  0% { transform: translateX(0) skewX(-16deg); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateX(400%) skewX(-16deg); opacity: 0; }
+}
+.dock-wrap:hover .dock[data-state="rest"]::after,
+.dock[data-state="rest"][data-armed]::after {
+  animation: glassGlint 0.9s ease-out 1;
 }
 .dock[data-state="listening"]::after,
 .dock[data-state="processing"]::after,
@@ -88,9 +91,6 @@
     radial-gradient(130% 122% at 66% 90%, color-mix(in oklab, var(--accent-deep) 60%, transparent), transparent 82%),
     radial-gradient(140% 135% at 38% 28%, color-mix(in oklab, var(--accent-soft) 50%, transparent), color-mix(in oklab, var(--accent) 64%, transparent) 70%);
   border: 1px solid rgba(255,255,255,0.6);
-  backdrop-filter: blur(5px) saturate(180%); /* fallback */
-  -webkit-backdrop-filter: url(#atmoGlass) blur(1px) saturate(190%);
-          backdrop-filter: url(#atmoGlass) blur(1px) saturate(190%);
   box-shadow:
     inset 0 2px 3px rgba(255,255,255,0.85),
     inset 0 -3px 7px -1px rgba(255,255,255,0.40),
@@ -141,7 +141,7 @@
           mask: radial-gradient(circle, transparent 70%, #000 83%, #000 95%, transparent 100%);
   filter: blur(0.5px) saturate(0.7) brightness(0.85);
   opacity: 0.32;
-  animation: rimSpin 18s linear infinite;
+  animation: none;
   transition: opacity 0.55s var(--ease-cosmic, ease), filter 0.55s ease;
   pointer-events: none;
 }
@@ -149,7 +149,7 @@
 .dock[data-state="rest"][data-armed]::before {
   filter: blur(0.4px) saturate(1.55) brightness(1.22);
   opacity: 0.95;
-  animation-duration: 9s;
+  animation: rimSpin 0.9s ease-out 1;
 }
 /* bright glass edge crescents */
 .dock[data-state="rest"]::after {
@@ -212,13 +212,12 @@
   width: 468px; height: 88px; padding: 0 12px 0 16px;
   border-radius: 26px;
   gap: 14px;
-  /* DARK = tinted LIQUID GLASS: translucent dusk tint so the desktop refracts through. */
+  /* Static tinted glass; no URL filters or continuously sampled backdrop. */
   background:
-    linear-gradient(180deg, color-mix(in oklab, var(--accent-deep) 52%, transparent),
-                            color-mix(in oklab, var(--accent-deep) 60%, transparent)) padding-box;
+    radial-gradient(120% 100% at 32% -15%, rgba(255,255,255,0.16), transparent 48%),
+    linear-gradient(180deg, color-mix(in oklab, var(--accent-deep) 88%, #25232b),
+                            color-mix(in oklab, var(--accent-deep) 92%, #151419)) padding-box;
   animation: capsuleIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
-  -webkit-backdrop-filter: url(#atmoGlass) blur(4px) saturate(190%) brightness(1.02);
-          backdrop-filter: url(#atmoGlass) blur(4px) saturate(190%) brightness(1.02);
 }
 @keyframes capsuleIn {
   from { transform: scale(0.965); transform-origin: 50% 72%; }
@@ -259,10 +258,10 @@
 
 /* the Aura mark living at the dock's left */
 .dock__mark { flex: none; display: grid; place-items: center; transition: transform 0.5s var(--spring), filter 0.5s ease; }
-.dock[data-state="rest"] .dock__mark { animation: breath calc(var(--dur-breath) * 1.4) var(--ease-breath, ease-in-out) infinite; transform: scale(0.9); }
+.dock[data-state="rest"] .dock__mark { animation: none; transform: scale(0.9); }
 .dock-wrap:hover .dock[data-state="rest"] .dock__mark,
 .dock[data-state="rest"][data-armed] .dock__mark { transform: scale(1.05); filter: drop-shadow(0 0 5px color-mix(in oklab, var(--neon,#9db0ff) 55%, transparent)); }
-.dock[data-state="rest"][data-armed] .dock__mark { animation: wake 0.5s var(--spring) 1, breath var(--dur-breath) var(--ease-breath, ease-in-out) 0.5s infinite; }
+.dock[data-state="rest"][data-armed] .dock__mark { animation: wake 0.5s var(--spring) 1; }
 .dock[data-state="processing"] .dock__mark { animation: spin 1.4s linear infinite; }
 .dock[data-state="listening"] .aura { filter: drop-shadow(0 0 6px color-mix(in oklab, var(--neon,#9db0ff) 75%, transparent)); }
 
@@ -351,6 +350,16 @@
 }
 .dock-tip--warn { color: #e6b75a; }
 .dock-wrap:hover .dock-tip { color: rgba(247,247,242,0.85); transform: translateY(2px); }
+.dock-alert {
+  max-width: 360px;
+  margin-top: 8px;
+  color: #ffe0d7;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(18,17,19,0.8);
+}
 
 /* light dock variant — CLEAR liquid glass */
 .dock[data-theme="light"] {

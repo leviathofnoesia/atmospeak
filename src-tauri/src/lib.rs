@@ -9,16 +9,18 @@ use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
-    cancel_model_download, cancel_recording, delete_dictionary_entry, delete_model, delete_snippet,
-    download_model, get_app_snapshot, get_last_stage_metrics, get_model_inventory,
+    cancel_model_download, cancel_recording, cancel_sound_check, complete_onboarding,
+    delete_dictionary_entry, delete_model, delete_session, delete_snippet, download_model,
+    finish_sound_check, get_app_snapshot, get_last_stage_metrics, get_model_inventory,
     get_model_status, get_recording_level, get_runtime_events, get_shortcut_status,
     handle_dictation_action, inject_text, list_microphones, mic_check_start, mic_check_stop,
+    open_windows_sound_settings, register_setup_shortcut, reset_overlay_position,
     save_overlay_position, save_settings, set_shortcut_test_active, set_shortcuts_paused,
-    show_main_window, show_overlay_window, start_recording, stop_recording,
+    show_main_window, show_overlay_window, start_recording, start_sound_check, stop_recording,
     upsert_dictionary_entry, upsert_snippet,
 };
 use services::{
-    app_state::AppState, asr_host, dictation_engine, metrics, overlay_window, runtime, shortcuts,
+    app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, window_manager,
 };
 
 /// Bring up the resident ASR host in the background: loading the model takes
@@ -79,7 +81,7 @@ pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
 }
 
 /// Must match frontend `ONBOARDING_VERSION` in `src/types/dictation.ts`.
-const ONBOARDING_VERSION: &str = "phase-a-honest-mvp-v1";
+pub(crate) const ONBOARDING_VERSION: &str = "atmospeak-setup-v2";
 
 fn install_global_shortcut(
     app: &mut tauri::App,
@@ -133,13 +135,6 @@ pub fn run() {
     let app_state = AppState::new().expect("failed to initialize application state");
     let shortcut_status = app_state.shortcut_status.clone();
     let shortcuts_paused = app_state.shortcuts_paused.clone();
-    let initial_hotkey = app_state
-        .database
-        .lock()
-        .load_settings()
-        .map(|settings| settings.hotkey)
-        .unwrap_or_else(|_| "Ctrl+Win".to_string());
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -150,42 +145,32 @@ pub fn run() {
             let engine = dictation_engine::spawn(app.handle().clone());
             app.state::<AppState>().set_engine(engine);
             start_asr_host(app.handle());
-
-            install_global_shortcut(
-                app,
-                shortcut_status.clone(),
-                shortcuts_paused.clone(),
-                &initial_hotkey,
-            )?;
             tray::install(app)?;
-            let needs_onboarding = app
-                .state::<AppState>()
-                .database
-                .lock()
-                .load_settings()
-                .map(|settings| {
-                    !settings.onboarding_complete
-                        || settings.onboarding_version != ONBOARDING_VERSION
-                })
-                .unwrap_or(true);
-            if needs_onboarding {
-                if let Some(main) = app.get_webview_window("main") {
-                    let _ = main.unminimize();
-                    let _ = main.show();
-                    let _ = main.set_focus();
-                }
+            if window_manager::setup_is_complete(app.handle(), ONBOARDING_VERSION) {
+                let hotkey = app
+                    .state::<AppState>()
+                    .database
+                    .lock()
+                    .load_settings()
+                    .map(|settings| settings.hotkey)
+                    .unwrap_or_else(|_| "Ctrl+Win".to_string());
+                install_global_shortcut(
+                    app,
+                    shortcut_status.clone(),
+                    shortcuts_paused.clone(),
+                    &hotkey,
+                )?;
+                window_manager::ensure_overlay(app.handle())?;
+                let _ = services::overlay_window::show(app.handle());
+            } else {
+                *shortcuts_paused.lock() = true;
+                window_manager::ensure_main(app.handle(), true)?;
             }
-            // Restore where the user parked it; only the tray action resets position.
-            let _ = overlay_window::show(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
-                    "main" => {
-                        api.prevent_close();
-                        let _ = window.hide();
-                    }
                     "overlay" => {
                         api.prevent_close();
                         let _ = window.hide();
@@ -210,6 +195,7 @@ pub fn run() {
             show_overlay_window,
             show_main_window,
             set_shortcut_test_active,
+            register_setup_shortcut,
             save_overlay_position,
             get_runtime_events,
             get_last_stage_metrics,
@@ -219,11 +205,18 @@ pub fn run() {
             handle_dictation_action,
             mic_check_start,
             mic_check_stop,
+            start_sound_check,
+            finish_sound_check,
+            cancel_sound_check,
+            open_windows_sound_settings,
+            complete_onboarding,
+            reset_overlay_position,
             inject_text,
             upsert_dictionary_entry,
             delete_dictionary_entry,
             upsert_snippet,
             delete_snippet,
+            delete_session,
             get_model_status,
             get_model_inventory,
             download_model,

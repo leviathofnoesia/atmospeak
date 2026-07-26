@@ -3,7 +3,6 @@ import { memo, useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { DictationMode, ModelStatus, RecordingStarted } from "../types/dictation";
 import { Aura } from "./Aura";
-import { attachLiquidGlass } from "../lib/liquidGlass";
 import "./RecorderOverlay.css";
 
 export type RecorderPhase = "idle" | "listening" | "processing" | "pasted" | "error";
@@ -113,6 +112,7 @@ function WaveCanvas({
   const raf = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!active) return undefined;
     const cv = ref.current;
     if (!cv) return;
     const ctx = cv.getContext("2d");
@@ -141,12 +141,13 @@ function WaveCanvas({
       c.closePath();
     };
 
-    const draw = () => {
+    let lastFrameAt = 0;
+    const draw = (timestamp: number) => {
+      raf.current = requestAnimationFrame(draw);
+      if (timestamp - lastFrameAt < 16.5) return;
+      lastFrameAt = timestamp;
       if (cv.clientWidth !== w || cv.clientHeight !== h) resize();
-      if (w === 0 || h === 0) {
-        raf.current = requestAnimationFrame(draw);
-        return;
-      }
+      if (w === 0 || h === 0) return;
       const arr = buf.current;
       arr.push(active ? levelRef.current : 0.04);
       if (arr.length > 110) arr.shift();
@@ -211,7 +212,6 @@ function WaveCanvas({
           ctx.globalAlpha = 1;
         });
       }
-      raf.current = requestAnimationFrame(draw);
     };
     raf.current = requestAnimationFrame(draw);
     return () => {
@@ -260,6 +260,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     onCancel,
     onMoveStart,
     onOpenHub,
+    notice,
   } = props;
 
   const isRecording = recording !== null;
@@ -276,18 +277,6 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   const levelRef = useRef(0.05);
   const peakBand = inputBands && inputBands.length ? Math.max(...inputBands) : 0;
   levelRef.current = Math.max(0.04, Math.min(1, Math.max(inputLevel, peakBand)));
-
-  // liquid-glass refraction — bends the real desktop behind the transparent window
-  useEffect(() => {
-    if (!dockRef.current) return;
-    return attachLiquidGlass(dockRef.current, () => ({
-      scaleMul: 2.2,
-      depthMul: 1.0,
-      splay: 1.12,
-      curvature: 1.05,
-      chroma: 0.08,
-    }));
-  }, []);
 
   // keep the latest words in view; only fade the left once text overflows
   const transcript = liveTranscript?.text ?? "";
@@ -390,6 +379,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         data-shape={dockShape}
         data-size={bubbleSize}
         data-theme={theme}
+        data-tauri-drag-region
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -399,16 +389,16 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         tabIndex={0}
         aria-label="Atmospeak companion — tap to dictate, drag to move"
       >
-        <span className="dock__mark">
+        <span className="dock__mark" data-tauri-drag-region>
           <Aura size={auraSize} active={listening} />
         </span>
 
         {state === "rest" && dockShape !== "orb" && (
-          <span className="dock__restlabel">{modelReady ? tip : "runtime offline"}</span>
+          <span className="dock__restlabel" data-tauri-drag-region>{modelReady ? tip : "runtime offline"}</span>
         )}
 
         {state !== "rest" && (
-          <div className="dock__core">
+          <div className="dock__core" data-tauri-drag-region>
             {state === "processing" ? (
               <div className="dock__transcript proc">
                 <span className="shim">transcribing on device</span>
@@ -478,6 +468,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
       {state === "rest" && dockShape === "orb" && (
         <div className={clsx("dock-tip", !modelReady && "dock-tip--warn")}>{modelReady ? tip : "runtime offline"}</div>
       )}
+      {notice && <div className="dock-alert" role="status">{notice}</div>}
     </div>
   );
 }

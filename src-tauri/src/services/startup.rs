@@ -19,15 +19,7 @@ pub fn set_start_at_login(enabled: bool) -> Result<()> {
             let command = format!("\"{}\"", exe.display());
             Command::new("reg.exe")
                 .args([
-                    "add",
-                    RUN_KEY,
-                    "/v",
-                    APP_VALUE,
-                    "/t",
-                    "REG_SZ",
-                    "/d",
-                    &command,
-                    "/f",
+                    "add", RUN_KEY, "/v", APP_VALUE, "/t", "REG_SZ", "/d", &command, "/f",
                 ])
                 .status()
                 .context("failed to configure Windows startup entry")?

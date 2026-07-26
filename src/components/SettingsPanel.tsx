@@ -6,17 +6,16 @@ import {
   Radio,
   RotateCw,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import type {
   AppSettings,
   MicrophoneInfo,
-  RuntimeEvent,
   ShortcutStatus,
   UpdateCheckResult,
   UpdateStatus,
 } from "../types/dictation";
 import { shortcutOptions } from "../panelOptions";
 import { PanelTitle } from "./PanelTitle";
-import { RuntimeEventList } from "./RuntimeEventList";
 import { ToggleRow } from "./ToggleRow";
 
 interface ShortcutTestState {
@@ -31,16 +30,18 @@ interface SettingsPanelProps {
   microphones: MicrophoneInfo[];
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
-  runtimeEvents: RuntimeEvent[];
   onTestShortcut: () => void;
   onToggleShortcutsPaused: () => Promise<void>;
   onShowFloatingControl: () => Promise<void>;
+  onResetDockPosition: () => Promise<void>;
   onRerunOnboarding: () => Promise<void>;
   onSave: () => Promise<void>;
   updateStatus: UpdateStatus;
   updateResult: UpdateCheckResult | null;
   onCheckUpdates: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
+  advanced: ReactNode;
+  modelManagement: ReactNode;
 }
 
 export function SettingsPanel({
@@ -49,19 +50,26 @@ export function SettingsPanel({
   microphones,
   shortcutStatus,
   shortcutTest,
-  runtimeEvents,
   onTestShortcut,
   onToggleShortcutsPaused,
   onShowFloatingControl,
+  onResetDockPosition,
   onRerunOnboarding,
   onSave,
   updateStatus,
   updateResult,
   onCheckUpdates,
   onInstallUpdate,
+  advanced,
+  modelManagement,
 }: SettingsPanelProps) {
   return (
-    <section className="settings-panel">
+    <div>
+      <div className="hub__head">
+        <div className="kick">P.05 / Settings — tune the room</div>
+        <h1>Quiet by <em>default.</em></h1>
+      </div>
+      <section className="settings-panel">
       <PanelTitle icon={<Keyboard size={22} />} title="Input" />
       <label>
         <span>Microphone</span>
@@ -136,6 +144,23 @@ export function SettingsPanel({
         checked={settings.startAtLogin}
         onChange={(startAtLogin) => setSettings({ ...settings, startAtLogin })}
       />
+      <label>
+        <span>Transcript retention</span>
+        <select
+          value={settings.transcriptRetentionDays}
+          onChange={(event) =>
+            setSettings({ ...settings, transcriptRetentionDays: Number(event.currentTarget.value) })
+          }
+        >
+          <option value={1}>1 day</option>
+          <option value={7}>7 days</option>
+          <option value={30}>30 days</option>
+          <option value={90}>90 days</option>
+          <option value={0}>Keep until deleted</option>
+        </select>
+      </label>
+
+      {modelManagement}
 
       <PanelTitle icon={<Palette size={22} />} title="Companion" />
       <p className="muted">How the floating dock looks and moves. Changes apply on save.</p>
@@ -216,6 +241,9 @@ export function SettingsPanel({
         <button type="button" className="button button--ghost" onClick={() => void onShowFloatingControl()}>
           Show floating control
         </button>
+        <button type="button" className="button button--ghost" onClick={() => void onResetDockPosition()}>
+          Reset dock position
+        </button>
         <button type="button" className="button button--ghost" onClick={() => void onRerunOnboarding()}>
           Run onboarding
         </button>
@@ -240,8 +268,11 @@ export function SettingsPanel({
       </div>
       <p className="muted">{updateResult?.message ?? "Updates use the Tauri updater when configured."}</p>
 
-      <PanelTitle icon={<Radio size={22} />} title="Runtime events" />
-      <RuntimeEventList events={runtimeEvents} />
-    </section>
+      <details className="advanced-disclosure">
+        <summary>Advanced diagnostics</summary>
+        {advanced}
+      </details>
+      </section>
+    </div>
   );
 }

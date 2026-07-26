@@ -31,6 +31,8 @@ pub fn show(app: &AppHandle) -> Result<()> {
 pub fn show_and_reset(app: &AppHandle) -> Result<()> {
     let window = overlay(app)?;
     prepare(&window);
+    let _ = app.emit("atmospeak://overlay-position-resetting", ());
+    let _ = app.emit("wind-speak://overlay-position-resetting", ());
     position_near_bottom_center(&window);
     clear_position(app);
     let _ = window.show();

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Atmospeak",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "app.atmospeak.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -10,36 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Atmospeak",
-        "visible": false,
-        "width": 1180,
-        "height": 760,
-        "minWidth": 980,
-        "minHeight": 660,
-        "resizable": true,
-        "center": true
-      },
-      {
-        "label": "overlay",
-        "title": "Atmospeak Overlay",
-        "url": "/?view=overlay",
-        "width": 520,
-        "height": 150,
-        "minWidth": 420,
-        "minHeight": 132,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "focus": false,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data:; font-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }

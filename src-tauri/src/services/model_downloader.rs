@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
@@ -336,10 +336,10 @@ where
 fn atomic_replace(source: &Path, destination: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows::{
-        core::PCWSTR,
         Win32::Storage::FileSystem::{
-            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
         },
+        core::PCWSTR,
     };
 
     let source_wide = source

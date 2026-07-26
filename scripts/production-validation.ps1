@@ -28,7 +28,7 @@ function Read-RequiredText {
 
 function Get-MatrixCases {
   param([string]$Text)
-  $rows = [regex]::Matches($Text, '(?m)^\|\s*(\d{3})\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$')
+  $rows = [regex]::Matches($Text, '(?m)^\|\s*(\d{3})\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|[ \t\r]*$')
   $cases = foreach ($row in $rows) {
     [pscustomobject]@{
       Id = $row.Groups[1].Value

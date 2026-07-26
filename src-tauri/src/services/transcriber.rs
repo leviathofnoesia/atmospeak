@@ -56,11 +56,7 @@ pub fn transcribe(
 
 const EMPTY_TRANSCRIPT: &str = "No speech was detected in that recording.";
 
-fn transcribe_with_cli(
-    app: &AppHandle,
-    settings: &AppSettings,
-    wav_path: &Path,
-) -> Result<String> {
+fn transcribe_with_cli(app: &AppHandle, settings: &AppSettings, wav_path: &Path) -> Result<String> {
     let resolved = runtime::resolve_runtime(app, settings)?;
     let wav = wav_path
         .to_str()

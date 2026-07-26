@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RecorderOverlay } from "./RecorderOverlay";
@@ -188,5 +188,47 @@ describe("RecorderOverlay", () => {
     );
     // It must not invite a dictation that cannot run.
     expect(screen.getByText("runtime offline")).toBeTruthy();
+  });
+
+  it("does not create an animation frame loop while idle", () => {
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame");
+    render(
+      <RecorderOverlay
+        recording={null}
+        elapsedSeconds={0}
+        busy={false}
+        phase="idle"
+        modelStatus={readyModel}
+        onToggle={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(requestFrame).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Atmospeak companion/i })).toHaveAttribute(
+      "data-tauri-drag-region",
+    );
+    requestFrame.mockRestore();
+  });
+
+  it("starts the native drag path after the four-pixel threshold", () => {
+    const onMoveStart = vi.fn();
+    render(
+      <RecorderOverlay
+        recording={null}
+        elapsedSeconds={0}
+        busy={false}
+        phase="idle"
+        modelStatus={readyModel}
+        onToggle={vi.fn()}
+        onCancel={vi.fn()}
+        onMoveStart={onMoveStart}
+      />,
+    );
+
+    const dock = screen.getByRole("button", { name: /Atmospeak companion/i });
+    fireEvent.pointerDown(dock, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(dock, { pointerId: 1, clientX: 16, clientY: 10 });
+    expect(onMoveStart).toHaveBeenCalledTimes(1);
   });
 });

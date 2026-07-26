@@ -1,12 +1,12 @@
 import { CheckCircle2, Cpu } from "lucide-react";
 import type {
   AppSettings,
-  ModelDownloadProgress,
-  ModelInventory,
   ModelStatus,
+  RuntimeEvent,
   StageMetrics,
 } from "../types/dictation";
 import { PanelTitle } from "./PanelTitle";
+import { RuntimeEventList } from "./RuntimeEventList";
 import { StatusLed } from "./StatusLed";
 import { ToggleRow } from "./ToggleRow";
 
@@ -14,13 +14,9 @@ interface AdvancedPanelProps {
   settings: AppSettings;
   setSettings: (settings: AppSettings) => void;
   modelStatus: ModelStatus | null;
-  modelInventory: ModelInventory | null;
-  modelDownload: ModelDownloadProgress | null;
   lastMetrics: StageMetrics | null;
-  onSelectModel: (modelId: string) => void;
-  onDownloadModel: (modelId: string) => Promise<void>;
-  onCancelModelDownload: () => Promise<void>;
-  onDeleteModel: (modelId: string) => Promise<void>;
+  runtimeEvents: RuntimeEvent[];
+  onRunDiagnosticSoundCheck: () => Promise<void>;
   onSave: () => Promise<void>;
 }
 
@@ -28,13 +24,9 @@ export function AdvancedPanel({
   settings,
   setSettings,
   modelStatus,
-  modelInventory,
-  modelDownload,
   lastMetrics,
-  onSelectModel,
-  onDownloadModel,
-  onCancelModelDownload,
-  onDeleteModel,
+  runtimeEvents,
+  onRunDiagnosticSoundCheck,
   onSave,
 }: AdvancedPanelProps) {
   return (
@@ -50,59 +42,6 @@ export function AdvancedPanel({
           Atmospeak ships with whisper.cpp and Base English. The resident host keeps the selected
           model warm, with automatic one-shot CLI fallback. Override paths only for custom builds.
         </p>
-      </div>
-      <div className="model-grid">
-        {modelInventory?.models.map((model) => {
-          const isActive =
-            settings.activeModelId === model.id && !settings.advancedRuntimeEnabled;
-          const downloading =
-            modelDownload?.modelId === model.id &&
-            ["starting", "downloading", "verifying"].includes(modelDownload.status);
-          return (
-            <div
-              key={model.id}
-              className={`model-pill ${isActive ? "model-pill--active" : ""}`}
-            >
-              <strong>{model.label}</strong>
-              <span>
-                {!model.installed
-                  ? "Not installed"
-                  : isActive
-                    ? "Active"
-                    : model.bundled
-                      ? "Bundled"
-                      : "Installed"}
-              </span>
-              {!model.bundled ? (
-                <div className="model-pill__actions">
-                  {downloading ? (
-                    <button type="button" className="button button--ghost" onClick={() => void onCancelModelDownload()}>
-                      Cancel {modelDownload?.percent != null ? `${Math.round(modelDownload.percent)}%` : ""}
-                    </button>
-                  ) : model.installed ? (
-                    <>
-                      <button type="button" className="button button--ghost" onClick={() => onSelectModel(model.id)}>
-                        {isActive ? "Selected" : "Use"}
-                      </button>
-                      <button type="button" className="button button--ghost" onClick={() => void onDeleteModel(model.id)}>
-                        Delete
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="button button--ghost"
-                      disabled={Boolean(modelDownload && ["starting", "downloading", "verifying"].includes(modelDownload.status))}
-                      onClick={() => void onDownloadModel(model.id)}
-                    >
-                      Download
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
       </div>
       <ToggleRow
         icon={<Cpu size={18} />}
@@ -144,6 +83,17 @@ export function AdvancedPanel({
           </p>
         </div>
       ) : null}
+      <div className="instruction-card">
+        <h3>Selected input and paths</h3>
+        <p>Microphone · {settings.microphoneName ?? "none selected"}</p>
+        <p>Whisper CLI · {modelStatus?.whisperCliPath || "unavailable"}</p>
+        <p>Model · {modelStatus?.modelPath || "unavailable"}</p>
+      </div>
+      <PanelTitle icon={<Cpu size={22} />} title="Runtime logs" />
+      <RuntimeEventList events={runtimeEvents} />
+      <button type="button" className="button button--ghost" onClick={() => void onRunDiagnosticSoundCheck()}>
+        Run diagnostic sound check
+      </button>
       <button type="button" className="button button--primary" onClick={() => void onSave()}>
         <CheckCircle2 size={16} />
         Save advanced settings

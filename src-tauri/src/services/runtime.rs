@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use tauri::{path::BaseDirectory, AppHandle, Manager};
+use anyhow::{Result, anyhow};
+use tauri::{AppHandle, Manager, path::BaseDirectory};
 
 use crate::models::{AppSettings, ModelInventory, ModelInventoryItem, ModelStatus, RuntimeSource};
 use crate::services::{app_state::AppState, model_downloader};

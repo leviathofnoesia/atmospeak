@@ -1,13 +1,11 @@
-import { BookOpen } from "lucide-react";
 import type { FormEvent } from "react";
 import type { DictionaryEntry } from "../types/dictation";
 import { EditableRow } from "./EditableRow";
-import { PanelTitle } from "./PanelTitle";
 
 interface DictionaryPanelProps {
   entries: DictionaryEntry[];
-  draft: { phrase: string; replacement: string };
-  setDraft: (draft: { phrase: string; replacement: string }) => void;
+  draft: { id: string | null; phrase: string; replacement: string };
+  setDraft: (draft: { id: string | null; phrase: string; replacement: string }) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onToggle: (entry: DictionaryEntry) => Promise<void>;
   onDelete: (entry: DictionaryEntry) => Promise<void>;
@@ -22,9 +20,13 @@ export function DictionaryPanel({
   onDelete,
 }: DictionaryPanelProps) {
   return (
-    <section className="list-panel">
-      <PanelTitle icon={<BookOpen size={22} />} title="Custom dictionary" />
-      <form className="inline-form" onSubmit={(event) => void onSubmit(event)}>
+    <div>
+      <div className="hub__head">
+        <div className="kick">P.03 / Dictionary — your words, spelled your way</div>
+        <h1>It learns your <em>names.</em></h1>
+      </div>
+      <section className="list-panel">
+        <form className="inline-form" onSubmit={(event) => void onSubmit(event)}>
         <input
           value={draft.phrase}
           onChange={(event) => setDraft({ ...draft, phrase: event.currentTarget.value })}
@@ -36,19 +38,36 @@ export function DictionaryPanel({
           placeholder="replacement"
         />
         <button className="button button--primary" type="submit">
-          Add
+          {draft.id ? "Save" : "Add"}
         </button>
-      </form>
-      {entries.map((entry) => (
-        <EditableRow
-          key={entry.id}
-          title={entry.phrase}
-          body={entry.replacement}
-          enabled={entry.enabled}
-          onToggle={() => void onToggle(entry)}
-          onDelete={() => void onDelete(entry)}
-        />
-      ))}
-    </section>
+        {draft.id ? (
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => setDraft({ id: null, phrase: "", replacement: "" })}
+          >
+            Cancel
+          </button>
+        ) : null}
+        </form>
+        {entries.map((entry) => (
+          <EditableRow
+            key={entry.id}
+            title={entry.phrase}
+            body={entry.replacement}
+            enabled={entry.enabled}
+            onEdit={() =>
+              setDraft({
+                id: entry.id,
+                phrase: entry.phrase,
+                replacement: entry.replacement,
+              })
+            }
+            onToggle={() => void onToggle(entry)}
+            onDelete={() => void onDelete(entry)}
+          />
+        ))}
+      </section>
+    </div>
   );
 }

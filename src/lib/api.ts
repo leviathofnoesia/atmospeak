@@ -13,6 +13,7 @@ import type {
   MicrophoneInfo,
   ModelInventory,
   ModelStatus,
+  SoundCheckResult,
   RecordingStarted,
   ReleaseArtifact,
   RuntimeEvent,
@@ -30,7 +31,7 @@ interface WindowWithTauri extends Window {
 }
 
 const releaseBaseUrl = "https://github.com/leviathofnoesia/wind-speak/releases/latest/download";
-const releaseVersion = "0.3.0";
+const releaseVersion = "0.3.1";
 const mockInstalledModels = new Set(["base.en"]);
 
 let mockSnapshot: AppSnapshot = {
@@ -61,6 +62,60 @@ let mockSnapshot: AppSnapshot = {
     averageWordsPerMinute: 0,
   },
 };
+
+// Browser-only visual regression fixture. Native builds always read the real
+// profile through Tauri, so this cannot bypass setup in the installed product.
+if (
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("fixture") === "hub"
+) {
+  const createdAt = new Date("2026-07-26T14:42:00-04:00").toISOString();
+  mockSnapshot = recalculateStats({
+    ...mockSnapshot,
+    settings: {
+      ...mockSnapshot.settings,
+      microphoneName: "Elgato Wave:3",
+      onboardingComplete: true,
+      onboardingVersion: "atmospeak-setup-v2",
+      transcriptRetentionDays: 30,
+      audioCalibration: {
+        deviceName: "Elgato Wave:3",
+        checkedAt: createdAt,
+        rmsDbfs: -24,
+        peakDbfs: -8,
+        snrDb: 28,
+        modelId: "base.en",
+        asrBackend: "host",
+      },
+    },
+    sessions: [
+      {
+        id: "fixture-1",
+        rawText: "Hi Mara — thanks so much for the studio visit yesterday.",
+        cleanedText:
+          "Hi Mara — thanks so much for the studio visit yesterday. I keep thinking about the halftone moon prints by the window.",
+        audioPath: "mock://fixture-1.wav",
+        durationMs: 18_000,
+        wordCount: 22,
+        injected: true,
+        sourceApplication: "Letters",
+        createdAt,
+      },
+      {
+        id: "fixture-2",
+        rawText: "Pushed the edition mockups to the shared drive.",
+        cleanedText: "Pushed the edition mockups to the shared drive. Take a look when you get a second.",
+        audioPath: "mock://fixture-2.wav",
+        durationMs: 8_000,
+        wordCount: 17,
+        injected: true,
+        sourceApplication: "Slack — #studio",
+        createdAt: new Date("2026-07-26T13:11:00-04:00").toISOString(),
+      },
+    ],
+  });
+}
 
 export function hasTauriRuntime(): boolean {
   return typeof window !== "undefined" && Boolean((window as WindowWithTauri).__TAURI_INTERNALS__);
@@ -116,14 +171,10 @@ export function showFloatingControl(): Promise<void> {
   return command("show_overlay_window", undefined, () => undefined);
 }
 
-export function getRecordingLevel(): Promise<number> {
-  return command("get_recording_level", undefined, () => 0.62);
-}
-
 export function listMicrophones(): Promise<MicrophoneInfo[]> {
   return command("list_microphones", undefined, () => [
-    { name: "System default microphone", isDefault: true },
-    { name: "USB-C Studio Mic", isDefault: false },
+    { name: "System default microphone", isDefault: true, isSelected: true, available: true },
+    { name: "USB-C Studio Mic", isDefault: false, isSelected: false, available: true },
   ]);
 }
 
@@ -154,6 +205,7 @@ export function stopRecording(): Promise<DictationResult> {
       durationMs: 4200,
       wordCount: cleanedText.split(/\s+/).length,
       injected: mockSnapshot.settings.autoInject,
+      sourceApplication: "Browser preview",
       createdAt: new Date().toISOString(),
     };
     mockSnapshot = recalculateStats({
@@ -435,6 +487,25 @@ export function setShortcutTestActive(active: boolean): Promise<void> {
   return command("set_shortcut_test_active", { active }, () => undefined);
 }
 
+export function deleteSession(id: string): Promise<AppSnapshot> {
+  return command("delete_session", { id }, () => {
+    mockSnapshot = recalculateStats({
+      ...mockSnapshot,
+      sessions: mockSnapshot.sessions.filter((session) => session.id !== id),
+    });
+    return mockSnapshot;
+  });
+}
+
+export function registerSetupShortcut(hotkey: string): Promise<ShortcutStatus> {
+  return command("register_setup_shortcut", { hotkey }, () => ({
+    registered: true,
+    hotkey,
+    paused: false,
+    message: `Global shortcut registered: ${hotkey}.`,
+  }));
+}
+
 export function showMainWindow(): Promise<void> {
   return command("show_main_window", undefined, () => undefined);
 }
@@ -449,6 +520,70 @@ export function micCheckStart(): Promise<void> {
 
 export function micCheckStop(): Promise<void> {
   return command("mic_check_stop", undefined, () => undefined);
+}
+
+export function startSoundCheck(deviceName: string): Promise<void> {
+  return command("start_sound_check", { deviceName }, () => undefined);
+}
+
+export function finishSoundCheck(expectedPhrase: string): Promise<SoundCheckResult> {
+  return command("finish_sound_check", { expectedPhrase }, () => ({
+    passed: true,
+    failureCode: null,
+    deviceName: mockSnapshot.settings.microphoneName ?? "System default microphone",
+    captureFormat: "mono f32 48000Hz -> mono PCM16 16000Hz",
+    durationMs: 3_200,
+    activeSpeechMs: 2_600,
+    rmsDbfs: -28,
+    peakDbfs: -10,
+    noiseFloorDbfs: -58,
+    snrDb: 30,
+    clippingRatio: 0,
+    transcript: expectedPhrase,
+    expectedPhrase,
+    tokenSimilarity: 1,
+    asrBackend: "host",
+    modelId: mockSnapshot.settings.activeModelId,
+    captureMs: 8,
+    asrMs: 420,
+    totalMs: 450,
+  }));
+}
+
+export function cancelSoundCheck(): Promise<boolean> {
+  return command("cancel_sound_check", undefined, () => true);
+}
+
+export function openWindowsSoundSettings(): Promise<void> {
+  return command("open_windows_sound_settings", undefined, () => undefined);
+}
+
+export function completeOnboarding(settings: AppSettings): Promise<AppSnapshot> {
+  return command("complete_onboarding", { settings }, () => {
+    const calibration = settings.audioCalibration ?? {
+      deviceName: settings.microphoneName ?? "System default microphone",
+      checkedAt: new Date().toISOString(),
+      rmsDbfs: -28,
+      peakDbfs: -10,
+      snrDb: 30,
+      modelId: settings.activeModelId,
+      asrBackend: "host",
+    };
+    mockSnapshot = {
+      ...mockSnapshot,
+      settings: {
+        ...settings,
+        onboardingComplete: true,
+        onboardingVersion: "atmospeak-setup-v2",
+        audioCalibration: calibration,
+      },
+    };
+    return mockSnapshot;
+  });
+}
+
+export function resetOverlayPosition(): Promise<void> {
+  return command("reset_overlay_position", undefined, () => undefined);
 }
 
 export function listReleaseArtifacts(): ReleaseArtifact[] {

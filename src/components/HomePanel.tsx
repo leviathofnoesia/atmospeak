@@ -1,23 +1,17 @@
-import { Mic } from "lucide-react";
-import type { AppSnapshot, ModelStatus, StageMetrics, TranscriptSession } from "../types/dictation";
+import { Copy } from "lucide-react";
+import type { AppSnapshot, TranscriptSession } from "../types/dictation";
 import { Aura } from "./Aura";
 
 interface HomePanelProps {
   snapshot: AppSnapshot;
-  modelStatus: ModelStatus | null;
   recentSession: TranscriptSession | null;
-  lastMetrics: StageMetrics | null;
-  onStart: () => void;
-  busy: boolean;
+  onCopyRecent: (session: TranscriptSession) => Promise<void>;
 }
 
 export function HomePanel({
   snapshot,
-  modelStatus,
   recentSession,
-  lastMetrics,
-  onStart,
-  busy,
+  onCopyRecent,
 }: HomePanelProps) {
   const { stats } = snapshot;
   return (
@@ -40,12 +34,6 @@ export function HomePanel({
               Nothing leaves your machine. The companion waits at the edge of the screen until you
               call it.
             </p>
-            <div style={{ marginTop: 20 }}>
-              <button className="pill-btn accent" type="button" onClick={onStart} disabled={busy}>
-                <Mic size={15} />
-                Start dictation
-              </button>
-            </div>
           </div>
           <div className="hub-hero__aura">
             <Aura size={124} active />
@@ -70,35 +58,36 @@ export function HomePanel({
         </div>
       </div>
 
-      <div className="hub__section" style={{ paddingTop: 4 }}>
-        <div className="kick" style={{ color: "rgba(27,26,29,0.45)", marginBottom: 12 }}>
-          Runtime
-        </div>
-        <p style={{ fontSize: 14, color: "#2a2930" }}>
-          {modelStatus?.message ?? "Checking transcription runtime…"}
-        </p>
-        {lastMetrics ? (
-          <p className="muted" style={{ marginTop: 6 }}>
-            Last pipeline: {lastMetrics.totalMs}ms total · ASR {lastMetrics.asrMs}ms (
-            {lastMetrics.asrBackend})
-          </p>
-        ) : null}
-      </div>
-
       {recentSession ? (
         <div className="hub__section" style={{ paddingTop: 4 }}>
           <div className="kick" style={{ color: "rgba(27,26,29,0.45)", marginBottom: 12 }}>
             Latest transcript
           </div>
-          <p style={{ fontSize: 16, lineHeight: 1.6, color: "#2a2930" }}>
-            {recentSession.cleanedText}
-          </p>
+          <div className="latest-transcript">
+            <p>{recentSession.cleanedText}</p>
+            <button
+              className="pill-btn ghost"
+              type="button"
+              onClick={() => void onCopyRecent(recentSession)}
+            >
+              <Copy size={14} /> Copy
+            </button>
+          </div>
         </div>
       ) : (
         <div className="hub__section" style={{ paddingTop: 4 }}>
           <p className="muted">No sessions yet. Hold your shortcut over Notepad to begin.</p>
         </div>
       )}
+      <div className="hub__section home-facts">
+        <span>Model · {snapshot.settings.activeModelId}</span>
+        <span>Privacy · on device</span>
+        <span>
+          Retention · {snapshot.settings.transcriptRetentionDays === 0
+            ? "until deleted"
+            : `${snapshot.settings.transcriptRetentionDays} days`}
+        </span>
+      </div>
     </div>
   );
 }

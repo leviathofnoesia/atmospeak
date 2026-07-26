@@ -91,8 +91,8 @@ fn process_name_for_hwnd(hwnd: isize) -> Option<String> {
     use windows::Win32::{
         Foundation::{CloseHandle, HWND, MAX_PATH},
         System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-            PROCESS_NAME_FORMAT,
+            OpenProcess, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+            QueryFullProcessImageNameW,
         },
         UI::WindowsAndMessaging::GetWindowThreadProcessId,
     };
@@ -191,7 +191,7 @@ pub fn is_atmospeak_hwnd(hwnd: isize) -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{GetWindowTextW, GetClassNameW};
+        use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowTextW};
         if hwnd == 0 {
             return false;
         }
@@ -219,7 +219,7 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
-            AllowSetForegroundWindow, IsWindow, SetForegroundWindow, ASFW_ANY,
+            ASFW_ANY, AllowSetForegroundWindow, IsWindow, SetForegroundWindow,
         };
 
         if target.hwnd == 0 || !hwnd_is_valid(target.hwnd) {
@@ -234,7 +234,9 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
         if ok {
             Ok(true)
         } else {
-            Err(anyhow!("SetForegroundWindow returned false (elevated/UIPI?)"))
+            Err(anyhow!(
+                "SetForegroundWindow returned false (elevated/UIPI?)"
+            ))
         }
     }
     #[cfg(not(target_os = "windows"))]
