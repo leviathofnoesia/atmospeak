@@ -140,6 +140,13 @@ export interface ShortcutKeyEvent {
   pressed: boolean;
 }
 
+export interface ShortcutCaptureEvent {
+  keys: string[];
+  completed: string | null;
+  error: string | null;
+  timestampMs: number;
+}
+
 export interface MicLevel {
   rmsDbfs: number;
   peakDbfs: number;

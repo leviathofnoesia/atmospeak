@@ -31,6 +31,15 @@ pub struct ShortcutKeyEvent {
     pub pressed: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutCaptureEvent {
+    pub keys: Vec<String>,
+    pub completed: Option<String>,
+    pub error: Option<String>,
+    pub timestamp_ms: u128,
+}
+
 fn sync_runtime_pause_state(shortcuts_paused: &Arc<Mutex<bool>>, paused: bool) {
     *shortcuts_paused.lock() = paused;
 }
@@ -428,13 +437,17 @@ fn key_name_to_vk(part: &str) -> Option<u32> {
 
 #[cfg(target_os = "windows")]
 mod windows_keyboard_hook {
-    use super::{ParsedShortcut, ShortcutKeyEvent, parse_shortcut, shortcut_candidates};
+    use super::{
+        ParsedShortcut, ShortcutCaptureEvent, ShortcutKeyEvent, normalize_label, parse_shortcut,
+        shortcut_candidates,
+    };
     use crate::models::ShortcutStatus;
     use parking_lot::Mutex as ParkingMutex;
     use std::{
+        collections::{HashMap, HashSet},
         sync::{Arc, LazyLock, Mutex as StdMutex, mpsc},
         thread,
-        time::Duration,
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
     use tauri::{AppHandle, Emitter, Manager};
     use windows::Win32::{
@@ -464,6 +477,8 @@ mod windows_keyboard_hook {
         shortcuts_paused: Option<Arc<ParkingMutex<bool>>>,
         hotkey: ParsedShortcut,
         runtime: ShortcutRuntimeState,
+        capture: ShortcutCaptureRuntime,
+        ui_tx: Option<mpsc::Sender<HookUiEvent>>,
     }
 
     impl Default for HookContext {
@@ -479,6 +494,8 @@ mod windows_keyboard_hook {
                     key: None,
                 },
                 runtime: ShortcutRuntimeState::default(),
+                capture: ShortcutCaptureRuntime::default(),
+                ui_tx: None,
             }
         }
     }
@@ -487,6 +504,19 @@ mod windows_keyboard_hook {
     struct ShortcutRuntimeState {
         active: bool,
         capturing: bool,
+    }
+
+    #[derive(Clone, Default)]
+    struct ShortcutCaptureRuntime {
+        pressed: HashMap<u32, String>,
+        chord: HashSet<String>,
+    }
+
+    #[derive(Clone, Debug)]
+    enum HookUiEvent {
+        Key(ShortcutKeyEvent),
+        Capture(ShortcutCaptureEvent),
+        Signal(&'static str),
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,6 +609,26 @@ mod windows_keyboard_hook {
         shortcuts_paused: Arc<ParkingMutex<bool>>,
         hotkey: ParsedShortcut,
     ) -> Result<(), String> {
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let ui_app = app.clone();
+        thread::Builder::new()
+            .name("atmospeak-shortcut-ui-events".to_string())
+            .spawn(move || {
+                while let Ok(event) = ui_rx.recv() {
+                    match event {
+                        HookUiEvent::Key(payload) => {
+                            let _ = ui_app.emit("atmospeak://shortcut-key", payload);
+                        }
+                        HookUiEvent::Capture(payload) => {
+                            let _ = ui_app.emit("atmospeak://shortcut-capture", payload);
+                        }
+                        HookUiEvent::Signal(payload) => {
+                            let _ = ui_app.emit("wind-speak://shortcut", payload);
+                        }
+                    }
+                }
+            })
+            .map_err(|error| error.to_string())?;
         {
             let mut context = HOOK_CONTEXT
                 .lock()
@@ -588,6 +638,8 @@ mod windows_keyboard_hook {
                 shortcuts_paused: Some(shortcuts_paused),
                 hotkey,
                 runtime: ShortcutRuntimeState::default(),
+                capture: ShortcutCaptureRuntime::default(),
+                ui_tx: Some(ui_tx),
             };
         }
 
@@ -681,20 +733,30 @@ mod windows_keyboard_hook {
         let test_active = app
             .try_state::<crate::services::app_state::AppState>()
             .is_some_and(|state| state.shortcut_test_active());
-        if (capture_active || test_active)
-            && let Some(key) = label_for_vk(event_vk)
-        {
-            let _ = app.emit(
-                "atmospeak://shortcut-key",
-                ShortcutKeyEvent {
-                    code: event_vk,
-                    key,
-                    pressed: key_down,
+        if capture_active {
+            let event = match label_for_vk(event_vk) {
+                Some(key) => context.capture.handle_event(event_vk, key, key_down),
+                None => ShortcutCaptureEvent {
+                    keys: context.capture.pressed_keys(),
+                    completed: None,
+                    error: Some("That key is not supported. Try another chord.".to_string()),
+                    timestamp_ms: timestamp_ms(),
                 },
-            );
-            if capture_active {
-                return true;
+            };
+            if let Some(tx) = context.ui_tx.as_ref() {
+                let _ = tx.send(HookUiEvent::Capture(event));
             }
+            return true;
+        }
+        if test_active
+            && let Some(key) = label_for_vk(event_vk)
+            && let Some(tx) = context.ui_tx.as_ref()
+        {
+            let _ = tx.send(HookUiEvent::Key(ShortcutKeyEvent {
+                code: event_vk,
+                key,
+                pressed: key_down,
+            }));
         }
         if context
             .shortcuts_paused
@@ -704,7 +766,9 @@ mod windows_keyboard_hook {
         {
             if context.runtime.active {
                 context.runtime = ShortcutRuntimeState::default();
-                let _ = app.emit("wind-speak://shortcut", "released");
+                if let Some(tx) = context.ui_tx.as_ref() {
+                    let _ = tx.send(HookUiEvent::Signal("released"));
+                }
                 crate::services::dictation_engine::route_shortcut_payload(&app, "released");
             }
             return false;
@@ -720,7 +784,9 @@ mod windows_keyboard_hook {
                 ShortcutSignal::Released => "released",
                 ShortcutSignal::Cancel => "cancel",
             };
-            let _ = app.emit("wind-speak://shortcut", payload);
+            if let Some(tx) = context.ui_tx.as_ref() {
+                let _ = tx.send(HookUiEvent::Signal(payload));
+            }
             // Setup validates the hook with the real chord, but must never start
             // dictation or create an overlay before calibration is complete.
             let testing_only = app
@@ -731,6 +797,63 @@ mod windows_keyboard_hook {
             }
         }
         outcome.consume
+    }
+
+    impl ShortcutCaptureRuntime {
+        fn handle_event(&mut self, code: u32, key: String, pressed: bool) -> ShortcutCaptureEvent {
+            if pressed {
+                self.pressed.insert(code, key.clone());
+                self.chord.insert(key);
+            } else {
+                self.pressed.remove(&code);
+            }
+
+            let keys = self.pressed_keys();
+            let mut completed = None;
+            let mut error = None;
+            if !pressed && self.pressed.is_empty() && !self.chord.is_empty() {
+                let candidate = ordered_keys(self.chord.iter().cloned()).join("+");
+                match normalize_label(&candidate) {
+                    Ok(label) => completed = Some(label),
+                    Err(reason) => error = Some(reason.to_string()),
+                }
+                self.chord.clear();
+            }
+
+            ShortcutCaptureEvent {
+                keys,
+                completed,
+                error,
+                timestamp_ms: timestamp_ms(),
+            }
+        }
+
+        fn pressed_keys(&self) -> Vec<String> {
+            ordered_keys(self.pressed.values().cloned())
+        }
+    }
+
+    fn ordered_keys(keys: impl IntoIterator<Item = String>) -> Vec<String> {
+        let unique = keys.into_iter().collect::<HashSet<_>>();
+        let mut ordered = ["Ctrl", "Win", "Alt", "Shift"]
+            .into_iter()
+            .filter(|key| unique.contains(*key))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut normal = unique
+            .into_iter()
+            .filter(|key| !matches!(key.as_str(), "Ctrl" | "Win" | "Alt" | "Shift"))
+            .collect::<Vec<_>>();
+        normal.sort();
+        ordered.extend(normal);
+        ordered
+    }
+
+    fn timestamp_ms() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
     }
 
     impl ShortcutRuntimeState {
@@ -972,7 +1095,8 @@ mod windows_keyboard_hook {
     #[cfg(test)]
     mod tests {
         use super::{
-            ShortcutEventOutcome, ShortcutRuntimeState, ShortcutSignal, parse_shortcut, vk_value,
+            ShortcutCaptureRuntime, ShortcutEventOutcome, ShortcutRuntimeState, ShortcutSignal,
+            parse_shortcut, vk_value,
         };
         use std::collections::HashSet;
         use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -1025,6 +1149,30 @@ mod windows_keyboard_hook {
                     signal: None
                 }
             );
+        }
+
+        #[test]
+        fn native_capture_reports_each_pressed_key_and_completes_on_release() {
+            let mut capture = ShortcutCaptureRuntime::default();
+            let ctrl = capture.handle_event(0xA2, "Ctrl".to_string(), true);
+            assert_eq!(ctrl.keys, vec!["Ctrl"]);
+            assert_eq!(ctrl.completed, None);
+
+            let alt = capture.handle_event(0xA4, "Alt".to_string(), true);
+            assert_eq!(alt.keys, vec!["Ctrl", "Alt"]);
+
+            let key = capture.handle_event(0x4B, "K".to_string(), true);
+            assert_eq!(key.keys, vec!["Ctrl", "Alt", "K"]);
+
+            assert_eq!(
+                capture.handle_event(0x4B, "K".to_string(), false).keys,
+                vec!["Ctrl", "Alt"]
+            );
+            let _ = capture.handle_event(0xA4, "Alt".to_string(), false);
+            let completed = capture.handle_event(0xA2, "Ctrl".to_string(), false);
+            assert!(completed.keys.is_empty());
+            assert_eq!(completed.completed.as_deref(), Some("Ctrl+Alt+K"));
+            assert_eq!(completed.error, None);
         }
 
         #[test]

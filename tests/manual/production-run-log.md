@@ -9,7 +9,7 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
   - Website download CTAs replaced by the temporary repair notice.
   - Direct v0.3.0 artifact and `latest.json` URLs return 404.
 - Automated recovery evidence:
-  - `cargo test --manifest-path src-tauri/Cargo.toml`: **45 passed**
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **46 passed**
   - `bun run test`: **19 passed**
   - `bun run e2e`: **10 passed**, including canonical 1000x660 Home/History
     screenshots with a maximum two-pixel difference, 125%/150% scaling, 360px
@@ -36,6 +36,11 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
     the same chord again, and unlocked Continue only after native
     `pressed`/`released` events. The same fresh native process also registered
     and exercised exact `Ctrl+Shift+F12` and modifier-only `Ctrl+Win` chords.
+  - Follow-up responsiveness repair moved chord assembly out of React and into
+    the native hook, with UI events dispatched off the low-level hook thread.
+    A fresh native run painted `Ctrl`, then `Ctrl+Alt`, then `Ctrl+Alt+K` after
+    each individual key-down; peak measured native-event delivery was **3 ms**,
+    the WebView console was clean, and release completed `Ctrl+Alt+K` once.
   - The runtime no longer substitutes a preset when the requested shortcut is
     invalid or unavailable; the selected normalized chord is the registered
     chord or setup reports a failure.

@@ -78,6 +78,7 @@ import type {
   NativeDictationEvent,
   RecordingStarted,
   RuntimeEvent,
+  ShortcutCaptureEvent,
   ShortcutKeyEvent,
   ShortcutStatus,
   Snippet,
@@ -132,24 +133,6 @@ function sortShortcutKeys(keys: Iterable<string>): string[] {
       (key) => !SHORTCUT_MODIFIERS.includes(key as (typeof SHORTCUT_MODIFIERS)[number]),
     ),
   ];
-}
-
-function capturedShortcutLabel(keys: Iterable<string>): { label: string | null; error: string | null } {
-  const ordered = sortShortcutKeys(keys);
-  const modifierCount = ordered.filter((key) =>
-    SHORTCUT_MODIFIERS.includes(key as (typeof SHORTCUT_MODIFIERS)[number]),
-  ).length;
-  const normalKeys = ordered.length - modifierCount;
-  if (modifierCount === 0) {
-    return { label: null, error: "Include Ctrl, Win, Alt, or Shift in the shortcut." };
-  }
-  if (normalKeys > 1) {
-    return { label: null, error: "Use one main key with any modifiers, then try again." };
-  }
-  if (normalKeys === 0 && modifierCount < 2) {
-    return { label: null, error: "A modifier-only shortcut needs at least two keys." };
-  }
-  return { label: ordered.join("+"), error: null };
 }
 
 interface SoundCheckState {
@@ -257,7 +240,6 @@ function AppShell() {
   const shortcutTestTimerRef = useRef<number | null>(null);
   const shortcutCaptureRef = useRef(shortcutCapture);
   const shortcutPressedCodesRef = useRef(new Map<number, string>());
-  const shortcutCapturedKeysRef = useRef(new Set<string>());
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -366,65 +348,69 @@ function AppShell() {
     void (async () => {
       const pairs: Array<[string, (payload: unknown) => void]> = [
         [
+          "atmospeak://shortcut-capture",
+          (payload) => {
+            const captureEvent = payload as ShortcutCaptureEvent;
+            if (!shortcutCaptureRef.current.active) return;
+
+            if (captureEvent.completed) {
+              const label = captureEvent.completed;
+              shortcutCaptureRef.current = {
+                arming: false,
+                active: false,
+                keys: [],
+                message: `${label} recorded. Test it once to continue.`,
+              };
+              setShortcutCapture(shortcutCaptureRef.current);
+              setShortcutTest({
+                active: false,
+                detected: false,
+                message: `${label} recorded. Test the same chord once to continue.`,
+              });
+              setSettingsDraft((current) => {
+                if (!current) return current;
+                const next = { ...current, hotkey: label };
+                settingsRef.current = next;
+                return next;
+              });
+              void cancelShortcutCapture().catch((error: unknown) => {
+                setShortcutCapture((current) => ({
+                  ...current,
+                  message: `Recorded ${label}, but cleanup failed: ${stringifyError(error)}`,
+                }));
+              });
+              return;
+            }
+
+            shortcutCaptureRef.current = {
+              ...shortcutCaptureRef.current,
+              keys: captureEvent.keys,
+              message:
+                captureEvent.error ??
+                (captureEvent.keys.length
+                  ? "Keep holding the chord, then release all keys to save it."
+                  : "Hold the keys you want together."),
+            };
+            setShortcutCapture(shortcutCaptureRef.current);
+          },
+        ],
+        [
           "atmospeak://shortcut-key",
           (payload) => {
             const keyEvent = payload as ShortcutKeyEvent;
             const pressedCodes = shortcutPressedCodesRef.current;
             if (keyEvent.pressed) {
               pressedCodes.set(keyEvent.code, keyEvent.key);
-              if (shortcutCaptureRef.current.active) {
-                shortcutCapturedKeysRef.current.add(keyEvent.key);
-              }
             } else {
               pressedCodes.delete(keyEvent.code);
             }
 
             const pressedKeys = new Set(pressedCodes.values());
-            setShortcutCapture((current) => ({
-              ...current,
+            shortcutCaptureRef.current = {
+              ...shortcutCaptureRef.current,
               keys: sortShortcutKeys(pressedKeys),
-            }));
-
-            if (
-              shortcutCaptureRef.current.active &&
-              !keyEvent.pressed &&
-              pressedCodes.size === 0 &&
-              shortcutCapturedKeysRef.current.size > 0
-            ) {
-              const captured = capturedShortcutLabel(shortcutCapturedKeysRef.current);
-              shortcutCapturedKeysRef.current.clear();
-              if (!captured.label) {
-                setShortcutCapture({
-                  arming: false,
-                  active: true,
-                  keys: [],
-                  message: captured.error ?? "That chord cannot be used. Try another.",
-                });
-                return;
-              }
-
-              const label = captured.label;
-              void cancelShortcutCapture().finally(() => {
-                shortcutCaptureRef.current = {
-                  arming: false,
-                  active: false,
-                  keys: [],
-                  message: `${label} recorded. Test it once to continue.`,
-                };
-                setShortcutCapture(shortcutCaptureRef.current);
-                setShortcutTest({
-                  active: false,
-                  detected: false,
-                  message: `${label} recorded. Test the same chord once to continue.`,
-                });
-                setSettingsDraft((current) => {
-                  if (!current) return current;
-                  const next = { ...current, hotkey: label };
-                  settingsRef.current = next;
-                  return next;
-                });
-              });
-            }
+            };
+            setShortcutCapture(shortcutCaptureRef.current);
           },
         ],
         [
@@ -764,7 +750,6 @@ function AppShell() {
           shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
           setShortcutCapture(shortcutCaptureRef.current);
           shortcutPressedCodesRef.current.clear();
-          shortcutCapturedKeysRef.current.clear();
           if (shortcutTestTimerRef.current !== null) {
             window.clearTimeout(shortcutTestTimerRef.current);
             shortcutTestTimerRef.current = null;
@@ -814,7 +799,6 @@ function AppShell() {
           }
           void setShortcutTestActive(false);
           shortcutPressedCodesRef.current.clear();
-          shortcutCapturedKeysRef.current.clear();
           shortcutCaptureRef.current = {
             arming: true,
             active: false,
@@ -869,7 +853,6 @@ function AppShell() {
           shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
           setShortcutCapture(shortcutCaptureRef.current);
           shortcutPressedCodesRef.current.clear();
-          shortcutCapturedKeysRef.current.clear();
           void setShortcutTestActive(false);
           setShortcutTest((current) => ({
             ...current,
@@ -888,7 +871,6 @@ function AppShell() {
           shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
           setShortcutCapture(shortcutCaptureRef.current);
           shortcutPressedCodesRef.current.clear();
-          shortcutCapturedKeysRef.current.clear();
           void setShortcutTestActive(false);
           setShortcutTest({
             active: false,

@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium } from "playwright";
 
 const portFlag = process.argv.find((argument) => argument.startsWith("--port="));
@@ -27,15 +29,26 @@ if (pages.length !== 1) {
   throw new Error(`Expected exactly one native WebView, found ${pages.length}.`);
 }
 const page = pages[0];
+const consoleProblems = [];
+page.on("console", (message) => {
+  if (message.type() === "error" || message.type() === "warning") {
+    consoleProblems.push(`${message.type()}: ${message.text()}`);
+  }
+});
+page.on("pageerror", (error) => consoleProblems.push(`pageerror: ${error.message}`));
 await page.waitForLoadState("domcontentloaded");
 await page.goto("http://localhost:1420/?view=setup&fixture=shortcut");
 await page.waitForLoadState("domcontentloaded");
+if (!page.url().includes("view=setup")) {
+  throw new Error(`Unexpected native page URL: ${page.url()}`);
+}
+await page.getByText("Welcome", { exact: true }).first().waitFor({ timeout: 10_000 });
 
 await page.evaluate(async () => {
   window.__atmospeakShortcutProbe = [];
   const subscribe = async (event) => {
     const callback = window.__TAURI_INTERNALS__.transformCallback(({ payload }) => {
-      window.__atmospeakShortcutProbe.push({ event, payload });
+      window.__atmospeakShortcutProbe.push({ event, payload, receivedAt: Date.now() });
     });
     await window.__TAURI_INTERNALS__.invoke("plugin:event|listen", {
       event,
@@ -44,6 +57,7 @@ await page.evaluate(async () => {
     });
   };
   await subscribe("atmospeak://shortcut-key");
+  await subscribe("atmospeak://shortcut-capture");
   await subscribe("wind-speak://shortcut");
 });
 
@@ -93,28 +107,45 @@ await page.getByRole("button", { name: /^continue$/i }).click();
 await page.getByRole("button", { name: /record shortcut/i }).click();
 await page.getByRole("button", { name: /recording keys/i }).waitFor();
 await resetProbe();
-sendVirtualKeys([0xA2, 0xA4, 0x4B]); // left Ctrl + left Alt + K
-const litKeys = await page.locator("kbd.is-down").allTextContents();
-if (JSON.stringify(litKeys) !== JSON.stringify(["Ctrl", "Alt", "K"])) {
-  throw new Error(`Keyboard-tester lighting was wrong: ${JSON.stringify(litKeys)}`);
-}
-sendVirtualKeys([0xA2, 0xA4, 0x4B], true);
-await page.getByText(/Ctrl\+Alt\+K recorded/i).first().waitFor();
-const captureEvents = await probe();
-const captureMissing = [];
-for (const key of ["Ctrl", "Alt", "K"]) {
-  const down = captureEvents.some(
-    ({ event, payload }) =>
-      event === "atmospeak://shortcut-key" && payload.key === key && payload.pressed === true,
-  );
-  const up = captureEvents.some(
-    ({ event, payload }) =>
-      event === "atmospeak://shortcut-key" && payload.key === key && payload.pressed === false,
-  );
-  if (!down || !up) {
-    captureMissing.push(key);
+const physicalKeys = [
+  { code: 0xA2, label: "Ctrl" },
+  { code: 0xA4, label: "Alt" },
+  { code: 0x4B, label: "K" },
+];
+const paintChecks = [];
+for (let index = 0; index < physicalKeys.length; index += 1) {
+  sendVirtualKeys([physicalKeys[index].code]);
+  const expected = physicalKeys.slice(0, index + 1).map(({ label }) => label);
+  const lit = await page.locator("kbd.is-down").allTextContents();
+  paintChecks.push({ expected, lit });
+  if (JSON.stringify(lit) !== JSON.stringify(expected)) {
+    throw new Error(
+      `Keyboard-tester failed after ${physicalKeys[index].label} down: ${JSON.stringify(lit)}`,
+    );
   }
 }
+const litKeys = paintChecks.at(-1).lit;
+const screenshotPath = join(tmpdir(), "atmospeak-shortcut-realtime.png");
+await page.screenshot({ path: screenshotPath });
+for (const { code } of [...physicalKeys].reverse()) {
+  sendVirtualKeys([code], true);
+}
+await page.getByText(/Ctrl\+Alt\+K recorded/i).first().waitFor();
+const captureEvents = await probe();
+const captureStates = captureEvents.filter(
+  ({ event }) => event === "atmospeak://shortcut-capture",
+);
+const captureMissing = ["Ctrl", "Alt", "K"].filter(
+  (key) => !captureStates.some(({ payload }) => payload.keys.includes(key)),
+);
+const completedCapture = captureStates.find(
+  ({ payload }) => payload.completed === "Ctrl+Alt+K",
+);
+if (!completedCapture) captureMissing.push("completed chord");
+const eventLatencies = captureStates
+  .map(({ payload, receivedAt }) => receivedAt - Number(payload.timestampMs))
+  .filter((latency) => latency >= 0);
+const maxEventLatencyMs = Math.max(...eventLatencies);
 
 await page.getByRole("button", { name: /test selected/i }).click();
 sendVirtualKeys([0xA2, 0xA4, 0x4B]);
@@ -156,12 +187,19 @@ if (captureMissing.length) {
     `Native capture missed ${captureMissing.join(", ")}: ${JSON.stringify(captureEvents)}; verification=${JSON.stringify(verified)}`,
   );
 }
+if (consoleProblems.length) {
+  throw new Error(`Native WebView console was not clean: ${JSON.stringify(consoleProblems)}`);
+}
 
 console.log(
   JSON.stringify({
     passed: true,
     captureKeys: ["Ctrl", "Alt", "K"],
     litKeys,
+    paintChecks,
+    maxEventLatencyMs,
+    screenshotPath,
+    consoleProblems,
     exactUiTest: true,
     verified,
   }),
