@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { defaultSettings } from "../types/dictation";
@@ -197,5 +197,32 @@ describe("Onboarding", () => {
     expect(screen.getByRole("button", { name: /hold to read/i })).toBeVisible();
     expect(screen.getByText(/too quiet/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+  });
+
+  it("starts on press and finishes on release on the porcelain phrase control", async () => {
+    const user = userEvent.setup();
+    const props = onboardingProps({
+      shortcutTest: { active: false, detected: true, message: "Detected" },
+      soundCheck: {
+        active: false,
+        result: { ...passingSoundCheck, passed: false, failureCode: "too_quiet" },
+        message: "Retry.",
+      },
+    });
+    render(<Onboarding {...props} />);
+
+    await user.click(screen.getByRole("button", { name: /begin/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    const hold = screen.getByRole("button", { name: /hold to read/i });
+    hold.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(hold, { pointerId: 7 });
+    expect(hold.setPointerCapture).toHaveBeenCalledWith(7);
+    expect(props.onStartSoundCheck).toHaveBeenCalledOnce();
+
+    fireEvent.pointerUp(hold, { pointerId: 7 });
+    expect(props.onFinishSoundCheck).toHaveBeenCalledOnce();
   });
 });

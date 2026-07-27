@@ -24,10 +24,10 @@ use crate::services::proc;
 const HOST_ENV: &str = "ATMOSPEAK_WHISPER_HOST";
 
 /// Model load has to finish before the server binds its port.
-const READY_TIMEOUT: Duration = Duration::from_secs(120);
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
 /// Generous enough for long-form dictation; the model itself is already warm.
-const INFERENCE_TIMEOUT: Duration = Duration::from_secs(120);
+const INFERENCE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn is_disabled() -> bool {
     matches!(

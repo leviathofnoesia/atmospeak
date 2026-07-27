@@ -63,12 +63,17 @@ pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
                 }
             };
 
+            // Publish the host before warming it. A sound check started during
+            // model load can then wait on this same host instead of incorrectly
+            // reporting that no resident backend exists (or spawning a second
+            // process).
+            app.state::<AppState>().set_asr_host(host.clone());
             match host.ensure_running() {
                 Ok(_) => {
-                    app.state::<AppState>().set_asr_host(host);
                     metrics::emit_runtime(&app, "asr-host-ready", "Resident speech model is warm.");
                 }
                 Err(error) => {
+                    app.state::<AppState>().shutdown_asr_host();
                     metrics::emit_runtime(
                         &app,
                         "asr-host-error",

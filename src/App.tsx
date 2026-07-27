@@ -812,19 +812,8 @@ function AppShell() {
         setSoundCheck({ active: false, result: null, message: "Choose a microphone first." });
         return false;
       }
+      setSoundCheck({ active: true, result: null, message: "Starting microphone..." });
       try {
-        // Persist the selected device and model before capture so the resident
-        // host used by the mandatory check is the one the user actually chose.
-        if (currentSettings) {
-          const prepared = await saveSettings({
-            ...currentSettings,
-            onboardingComplete: false,
-            onboardingVersion: "",
-            audioCalibration: null,
-          });
-          setSnapshot(prepared);
-          setSettingsDraft(prepared.settings);
-        }
         await startSoundCheck(deviceName);
         setSoundCheck({ active: true, result: null, message: "Listening..." });
         return true;
@@ -897,9 +886,19 @@ function AppShell() {
     try {
       const inventory = await downloadModel(modelId);
       setModelInventory(inventory);
-      setSettingsDraft((current) =>
-        current ? { ...current, activeModelId: modelId } : current,
-      );
+      const current = settingsRef.current;
+      if (current) {
+        const selected = {
+          ...current,
+          activeModelId: modelId,
+          onboardingComplete: false,
+          onboardingVersion: "",
+          audioCalibration: null,
+        };
+        const saved = await saveSettings(selected);
+        setSnapshot(saved);
+        setSettingsDraft(saved.settings);
+      }
       setModelStatus(await getModelStatus());
       setNotice({
         tone: "success",
@@ -1110,11 +1109,26 @@ function AppShell() {
             });
           }
         }}
-        onSelectModel={(modelId) =>
-          setSettingsDraft((current) =>
-            current ? { ...current, activeModelId: modelId } : current,
-          )
-        }
+        onSelectModel={(modelId) => {
+          const current = settingsRef.current;
+          if (!current) return;
+          const selected = {
+            ...current,
+            activeModelId: modelId,
+            onboardingComplete: false,
+            onboardingVersion: "",
+            audioCalibration: null,
+          };
+          setSettingsDraft(selected);
+          void saveSettings(selected)
+            .then((next) => {
+              setSnapshot(next);
+              setSettingsDraft(next.settings);
+            })
+            .catch((error: unknown) => {
+              setNotice({ tone: "error", message: stringifyError(error) });
+            });
+        }}
         onDownloadModel={onDownloadModel}
         onCancelModelDownload={async () => {
           await cancelModelDownload();

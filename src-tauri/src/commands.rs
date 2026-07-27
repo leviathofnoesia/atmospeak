@@ -9,7 +9,7 @@ use crate::{
     },
     services::{
         app_state::AppState,
-        dictation_engine::{self, DispatchResult, EngineAction},
+        dictation_engine::{self, EngineAction},
         injection, model_downloader, overlay_window, proc, runtime, shortcuts, sound_check,
         startup, window_manager,
     },
@@ -53,11 +53,14 @@ pub fn list_microphones(state: State<'_, AppState>) -> CommandResult<Vec<Microph
 }
 
 #[tauri::command]
-pub fn save_settings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    settings: AppSettings,
-) -> CommandResult<AppSnapshot> {
+pub async fn save_settings(app: AppHandle, settings: AppSettings) -> CommandResult<AppSnapshot> {
+    tauri::async_runtime::spawn_blocking(move || save_settings_blocking(app, settings))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResult<AppSnapshot> {
+    let state = app.state::<AppState>();
     let previous_settings = state
         .database
         .lock()
@@ -101,7 +104,9 @@ pub fn save_settings(
             .audio_calibration
             .as_ref()
             .is_some_and(|calibration| calibration.asr_backend == "host");
-    startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
+    if setup_complete {
+        startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
+    }
     let database = state.database.lock();
     database
         .save_settings(&settings)
@@ -278,10 +283,10 @@ pub fn handle_dictation_action(
         "cancel" => EngineAction::Cancel,
         other => return Err(format!("unknown dictation action: {other}")),
     };
-    match engine.dispatch_with_ack(engine_action)? {
-        DispatchResult::Accepted => Ok("accepted".to_string()),
-        DispatchResult::Ignored { reason } => Ok(format!("ignored:{reason}")),
-        DispatchResult::Rejected { reason } => Err(reason),
+    if engine.dispatch_fire_and_forget(engine_action) {
+        Ok("accepted".to_string())
+    } else {
+        Err("dictation engine is not running".to_string())
     }
 }
 
@@ -363,23 +368,23 @@ pub async fn complete_onboarding(
     settings.audio_calibration = Some(calibration);
     settings.onboarding_complete = true;
     settings.onboarding_version = crate::ONBOARDING_VERSION.to_string();
-    startup::set_start_at_login(settings.start_at_login).map_err(|error| error.to_string())?;
-
     let shortcut_app = app.clone();
     let shortcut_status = state.shortcut_status.clone();
     let shortcuts_paused = state.shortcuts_paused.clone();
     let hotkey = settings.hotkey.clone();
+    let start_at_login = settings.start_at_login;
     let shortcut = tauri::async_runtime::spawn_blocking(move || {
-        shortcuts::register_shortcut(
+        startup::set_start_at_login(start_at_login).map_err(|error| error.to_string())?;
+        Ok::<_, String>(shortcuts::register_shortcut(
             &shortcut_app,
             shortcut_status,
             shortcuts_paused,
             &hotkey,
             false,
-        )
+        ))
     })
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| error.to_string())??;
     if !shortcut.registered {
         return Err(shortcut.message);
     }

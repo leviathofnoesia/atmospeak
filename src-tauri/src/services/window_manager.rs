@@ -34,13 +34,17 @@ pub fn ensure_main(app: &AppHandle, setup: bool) -> Result<WebviewWindow> {
     }
 
     let view = if setup { SETUP_VIEW } else { HUB_VIEW };
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(view.into()))
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(view.into()))
         .title("Atmospeak")
         .inner_size(1000.0, 660.0)
         .min_inner_size(900.0, 620.0)
         .resizable(true)
-        .center()
-        .build()?;
+        .center();
+    #[cfg(target_os = "windows")]
+    if let Some(arguments) = webview_debug_arguments() {
+        builder = builder.additional_browser_args(&arguments);
+    }
+    let window = builder.build()?;
     let _ = window.set_focus();
     Ok(window)
 }
@@ -50,21 +54,36 @@ pub fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow> {
         return Ok(window);
     }
 
-    let window = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App(OVERLAY_VIEW.into()))
-        .title("Atmospeak Overlay")
-        .inner_size(520.0, 150.0)
-        .min_inner_size(420.0, 132.0)
-        .resizable(false)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(false)
-        .visible(false)
-        .build()?;
+    let mut builder =
+        WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App(OVERLAY_VIEW.into()))
+            .title("Atmospeak Overlay")
+            .inner_size(520.0, 150.0)
+            .min_inner_size(420.0, 132.0)
+            .resizable(false)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .visible(false);
+    #[cfg(target_os = "windows")]
+    if let Some(arguments) = webview_debug_arguments() {
+        builder = builder.additional_browser_args(&arguments);
+    }
+    let window = builder.build()?;
     let _ = window.set_size(Size::Logical(LogicalSize::new(520.0, 150.0)));
     Ok(window)
+}
+
+#[cfg(target_os = "windows")]
+fn webview_debug_arguments() -> Option<String> {
+    let port = std::env::var("ATMOSPEAK_WEBVIEW_DEBUG_PORT")
+        .ok()?
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)?;
+    Some(format!("--remote-debugging-port={port}"))
 }
 
 pub fn show_overlay(app: &AppHandle, onboarding_version: &str) -> Result<()> {

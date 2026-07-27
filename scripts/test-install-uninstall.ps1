@@ -101,6 +101,47 @@ function Wait-ForPathRemoval {
   throw "Path still exists after waiting for uninstall cleanup: $Path"
 }
 
+function Stop-ProcessesUnderInstallDir {
+  param(
+    [string]$Directory,
+    [int]$TimeoutSeconds = 10
+  )
+
+  $resolvedDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd('\') + '\'
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $installedProcesses = @(
+      Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.ExecutablePath -and
+          [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+            $resolvedDirectory,
+            [System.StringComparison]::OrdinalIgnoreCase
+          )
+        }
+    )
+    if ($installedProcesses.Count -eq 0) {
+      return
+    }
+    foreach ($installedProcess in $installedProcesses) {
+      Stop-Process -Id $installedProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $deadline)
+
+  $remaining = @(
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.ExecutablePath -and
+        [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+          $resolvedDirectory,
+          [System.StringComparison]::OrdinalIgnoreCase
+        )
+      }
+  )
+  throw "Installed processes did not exit: $($remaining.ProcessId -join ', ')"
+}
+
 function Get-FreeTcpPort {
   $listener = [System.Net.Sockets.TcpListener]::new(
     [System.Net.IPAddress]::Loopback,
@@ -127,6 +168,7 @@ if (-not $InstallerPath -or -not (Test-Path $InstallerPath)) {
 }
 
 if (Test-Path $InstallDir) {
+  Stop-ProcessesUnderInstallDir -Directory $InstallDir
   Remove-Item $InstallDir -Recurse -Force
 }
 
@@ -156,9 +198,11 @@ if (Test-Path $ProfileDir) {
 }
 $PreviousProfileOverride = $env:ATMOSPEAK_APP_DATA_DIR
 $PreviousWebViewArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+$PreviousDebugPort = $env:ATMOSPEAK_WEBVIEW_DEBUG_PORT
 $DebugPort = Get-FreeTcpPort
 $env:ATMOSPEAK_APP_DATA_DIR = $ProfileDir
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$DebugPort"
+$env:ATMOSPEAK_WEBVIEW_DEBUG_PORT = "$DebugPort"
 try {
   $process = Start-Process -FilePath $AppExe -PassThru
 } finally {
@@ -171,6 +215,11 @@ try {
     Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
   } else {
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $PreviousWebViewArguments
+  }
+  if ($null -eq $PreviousDebugPort) {
+    Remove-Item Env:ATMOSPEAK_WEBVIEW_DEBUG_PORT -ErrorAction SilentlyContinue
+  } else {
+    $env:ATMOSPEAK_WEBVIEW_DEBUG_PORT = $PreviousDebugPort
   }
 }
 try {
@@ -190,6 +239,7 @@ try {
 }
 finally {
   Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+  Stop-ProcessesUnderInstallDir -Directory $InstallDir
 }
 
 $Uninstaller = Get-ChildItem $InstallDir -Filter "*uninst*.exe" -File -ErrorAction SilentlyContinue |
@@ -208,6 +258,7 @@ if ($uninstall.ExitCode -ne 0) {
 }
 
 Wait-ForPathRemoval -Path $AppExe
+Stop-ProcessesUnderInstallDir -Directory $InstallDir
 if (Test-Path $ProfileDir) {
   Remove-Item $ProfileDir -Recurse -Force
 }
