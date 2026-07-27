@@ -41,6 +41,12 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
     A fresh native run painted `Ctrl`, then `Ctrl+Alt`, then `Ctrl+Alt+K` after
     each individual key-down; peak measured native-event delivery was **3 ms**,
     the WebView console was clean, and release completed `Ctrl+Alt+K` once.
+  - Focus-specific retest exposed that the global hook path behaved differently
+    while the onboarding WebView owned focus. Recording now uses focused
+    `keydown`/`keyup` events with synchronous visual updates; only “Test
+    selected” uses the native global hook. A native focused-WebView run painted
+    `Ctrl`, `Ctrl+Alt`, and `Ctrl+Alt+K` at **46 / 18 / 16 ms**, completed the
+    chord on release, then passed the separate global test with a clean console.
   - The runtime no longer substitutes a preset when the requested shortcut is
     invalid or unavailable; the selected normalized chord is the registered
     chord or setup reports a failure.

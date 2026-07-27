@@ -24,9 +24,12 @@ if (!browser) {
   throw new Error(`WebView2 debugging did not open on port ${port}: ${lastError}`);
 }
 
-const pages = browser.contexts().flatMap((context) => context.pages());
+const allPages = browser.contexts().flatMap((context) => context.pages());
+const pages = allPages.filter((candidate) => !candidate.url().startsWith("edge://"));
 if (pages.length !== 1) {
-  throw new Error(`Expected exactly one native WebView, found ${pages.length}.`);
+  throw new Error(
+    `Expected exactly one Atmospeak WebView, found ${pages.length}: ${JSON.stringify(allPages.map((candidate) => candidate.url()))}`,
+  );
 }
 const page = pages[0];
 const consoleProblems = [];
@@ -108,16 +111,21 @@ await page.getByRole("button", { name: /record shortcut/i }).click();
 await page.getByRole("button", { name: /recording keys/i }).waitFor();
 await resetProbe();
 const physicalKeys = [
-  { code: 0xA2, label: "Ctrl" },
-  { code: 0xA4, label: "Alt" },
-  { code: 0x4B, label: "K" },
+  { playwright: "Control", label: "Ctrl" },
+  { playwright: "Alt", label: "Alt" },
+  { playwright: "K", label: "K" },
 ];
 const paintChecks = [];
 for (let index = 0; index < physicalKeys.length; index += 1) {
-  sendVirtualKeys([physicalKeys[index].code]);
+  const startedAt = Date.now();
+  await page.keyboard.down(physicalKeys[index].playwright);
   const expected = physicalKeys.slice(0, index + 1).map(({ label }) => label);
+  await page
+    .locator("kbd.is-down")
+    .filter({ hasText: physicalKeys[index].label })
+    .waitFor({ timeout: 1_000 });
   const lit = await page.locator("kbd.is-down").allTextContents();
-  paintChecks.push({ expected, lit });
+  paintChecks.push({ expected, lit, paintLatencyMs: Date.now() - startedAt });
   if (JSON.stringify(lit) !== JSON.stringify(expected)) {
     throw new Error(
       `Keyboard-tester failed after ${physicalKeys[index].label} down: ${JSON.stringify(lit)}`,
@@ -127,27 +135,14 @@ for (let index = 0; index < physicalKeys.length; index += 1) {
 const litKeys = paintChecks.at(-1).lit;
 const screenshotPath = join(tmpdir(), "atmospeak-shortcut-realtime.png");
 await page.screenshot({ path: screenshotPath });
-for (const { code } of [...physicalKeys].reverse()) {
-  sendVirtualKeys([code], true);
+for (const { playwright } of [...physicalKeys].reverse()) {
+  await page.keyboard.up(playwright);
 }
 await page.getByText(/Ctrl\+Alt\+K recorded/i).first().waitFor();
-const captureEvents = await probe();
-const captureStates = captureEvents.filter(
-  ({ event }) => event === "atmospeak://shortcut-capture",
-);
-const captureMissing = ["Ctrl", "Alt", "K"].filter(
-  (key) => !captureStates.some(({ payload }) => payload.keys.includes(key)),
-);
-const completedCapture = captureStates.find(
-  ({ payload }) => payload.completed === "Ctrl+Alt+K",
-);
-if (!completedCapture) captureMissing.push("completed chord");
-const eventLatencies = captureStates
-  .map(({ payload, receivedAt }) => receivedAt - Number(payload.timestampMs))
-  .filter((latency) => latency >= 0);
-const maxEventLatencyMs = Math.max(...eventLatencies);
+const maxPaintLatencyMs = Math.max(...paintChecks.map(({ paintLatencyMs }) => paintLatencyMs));
 
 await page.getByRole("button", { name: /test selected/i }).click();
+await page.getByText(/Press your dictation shortcut/i).waitFor();
 sendVirtualKeys([0xA2, 0xA4, 0x4B]);
 const testLitKeys = await page.locator("kbd.is-down").allTextContents();
 if (JSON.stringify(testLitKeys) !== JSON.stringify(["Ctrl", "Alt", "K"])) {
@@ -182,11 +177,6 @@ const verified = [
   await verifyChord("Ctrl+Win", [0xA2, 0x5B]),
 ];
 
-if (captureMissing.length) {
-  throw new Error(
-    `Native capture missed ${captureMissing.join(", ")}: ${JSON.stringify(captureEvents)}; verification=${JSON.stringify(verified)}`,
-  );
-}
 if (consoleProblems.length) {
   throw new Error(`Native WebView console was not clean: ${JSON.stringify(consoleProblems)}`);
 }
@@ -197,7 +187,7 @@ console.log(
     captureKeys: ["Ctrl", "Alt", "K"],
     litKeys,
     paintChecks,
-    maxEventLatencyMs,
+    maxPaintLatencyMs,
     screenshotPath,
     consoleProblems,
     exactUiTest: true,

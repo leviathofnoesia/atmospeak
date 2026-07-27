@@ -24,7 +24,17 @@ test("shortcut step offers custom recording and visibly arms the exact test", as
 
   const continueButton = page.getByRole("button", { name: /continue/i });
   await expect(continueButton).toBeDisabled();
-  await expect(page.getByRole("button", { name: /record shortcut/i })).toBeVisible();
+  await page.getByRole("button", { name: /record shortcut/i }).click();
+  await page.keyboard.down("Control");
+  await expect(page.locator("kbd.is-down")).toHaveText(["Ctrl"]);
+  await page.keyboard.down("Alt");
+  await expect(page.locator("kbd.is-down")).toHaveText(["Ctrl", "Alt"]);
+  await page.keyboard.down("K");
+  await expect(page.locator("kbd.is-down")).toHaveText(["Ctrl", "Alt", "K"]);
+  await page.keyboard.up("K");
+  await page.keyboard.up("Alt");
+  await page.keyboard.up("Control");
+  await expect(page.getByText(/Ctrl\+Alt\+K recorded/i).first()).toBeVisible();
   await page.getByRole("button", { name: /test selected/i }).click();
   await expect(page.getByRole("button", { name: /testing/i })).toBeDisabled();
   await page.getByRole("button", { name: /back/i }).click();
