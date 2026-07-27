@@ -1,74 +1,203 @@
-# Atmospeak
+<p align="center">
+  <img src="src/assets/nov-pax/assets/brand/logo-lotus-eye.png" width="112" alt="Atmospeak lotus-eye mark">
+</p>
 
-Windows-first, local-only desktop dictation built with Tauri 2, React, Rust, SQLite, and `whisper.cpp`.
+<h1 align="center">Atmospeak</h1>
 
-**Version:** 0.3.1 recovery candidate (setup v2, native sound check, and lazy windows). See
-[`docs/PHASE_A_HONEST_MVP.md`](docs/PHASE_A_HONEST_MVP.md) and
-[`docs/PHASE_B_ASR_HOST.md`](docs/PHASE_B_ASR_HOST.md).
+<p align="center">
+  Local-first voice dictation for Windows. Hold a shortcut, speak, release, and keep typing.
+</p>
 
-## What works
+<p align="center">
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
+</p>
 
-- **DictationEngine (Rust)** owns the loop: idle → listening → processing → pasted/error
-- Global hotkey (Windows low-level hook) and tray **dispatch into the engine** (not React)
-- Push-to-talk and toggle modes (frozen mapping; toggle ignores key-up)
-- CPAL microphone capture → 16 kHz mono WAV
-- **Resident `whisper-server.exe`** keeps the model warm, with automatic fallback to the
-  one-shot `whisper-cli.exe` whenever the host is unavailable
-- Cleanup: fillers, spoken punctuation, dictionary, snippets, sentence casing
-- Injection: clipboard + Ctrl+V with **last external window restore** and soft-fail “left on clipboard”
-- SQLite settings/history/dictionary/snippets under `%LOCALAPPDATA%\Atmospeak`
-- Stage metrics (log + events) for production validation
-- Six-step desktop setup (version `atmospeak-setup-v2`) with host-backed microphone calibration
-- Browser mock mode for UI without Tauri
+<p align="center">
+  <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
+  ·
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-setup.exe"><strong>Download v0.4.0</strong></a>
+  ·
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><strong>Release notes</strong></a>
+</p>
 
-## What is *not* claimed
+Atmospeak is a Windows desktop dictation app built around a local
+[`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) runtime. It requires
+no account and sends no microphone audio to a transcription service.
 
-- A fixed latency figure. Keeping the model resident removes roughly 0.7 s of load per
-  utterance; the rest is real inference and scales with how long you spoke. Short phrases
-  land under a second, long-form dictation does not.
-- Live streaming partials, AI polish, cloud STT, privacy auto-delete, export formats, FFT “pro” meter as product features
-- Any non-Windows support
+## What ships in 0.4.0
 
-## First run
+- **Push-to-talk that finishes on release.** Hold the configured chord, speak,
+  and release it to transcribe and paste once at the original cursor.
+- **Any supported custom chord.** Record a shortcut in onboarding or Settings;
+  the saved chord is also shown on the dock.
+- **System-wide Windows activation.** Keyed shortcuts use native Windows hotkey
+  registration and continue to trigger while an elevated Windows Terminal has
+  focus.
+- **Offline first run.** The `base.en` model and Windows x64 Whisper runtime are
+  bundled in every installer.
+- **Real setup gate.** First run covers microphone selection, model choice,
+  shortcut validation, and a host-backed phrase transcription before setup can
+  finish.
+- **Resident local ASR.** `whisper-server.exe` keeps the selected model warm;
+  `whisper-cli.exe` is the local fallback if the resident host is unavailable.
+- **Useful local hub.** History, dictionary corrections, snippets, model
+  management, microphone and shortcut settings, retention controls, and
+  advanced diagnostics are backed by SQLite.
+- **Quiet background dock.** The overlay is draggable, remembers its position,
+  and stops active animation work while idle or hidden.
 
-Requires **Rust + MSVC Build Tools** (Desktop C++), Git LFS, and Bun:
+## Install
+
+Atmospeak currently supports **Windows 10/11 x64**.
+
+| Package | Use it when | Download |
+| --- | --- | --- |
+| Setup EXE | Recommended installation | [atmospeak_0.4.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_0.4.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_0.4.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-portable.zip) |
+| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/SHA256SUMS.txt) |
+
+The Windows installers are not Authenticode-signed yet. SmartScreen may show
+**Windows protected your PC**. Choose **More info**, verify the app name is
+Atmospeak, and choose **Run anyway**. You can verify the download against the
+published SHA-256 manifest before opening it.
+
+## Daily use
+
+1. Complete the six-step first-run setup and its real microphone transcription.
+2. Leave Atmospeak in the tray.
+3. Hold the default `Ctrl+Win` shortcut—or the custom chord you recorded.
+4. Speak, then release the shortcut.
+5. Atmospeak transcribes locally and pastes at the cursor that was active when
+   recording began.
+
+Tap-to-toggle remains available in Settings. If Windows prevents a normal
+process from injecting into a higher-integrity application, Atmospeak leaves
+the transcript on the clipboard instead of discarding it.
+
+Local application data lives under:
+
+```text
+%LOCALAPPDATA%\Atmospeak
+```
+
+That directory contains settings, history, downloaded models, diagnostics, and
+the local database. Atmospeak does not require a cloud account.
+
+## Speech models
+
+The bundled model works immediately. Optional models download from their
+published Hugging Face repositories into Atmospeak's local model directory,
+stream to a temporary file, and are installed only after their pinned SHA-256
+hash passes.
+
+| Atmospeak ID | Upstream model | Availability | Approx. size |
+| --- | --- | --- | ---: |
+| `tiny.en` | Whisper Tiny English | Setup / Settings | 75 MB |
+| `base.en` | Whisper Base English | **Bundled default** | 142 MB |
+| `small.en` | Whisper Small English | Setup / Settings | 466 MB |
+| `medium.en` | Whisper Medium English | Settings | 1.43 GB |
+| `large-v3-turbo-q5` | Whisper Large v3 Turbo q5 | Settings | 548 MB |
+| `distil-large-v3.5` | Distil-Whisper Large v3.5 | Settings | 1.42 GB |
+| `distil-large-v3` | Distil-Whisper Large v3 | Legacy installs | 1.42 GB |
+
+If an optional selection is missing, Atmospeak falls back to the bundled
+`base.en` model. Advanced Settings can also point to a custom compatible
+Whisper CLI and GGML model.
+
+## How it works
+
+```text
+Global hotkey / dock
+        ↓
+Rust dictation engine
+        ↓
+CPAL microphone capture → speech-quality gate → 16 kHz mono WAV
+        ↓
+Resident whisper-server (local) → whisper-cli fallback (local)
+        ↓
+Cleanup + dictionary + snippets
+        ↓
+Restore original target → clipboard paste → local History
+```
+
+Ordinary dictation is rejected before ASR when it is effectively silent, too
+quiet, or too noisy. This prevents empty recordings from becoming Whisper
+hallucinations.
+
+## Build from source
+
+Requirements:
+
+- Windows 10/11 x64
+- Rust toolchain
+- Visual Studio Build Tools with **Desktop development with C++**
+- [Bun](https://bun.sh/)
+- [Git LFS](https://git-lfs.com/)
 
 ```powershell
-$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+git clone https://github.com/leviathofnoesia/atmospeak.git
+cd atmospeak
 git lfs install
 git lfs pull
 bun install
 bun run tauri dev
 ```
 
-The bundled model and `whisper.cpp` Windows binaries are tracked by Git LFS.
-If a clone contains tiny pointer files instead of the runtime, recover them with:
+The bundled GGML model and `whisper.cpp` binaries are LFS-tracked. If a clone
+contains pointer files instead of the runtime, recover them with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/bootstrap-whisper.ps1
 ```
 
-## Verification
+## Validate a change
 
 ```powershell
 bun run build
 bun run test
 bun run e2e
-# Requires MSVC link.exe:
-$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+bun run site:build
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## Manual acceptance (Phase A gate)
+The native push-to-talk harness exercises shortcut persistence, key-down,
+key-up, resident-host transcription, target restoration, and exactly one
+native paste:
 
-1. Start Notepad and focus the body.
-2. Hold the registered shortcut (default family: `Ctrl+Win` / fallbacks).
-3. Speak ≥1 second; release.
-4. Expect cleaned text paste (or clipboard recovery message) and a History row.
-5. Record stage metrics from Advanced / runtime events if validating 001–012.
+```powershell
+bun run validation:native-ptt
+```
 
-Production matrix: `tests/manual/production-100.md` (hard pass **001** and **005**).
+The deterministic audio seam exists only in debug builds. Release acceptance
+still requires real microphone runs for Notepad one-shot (`001`) and
+push-to-talk (`005`), recorded in
+[`tests/manual/production-run-log.md`](tests/manual/production-run-log.md).
 
-## Prototype boundaries
+## Current boundaries
 
-Atmospeak is clean-room software. It emulates the core desktop dictation workflow of modern voice input tools, but it does not copy proprietary UI, code, model services, names, assets, or private behavior.
+- Windows x64 only.
+- Unsigned installers; SmartScreen warnings remain.
+- No cloud STT, live partial transcription, mobile client, or cross-device
+  synchronization.
+- Latency depends on speech length, selected model, CPU, and whether the
+  resident host has warmed. Atmospeak does not advertise a fixed latency.
+- Updating downloads the complete installer; Tauri does not provide delta
+  updates here.
+
+## Project
+
+Atmospeak uses Tauri 2, React, TypeScript, Rust, SQLite, CPAL, WebView2, and
+`whisper.cpp`. It is clean-room software and does not contain proprietary code,
+assets, or model services from competing dictation products.
+
+See [`docs/RELEASE.md`](docs/RELEASE.md) for packaging and updater details,
+[`docs/MODEL_BOOTSTRAP.md`](docs/MODEL_BOOTSTRAP.md) for runtime recovery, and
+[`tests/manual/production-100.md`](tests/manual/production-100.md) for the
+manual production matrix.
+
+Atmospeak source code is available under the [MIT License](LICENSE). Bundled
+third-party notices are reproduced in
+[`src-tauri/resources/ACKNOWLEDGEMENTS.md`](src-tauri/resources/ACKNOWLEDGEMENTS.md).
