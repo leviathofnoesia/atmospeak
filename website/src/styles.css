@@ -185,6 +185,7 @@ a {
 }
 
 .feature-band,
+.models,
 .downloads,
 .docs,
 .site-footer {
@@ -216,6 +217,7 @@ a {
 }
 
 .feature-card h2,
+.models h2,
 .downloads h2,
 .docs h2,
 .download-card h3 {
@@ -224,6 +226,103 @@ a {
   line-height: 1;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+.models {
+  padding: 36px 0 12px;
+}
+
+.model-head {
+  max-width: 900px;
+}
+
+.models h2 {
+  margin: 14px 0 12px;
+  font-size: 46px;
+}
+
+.model-table {
+  border: 2px solid var(--line);
+  background: #ffffff;
+  box-shadow: 8px 8px 0 var(--line);
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: 1.15fr 1.35fr 1.45fr 0.55fr 1fr;
+  align-items: center;
+  min-height: 74px;
+  border-bottom: 1px solid var(--line);
+}
+
+.model-row:last-child {
+  border-bottom: 0;
+}
+
+.model-row > * {
+  min-width: 0;
+  padding: 14px;
+  overflow-wrap: anywhere;
+}
+
+.model-row--header {
+  min-height: 44px;
+  color: var(--c-porcelain);
+  background: var(--c-onyx);
+  font-family: "Geist Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.model-row--bundled {
+  background: color-mix(in srgb, var(--c-lilac) 34%, white);
+}
+
+.model-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.model-identity strong {
+  font-size: 18px;
+}
+
+.model-row code,
+.model-row a {
+  font-family: "Geist Mono", monospace;
+  font-size: 12px;
+}
+
+.model-row a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.model-notes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.model-notes article {
+  border-left: 2px solid var(--line);
+  padding: 4px 16px;
+}
+
+.model-notes h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  text-transform: uppercase;
+}
+
+.model-notes p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
 }
 
 .downloads {
@@ -363,8 +462,30 @@ a {
   .feature-band,
   .download-grid,
   .docs-grid,
+  .model-notes,
   .spec-strip {
     grid-template-columns: 1fr;
+  }
+
+  .model-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .model-row--header {
+    display: none;
+  }
+
+  .model-row > * {
+    padding: 10px 14px;
+  }
+
+  .model-identity,
+  .model-row > code {
+    grid-column: 1 / -1;
+  }
+
+  .model-notes article {
+    padding: 4px 14px;
   }
 
   .spec-strip span,
@@ -419,6 +540,7 @@ a {
   }
 
   .feature-band,
+  .models,
   .downloads,
   .docs,
   .site-footer {
@@ -427,6 +549,14 @@ a {
 
   .downloads {
     padding: 18px;
+  }
+
+  .model-row {
+    grid-template-columns: 1fr;
+  }
+
+  .model-row > * {
+    grid-column: 1;
   }
 
   .docs h2 {

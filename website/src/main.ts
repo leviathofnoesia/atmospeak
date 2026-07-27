@@ -8,7 +8,7 @@ if (!app) {
 
 const shell = document.createElement("main");
 shell.className = "site-shell";
-shell.append(hero(), featureBand(), downloadSection(), docsSection(), footer());
+shell.append(hero(), featureBand(), modelSection(), downloadSection(), docsSection(), footer());
 app.appendChild(shell);
 
 function hero() {
@@ -22,7 +22,11 @@ function hero() {
   nav.append(label("Atmospeak × Nov Pax", "brand-chip"));
   const navItems = document.createElement("span");
   navItems.className = "nav-items";
-  navItems.append(navLink("Downloads", "#downloads"), navLink("Docs", "#docs"));
+  navItems.append(
+    navLink("Models", "#models"),
+    navLink("Downloads", "#downloads"),
+    navLink("Docs", "#docs"),
+  );
   nav.append(navItems);
   section.append(nav);
 
@@ -87,6 +91,155 @@ function featureBand() {
   }
 
   return section;
+}
+
+function modelSection() {
+  const section = document.createElement("section");
+  section.id = "models";
+  section.className = "models";
+  section.setAttribute("aria-labelledby", "models-title");
+
+  const header = document.createElement("div");
+  header.className = "section-head model-head";
+  header.append(kicker("+ UNDER THE HOOD / EXACT MODELS"));
+  const heading = document.createElement("h2");
+  heading.id = "models-title";
+  heading.textContent = "Local Whisper models";
+  const copy = document.createElement("p");
+  copy.textContent =
+    "Atmospeak runs the Windows x64 whisper.cpp runtime locally. It prefers a resident whisper-server that keeps the selected GGML model warm, then falls back to the bundled one-shot whisper-cli if that host is unavailable.";
+  header.append(heading, copy);
+  section.append(header);
+
+  const table = document.createElement("div");
+  table.className = "model-table";
+  table.setAttribute("role", "table");
+  table.setAttribute("aria-label", "Atmospeak speech recognition models");
+
+  const tableHeader = document.createElement("div");
+  tableHeader.className = "model-row model-row--header";
+  tableHeader.setAttribute("role", "row");
+  for (const text of ["Model", "Used in Atmospeak", "File", "Size", "Source"]) {
+    const cell = document.createElement("span");
+    cell.setAttribute("role", "columnheader");
+    cell.textContent = text;
+    tableHeader.append(cell);
+  }
+  table.append(tableHeader);
+
+  const models = [
+    {
+      name: "Tiny English",
+      id: "tiny.en",
+      use: "Swift · setup option",
+      file: "ggml-tiny.en.bin",
+      size: "75 MB",
+      source: "ggerganov/whisper.cpp",
+      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+    },
+    {
+      name: "Base English",
+      id: "base.en",
+      use: "Balanced · bundled default",
+      file: "ggml-base.en.bin",
+      size: "142 MB",
+      source: "ggerganov/whisper.cpp",
+      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+    },
+    {
+      name: "Small English",
+      id: "small.en",
+      use: "Faithful · setup option",
+      file: "ggml-small.en.bin",
+      size: "466 MB",
+      source: "ggerganov/whisper.cpp",
+      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+    },
+    {
+      name: "Medium English",
+      id: "medium.en",
+      use: "Optional · Settings",
+      file: "ggml-medium.en.bin",
+      size: "1,463 MB",
+      source: "ggerganov/whisper.cpp",
+      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
+    },
+    {
+      name: "Distil Large v3",
+      id: "distil-large-v3",
+      use: "Optional · Settings",
+      file: "ggml-distil-large-v3.bin",
+      size: "1,450 MB",
+      source: "distil-whisper",
+      href: "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin",
+    },
+  ] as const;
+
+  for (const model of models) {
+    const row = document.createElement("div");
+    row.className = model.id === "base.en" ? "model-row model-row--bundled" : "model-row";
+    row.setAttribute("role", "row");
+
+    const identity = document.createElement("span");
+    identity.className = "model-identity";
+    identity.setAttribute("role", "cell");
+    const name = document.createElement("strong");
+    name.textContent = model.name;
+    const id = document.createElement("code");
+    id.textContent = model.id;
+    identity.append(name, id);
+
+    const use = document.createElement("span");
+    use.setAttribute("role", "cell");
+    use.textContent = model.use;
+
+    const file = document.createElement("code");
+    file.setAttribute("role", "cell");
+    file.textContent = model.file;
+
+    const size = document.createElement("span");
+    size.setAttribute("role", "cell");
+    size.textContent = model.size;
+
+    const source = document.createElement("a");
+    source.setAttribute("role", "cell");
+    source.href = model.href;
+    source.textContent = model.source;
+    source.rel = "noreferrer";
+
+    row.append(identity, use, file, size, source);
+    table.append(row);
+  }
+  section.append(table);
+
+  const notes = document.createElement("div");
+  notes.className = "model-notes";
+  notes.append(
+    modelNote(
+      "Selection safety",
+      "If a selected optional model is missing, Atmospeak automatically uses the bundled base.en model instead.",
+    ),
+    modelNote(
+      "Download integrity",
+      "Every managed download is checked against a pinned SHA-256 hash before it is installed.",
+    ),
+    modelNote(
+      "Advanced overrides",
+      "Settings can point to a custom whisper.cpp CLI and model path; this bypasses the managed list above.",
+    ),
+  );
+  section.append(notes);
+  return section;
+}
+
+function modelNote(titleText: string, description: string) {
+  const note = document.createElement("article");
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  const copy = document.createElement("p");
+  copy.textContent = description;
+  note.append(title, copy);
+  return note;
 }
 
 function downloadSection() {
