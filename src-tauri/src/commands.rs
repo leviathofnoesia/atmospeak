@@ -148,16 +148,24 @@ pub fn set_shortcuts_paused(
 }
 
 #[tauri::command]
-pub fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
-    window_manager::show_overlay(&app, crate::ONBOARDING_VERSION).map_err(|e| e.to_string())
+pub async fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        window_manager::show_overlay(&app, crate::ONBOARDING_VERSION)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn show_main_window(app: AppHandle) -> CommandResult<()> {
-    let setup = !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION);
-    window_manager::ensure_main(&app, setup)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+pub async fn show_main_window(app: AppHandle) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let setup = !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION);
+        window_manager::ensure_main(&app, setup).map(|_| ())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -324,7 +332,7 @@ pub fn open_windows_sound_settings() -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub fn complete_onboarding(
+pub async fn complete_onboarding(
     app: AppHandle,
     state: State<'_, AppState>,
     mut settings: AppSettings,
@@ -356,31 +364,39 @@ pub fn complete_onboarding(
     settings.onboarding_complete = true;
     settings.onboarding_version = crate::ONBOARDING_VERSION.to_string();
     startup::set_start_at_login(settings.start_at_login).map_err(|error| error.to_string())?;
+
+    let shortcut_app = app.clone();
+    let shortcut_status = state.shortcut_status.clone();
+    let shortcuts_paused = state.shortcuts_paused.clone();
+    let hotkey = settings.hotkey.clone();
+    let shortcut = tauri::async_runtime::spawn_blocking(move || {
+        shortcuts::register_shortcut(
+            &shortcut_app,
+            shortcut_status,
+            shortcuts_paused,
+            &hotkey,
+            false,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    if !shortcut.registered {
+        return Err(shortcut.message);
+    }
     state
         .database
         .lock()
         .save_settings(&settings)
         .map_err(|error| error.to_string())?;
-    let shortcut = shortcuts::register_shortcut(
-        &app,
-        state.shortcut_status.clone(),
-        state.shortcuts_paused.clone(),
-        &settings.hotkey,
-        false,
-    );
-    if !shortcut.registered {
-        settings.onboarding_complete = false;
-        settings.onboarding_version.clear();
-        state
-            .database
-            .lock()
-            .save_settings(&settings)
-            .map_err(|error| error.to_string())?;
-        return Err(shortcut.message);
-    }
     let _ = app.emit("atmospeak://settings-changed", settings.clone());
     let _ = app.emit("wind-speak://settings-changed", settings);
-    window_manager::finish_setup(&app).map_err(|error| error.to_string())?;
+
+    let window_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || window_manager::finish_setup(&window_app))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+
     state
         .database
         .lock()

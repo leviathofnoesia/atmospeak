@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -63,28 +62,6 @@ await page.evaluate(async () => {
   await subscribe("atmospeak://shortcut-capture");
   await subscribe("wind-speak://shortcut");
 });
-
-function sendVirtualKeys(keys, release = false) {
-  const ordered = release ? [...keys].reverse() : keys;
-  const flags = release ? 2 : 0;
-  const calls = ordered
-    .map(
-      (key) =>
-        `[NativeKeys]::keybd_event([byte]${key}, 0, ${flags}, [UIntPtr]::Zero)`,
-    )
-    .join("; ");
-  const script = [
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class NativeKeys { [DllImport(\"user32.dll\")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra); }'",
-    calls,
-    "Start-Sleep -Milliseconds 100",
-  ].join("; ");
-  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-}
-
-function injectVirtualKeys(keys) {
-  sendVirtualKeys(keys);
-  sendVirtualKeys(keys, true);
-}
 
 async function resetProbe() {
   await page.evaluate(() => {
