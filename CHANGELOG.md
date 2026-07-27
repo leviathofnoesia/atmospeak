@@ -51,7 +51,7 @@ production tests 001 and 005, and the seven-day daily-driver gate are complete.
   CLI retry of audio the host already handled correctly.
 - Normal launches now stay in the tray after onboarding. Tray hide/show preserves the
   saved dock position; resetting it is a separate explicit action.
-- Updater and release URLs consistently target `leviathofnoesia/wind-speak`.
+- Updater and release URLs consistently target `leviathofnoesia/atmospeak`.
 
 ### Companion dock (design handoff)
 - Imported the Claude Design project and closed the integration gaps. The dock port

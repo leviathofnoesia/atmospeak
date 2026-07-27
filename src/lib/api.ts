@@ -30,7 +30,7 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/wind-speak/releases/latest/download";
+const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
 const releaseVersion = "0.3.1";
 const mockInstalledModels = new Set(["base.en"]);
 
