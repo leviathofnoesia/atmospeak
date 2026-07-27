@@ -10,7 +10,7 @@ use cpal::{
     SampleFormat, Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
+use hound::{SampleFormat as WavSampleFormat, WavReader, WavSpec, WavWriter};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
@@ -28,7 +28,8 @@ struct ActiveRecording {
     started_instant: Instant,
     sample_rate: u32,
     samples: Arc<Mutex<Vec<f32>>>,
-    _stream: Stream,
+    duration_override_ms: Option<u64>,
+    _stream: Option<Stream>,
 }
 
 pub struct FinishedRecording {
@@ -64,6 +65,15 @@ impl RecorderService {
     }
 
     pub fn list_microphones(&self, selected: Option<&str>) -> Result<Vec<MicrophoneInfo>> {
+        if harness_audio_fixture().is_some() {
+            return Ok(vec![MicrophoneInfo {
+                name: harness_microphone_name().to_string(),
+                is_default: true,
+                is_selected: selected == Some(harness_microphone_name()),
+                available: true,
+            }]);
+        }
+
         let host = cpal::default_host();
         let default_name = host
             .default_input_device()
@@ -96,6 +106,25 @@ impl RecorderService {
 
         std::fs::create_dir_all(&self.recordings_dir)
             .context("failed to create recordings directory")?;
+
+        if let Some(path) = harness_audio_fixture() {
+            let (sample_rate, samples, duration_ms) = load_fixture_samples(&path)?;
+            let id = Uuid::new_v4().to_string();
+            let started_at = Utc::now();
+            *active = Some(ActiveRecording {
+                id: id.clone(),
+                started_instant: Instant::now(),
+                sample_rate,
+                samples: Arc::new(Mutex::new(samples)),
+                duration_override_ms: Some(duration_ms),
+                _stream: None,
+            });
+            return Ok(RecordingStarted {
+                id,
+                started_at,
+                microphone_name: harness_microphone_name().to_string(),
+            });
+        }
 
         let host = cpal::default_host();
         let device = match preferred_microphone {
@@ -153,7 +182,8 @@ impl RecorderService {
             started_instant: Instant::now(),
             sample_rate,
             samples,
-            _stream: stream,
+            duration_override_ms: None,
+            _stream: Some(stream),
         });
 
         Ok(RecordingStarted {
@@ -169,7 +199,9 @@ impl RecorderService {
             .lock()
             .take()
             .ok_or_else(|| anyhow!("no active recording to stop"))?;
-        let duration_ms = active.started_instant.elapsed().as_millis() as u64;
+        let duration_ms = active
+            .duration_override_ms
+            .unwrap_or_else(|| active.started_instant.elapsed().as_millis() as u64);
         if Duration::from_millis(duration_ms) < Duration::from_millis(250) {
             return Err(anyhow!("recording was too short to transcribe"));
         }
@@ -178,6 +210,7 @@ impl RecorderService {
             id,
             sample_rate,
             samples,
+            duration_override_ms: _,
             _stream,
             ..
         } = active;
@@ -261,6 +294,78 @@ impl RecorderService {
             timestamp_ms: Utc::now().timestamp_millis(),
         }
     }
+}
+
+const HARNESS_MICROPHONE_NAME: &str = "Atmospeak Test Audio Fixture";
+
+fn harness_microphone_name() -> &'static str {
+    HARNESS_MICROPHONE_NAME
+}
+
+#[cfg(debug_assertions)]
+fn harness_audio_fixture() -> Option<PathBuf> {
+    if std::env::var("ATMOSPEAK_NATIVE_HARNESS").ok().as_deref() != Some("1") {
+        return None;
+    }
+    let path = PathBuf::from(std::env::var_os("ATMOSPEAK_TEST_AUDIO_FIXTURE")?);
+    path.is_file().then_some(path)
+}
+
+#[cfg(not(debug_assertions))]
+fn harness_audio_fixture() -> Option<PathBuf> {
+    None
+}
+
+fn load_fixture_samples(path: &std::path::Path) -> Result<(u32, Vec<f32>, u64)> {
+    let mut reader = WavReader::open(path).with_context(|| {
+        format!(
+            "failed to open native harness audio fixture {}",
+            path.display()
+        )
+    })?;
+    let spec = reader.spec();
+    let channels = usize::from(spec.channels);
+    if channels == 0 || spec.sample_rate == 0 {
+        return Err(anyhow!(
+            "native harness audio fixture has an invalid format"
+        ));
+    }
+
+    let interleaved = match spec.sample_format {
+        WavSampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to decode float native harness audio fixture")?,
+        WavSampleFormat::Int if spec.bits_per_sample <= 16 => reader
+            .samples::<i16>()
+            .map(|sample| sample.map(|value| value as f32 / i16::MAX as f32))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to decode 16-bit native harness audio fixture")?,
+        WavSampleFormat::Int => {
+            let maximum = ((1_i64 << (spec.bits_per_sample.saturating_sub(1) as u32)) - 1) as f32;
+            reader
+                .samples::<i32>()
+                .map(|sample| sample.map(|value| value as f32 / maximum))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("failed to decode integer native harness audio fixture")?
+        }
+    };
+    if interleaved.is_empty() {
+        return Err(anyhow!("native harness audio fixture is empty"));
+    }
+
+    let samples = if channels == 1 {
+        interleaved
+    } else {
+        interleaved
+            .chunks(channels)
+            .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32)
+            .collect()
+    };
+    let duration_ms = ((samples.len() as u128 * 1_000) / spec.sample_rate as u128)
+        .try_into()
+        .unwrap_or(u64::MAX);
+    Ok((spec.sample_rate, samples, duration_ms))
 }
 
 pub fn analyze_samples(samples: &[f32], sample_rate: u32) -> AudioAnalysis {
@@ -482,7 +587,7 @@ fn write_wav(path: &PathBuf, samples: &[f32]) -> Result<()> {
 mod tests {
     use super::{
         AudioAnalysis, CapturedRecording, TARGET_SAMPLE_RATE, analyze_samples, finish_recording,
-        normal_dictation_failure, prepare_for_dictation,
+        load_fixture_samples, normal_dictation_failure, prepare_for_dictation,
     };
     use tempfile::tempdir;
 
@@ -511,6 +616,31 @@ mod tests {
         assert_eq!(spec.channels, 1);
         assert_eq!(spec.sample_rate, TARGET_SAMPLE_RATE);
         assert_eq!(spec.bits_per_sample, 16);
+    }
+
+    #[test]
+    fn native_harness_fixture_is_decoded_and_downmixed() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("fixture.wav");
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).expect("wav writer");
+        for _ in 0..16_000 {
+            writer.write_sample(8_000_i16).expect("left");
+            writer.write_sample(4_000_i16).expect("right");
+        }
+        writer.finalize().expect("finalize");
+
+        let (sample_rate, samples, duration_ms) =
+            load_fixture_samples(&path).expect("load fixture");
+        assert_eq!(sample_rate, 16_000);
+        assert_eq!(samples.len(), 16_000);
+        assert_eq!(duration_ms, 1_000);
+        assert!((samples[0] - (6_000.0 / i16::MAX as f32)).abs() < 0.0001);
     }
 
     #[test]

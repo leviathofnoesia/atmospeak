@@ -175,13 +175,31 @@ function modelSection() {
       href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
     },
     {
-      name: "Distil Large v3",
+      name: "Distil Large v3 (legacy)",
       id: "distil-large-v3",
-      use: "Optional · Settings",
+      use: "Existing installs · Settings",
       file: "ggml-distil-large-v3.bin",
       size: "1,450 MB",
       source: "distil-whisper",
       href: "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin",
+    },
+    {
+      name: "Large v3 Turbo q5",
+      id: "large-v3-turbo-q5",
+      use: "Current multilingual · Settings",
+      file: "ggml-large-v3-turbo-q5_0.bin",
+      size: "548 MB",
+      source: "ggerganov/whisper.cpp",
+      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+    },
+    {
+      name: "Distil Large v3.5",
+      id: "distil-large-v3.5",
+      use: "Current English · Settings",
+      file: "ggml-distil-large-v3.5.bin",
+      size: "1,450 MB",
+      source: "distil-whisper",
+      href: "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin",
     },
   ] as const;
 
@@ -295,7 +313,7 @@ function downloadSection() {
     downloadCard(
       "Checksums",
       "Verify files",
-      "SHA-256 hashes for every published v0.3.1 release artifact.",
+      `SHA-256 hashes for every published v${APP_VERSION} release artifact.`,
       releaseArtifacts.checksums,
     ),
     downloadCard(

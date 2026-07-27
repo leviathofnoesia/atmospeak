@@ -104,26 +104,61 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
             .audio_calibration
             .as_ref()
             .is_some_and(|calibration| calibration.asr_backend == "host");
+    let shortcuts_were_paused = *state.shortcuts_paused.lock();
     if setup_complete {
-        startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
-    }
-    let database = state.database.lock();
-    database
-        .save_settings(&settings)
-        .map_err(|e| e.to_string())?;
-    let expired_audio = database
-        .prune_sessions(settings.transcript_retention_days)
-        .map_err(|e| e.to_string())?;
-    let _ = runtime::model_status(&app, &settings);
-    if setup_complete {
-        shortcuts::register_shortcut(
+        let shortcut = shortcuts::register_shortcut(
             &app,
             state.shortcut_status.clone(),
             state.shortcuts_paused.clone(),
             &settings.hotkey,
-            *state.shortcuts_paused.lock(),
+            shortcuts_were_paused,
         );
+        if !shortcut.registered {
+            let _ = shortcuts::register_shortcut(
+                &app,
+                state.shortcut_status.clone(),
+                state.shortcuts_paused.clone(),
+                &previous_settings.hotkey,
+                shortcuts_were_paused,
+            );
+            return Err(shortcut.message);
+        }
+        if let Err(error) = startup::set_start_at_login(settings.start_at_login) {
+            let _ = startup::set_start_at_login(previous_settings.start_at_login);
+            let _ = shortcuts::register_shortcut(
+                &app,
+                state.shortcut_status.clone(),
+                state.shortcuts_paused.clone(),
+                &previous_settings.hotkey,
+                shortcuts_were_paused,
+            );
+            return Err(error.to_string());
+        }
     }
+    let database = state.database.lock();
+    if let Err(error) = database.save_settings(&settings) {
+        drop(database);
+        if setup_complete {
+            let _ = startup::set_start_at_login(previous_settings.start_at_login);
+            let _ = shortcuts::register_shortcut(
+                &app,
+                state.shortcut_status.clone(),
+                state.shortcuts_paused.clone(),
+                &previous_settings.hotkey,
+                shortcuts_were_paused,
+            );
+        }
+        return Err(error.to_string());
+    }
+    let expired_audio = database
+        .prune_sessions(settings.transcript_retention_days)
+        .map_err(|e| e.to_string())?;
+    let _ = runtime::model_status(&app, &settings);
+    // A completed Settings save returns the shortcut to normal dictation
+    // operation. Otherwise an interrupted recorder/test can leave the hook in
+    // feedback-only mode: keys light up, but the engine is intentionally not
+    // dispatched.
+    state.clear_shortcut_interaction_state();
     // The overlay lives in its own webview and reads settings once on mount, so
     // appearance and hotkey changes have to be pushed to it.
     let _ = app.emit("wind-speak://settings-changed", settings.clone());
@@ -350,7 +385,9 @@ pub async fn complete_onboarding(
     let previous_start_at_login = persisted.start_at_login;
     let calibration = persisted
         .audio_calibration
+        .as_ref()
         .filter(|calibration| calibration.asr_backend == "host")
+        .cloned()
         .ok_or_else(|| {
             "Complete the host-backed sound check before entering Atmospeak.".to_string()
         })?;
@@ -397,19 +434,47 @@ pub async fn complete_onboarding(
     if !shortcut.registered {
         return Err(shortcut.message);
     }
-    state
-        .database
-        .lock()
-        .save_settings(&settings)
-        .map_err(|error| error.to_string())?;
+    let save_result = {
+        let database = state.database.lock();
+        database.save_settings(&settings)
+    };
+    if let Err(error) = save_result {
+        let rollback_app = app.clone();
+        let shortcut_status = state.shortcut_status.clone();
+        let shortcuts_paused = state.shortcuts_paused.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = startup::set_start_at_login(previous_start_at_login);
+            shortcuts::set_paused(&rollback_app, shortcut_status, shortcuts_paused, true);
+        })
+        .await
+        .map_err(|join_error| join_error.to_string())?;
+        return Err(error.to_string());
+    }
+    state.clear_shortcut_interaction_state();
     let _ = app.emit("atmospeak://settings-changed", settings.clone());
     let _ = app.emit("wind-speak://settings-changed", settings);
 
     let window_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || window_manager::finish_setup(&window_app))
+    let finish_result =
+        tauri::async_runtime::spawn_blocking(move || window_manager::finish_setup(&window_app))
+            .await
+            .map_err(|error| error.to_string())?;
+    if let Err(error) = finish_result {
+        {
+            let database = state.database.lock();
+            let _ = database.save_settings(&persisted);
+        }
+        let rollback_app = app.clone();
+        let shortcut_status = state.shortcut_status.clone();
+        let shortcuts_paused = state.shortcuts_paused.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = startup::set_start_at_login(previous_start_at_login);
+            shortcuts::set_paused(&rollback_app, shortcut_status, shortcuts_paused, true);
+        })
         .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
+        .map_err(|join_error| join_error.to_string())?;
+        return Err(error.to_string());
+    }
 
     state
         .database

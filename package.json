@@ -1,7 +1,7 @@
 {
   "name": "atmospeak",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,6 +15,7 @@
     "release:portable": "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1 -SkipTauriBuild",
     "release:test-install": "powershell -ExecutionPolicy Bypass -File scripts/test-install-uninstall.ps1",
     "validation:production": "powershell -ExecutionPolicy Bypass -File scripts/production-validation.ps1",
+    "validation:native-ptt": "powershell -ExecutionPolicy Bypass -File scripts/run-native-push-to-talk-smoke.ps1",
     "site:dev": "vite --config website/vite.config.ts",
     "site:build": "tsc --noEmit -p website/tsconfig.json && vite build --config website/vite.config.ts",
     "site:preview": "vite preview --config website/vite.config.ts"

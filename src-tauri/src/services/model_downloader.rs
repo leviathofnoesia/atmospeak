@@ -76,6 +76,24 @@ pub const MODELS: &[ModelDescriptor] = &[
         size_bytes: 1_519_521_155,
         bundled: false,
     },
+    ModelDescriptor {
+        id: "large-v3-turbo-q5",
+        label: "Large v3 Turbo q5",
+        filename: "ggml-large-v3-turbo-q5_0.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        size_bytes: 574_041_195,
+        bundled: false,
+    },
+    ModelDescriptor {
+        id: "distil-large-v3.5",
+        label: "Distil Large v3.5",
+        filename: "ggml-distil-large-v3.5.bin",
+        url: "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin",
+        sha256: "ec2498919b498c5f6b00041adb45650124b3cd9f26f545fffa8f5d11c28dcf26",
+        size_bytes: 1_519_521_155,
+        bundled: false,
+    },
 ];
 
 pub fn descriptor(model_id: &str) -> Option<&'static ModelDescriptor> {
@@ -382,6 +400,39 @@ mod tests {
             installed_model_path(root, model),
             root.join("models").join("ggml-small.en.bin")
         );
+    }
+
+    #[test]
+    fn current_generation_models_use_pinned_hugging_face_blobs() {
+        let turbo = descriptor("large-v3-turbo-q5").expect("large v3 turbo q5");
+        assert_eq!(turbo.filename, "ggml-large-v3-turbo-q5_0.bin");
+        assert_eq!(turbo.size_bytes, 574_041_195);
+        assert_eq!(
+            turbo.sha256,
+            "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+        );
+
+        let distil = descriptor("distil-large-v3.5").expect("distil large v3.5");
+        assert_eq!(distil.filename, "ggml-distil-large-v3.5.bin");
+        assert_eq!(distil.size_bytes, 1_519_521_155);
+        assert_eq!(
+            distil.sha256,
+            "ec2498919b498c5f6b00041adb45650124b3cd9f26f545fffa8f5d11c28dcf26"
+        );
+    }
+
+    #[test]
+    fn managed_model_ids_and_filenames_are_unique() {
+        let mut ids = std::collections::HashSet::new();
+        let mut filenames = std::collections::HashSet::new();
+        for model in MODELS {
+            assert!(ids.insert(model.id), "duplicate model id: {}", model.id);
+            assert!(
+                filenames.insert(model.filename),
+                "duplicate model filename: {}",
+                model.filename
+            );
+        }
     }
 
     #[test]

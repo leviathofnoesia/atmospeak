@@ -7,6 +7,7 @@ listed below and remain local to the installed application.
 - `whisper.cpp` and GGML runtime: https://github.com/ggml-org/whisper.cpp
 - Whisper GGML model weights: https://huggingface.co/ggerganov/whisper.cpp
 - Distil-Whisper GGML model weights: https://huggingface.co/distil-whisper/distil-large-v3-ggml
+- Distil-Whisper v3.5 GGML model weights: https://huggingface.co/distil-whisper/distil-large-v3.5-ggml
 
 ## whisper.cpp and GGML runtime
 

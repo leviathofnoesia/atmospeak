@@ -186,6 +186,11 @@ pub fn run() {
                             );
                         }
                     }
+                    "main" => {
+                        if let Some(state) = window.app_handle().try_state::<AppState>() {
+                            state.clear_shortcut_interaction_state();
+                        }
+                    }
                     _ => {}
                 }
             }

@@ -6,6 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use tauri::{AppHandle, Manager};
@@ -24,6 +25,7 @@ pub struct AppState {
     pub shortcut_status: Arc<Mutex<ShortcutStatus>>,
     pub shortcuts_paused: Arc<Mutex<bool>>,
     pub shortcut_test_active: Arc<Mutex<bool>>,
+    shortcut_test_deadline_ms: AtomicU64,
     pub shortcut_capture_active: Arc<Mutex<bool>>,
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
@@ -64,6 +66,7 @@ impl AppState {
             shortcut_status: Arc::new(Mutex::new(ShortcutStatus::default())),
             shortcuts_paused: Arc::new(Mutex::new(false)),
             shortcut_test_active: Arc::new(Mutex::new(false)),
+            shortcut_test_deadline_ms: AtomicU64::new(0),
             shortcut_capture_active: Arc::new(Mutex::new(false)),
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(Vec::new())),
@@ -122,11 +125,25 @@ impl AppState {
     }
 
     pub fn shortcut_test_active(&self) -> bool {
-        *self.shortcut_test_active.lock()
+        let mut active = self.shortcut_test_active.lock();
+        if !*active {
+            return false;
+        }
+        let deadline = self.shortcut_test_deadline_ms.load(Ordering::Relaxed);
+        if deadline > 0 && now_ms() > deadline {
+            *active = false;
+            self.shortcut_test_deadline_ms.store(0, Ordering::Relaxed);
+            return false;
+        }
+        true
     }
 
     pub fn set_shortcut_test_active(&self, active: bool) {
         *self.shortcut_test_active.lock() = active;
+        self.shortcut_test_deadline_ms.store(
+            active.then(|| now_ms() + 20_000).unwrap_or(0),
+            Ordering::Relaxed,
+        );
     }
 
     pub fn shortcut_capture_active(&self) -> bool {
@@ -135,6 +152,12 @@ impl AppState {
 
     pub fn set_shortcut_capture_active(&self, active: bool) {
         *self.shortcut_capture_active.lock() = active;
+    }
+
+    pub fn clear_shortcut_interaction_state(&self) {
+        *self.shortcut_test_active.lock() = false;
+        self.shortcut_test_deadline_ms.store(0, Ordering::Relaxed);
+        *self.shortcut_capture_active.lock() = false;
     }
 
     pub fn last_target_window(&self) -> Option<isize> {
@@ -204,6 +227,15 @@ impl AppState {
     pub fn level_stream_is_current(&self, generation: u64) -> bool {
         self.level_stream_generation.load(Ordering::Relaxed) == generation
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn resolve_app_dir() -> Result<(PathBuf, bool)> {
@@ -334,6 +366,10 @@ mod tests {
 
         state.set_shortcut_test_active(true);
         assert!(state.shortcut_test_active());
+        state.set_shortcut_capture_active(true);
+        state.clear_shortcut_interaction_state();
+        assert!(!state.shortcut_test_active());
+        assert!(!state.shortcut_capture_active());
         state.set_shortcut_test_active(false);
         assert!(!state.shortcut_test_active());
 
@@ -351,6 +387,31 @@ mod tests {
 
         state.cancel_retention_sweeper();
         assert!(state.retention_sweeper_cancel.load(Ordering::Relaxed));
+
+        match previous {
+            Some(value) => unsafe {
+                std::env::set_var(key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(key);
+            },
+        }
+    }
+
+    #[test]
+    fn abandoned_shortcut_test_lease_expires() {
+        let key = "WIND_SPEAK_APP_DATA_DIR";
+        let previous = std::env::var(key).ok();
+        unsafe {
+            std::env::set_var(key, r"C:\temp\wind-speak-shortcut-lease-test");
+        }
+
+        let state = AppState::new().expect("app state");
+        state.set_shortcut_test_active(true);
+        state.shortcut_test_deadline_ms.store(1, Ordering::Relaxed);
+
+        assert!(!state.shortcut_test_active());
+        assert!(!*state.shortcut_test_active.lock());
 
         match previous {
             Some(value) => unsafe {

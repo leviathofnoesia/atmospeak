@@ -83,6 +83,50 @@ test.describe("canonical editorial hub", () => {
     await expect(page.getByText("Advanced runtime", { exact: true })).toBeVisible();
   });
 
+  test("Settings records arbitrary chords in real time and explains push-to-talk release", async ({
+    page,
+  }) => {
+    await page.goto("/?view=hub&fixture=hub");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    await page.getByRole("button", { name: "Record any chord" }).click();
+    await page.keyboard.down("Control");
+    await expect(page.locator(".settings-shortcut kbd.is-down")).toHaveText(["Ctrl"]);
+    await page.keyboard.down("Shift");
+    await expect(page.locator(".settings-shortcut kbd.is-down")).toHaveText(["Ctrl", "Shift"]);
+    await page.keyboard.down("K");
+    await expect(page.locator(".settings-shortcut kbd.is-down")).toHaveText([
+      "Ctrl",
+      "Shift",
+      "K",
+    ]);
+    await page.keyboard.up("K");
+    await page.keyboard.up("Shift");
+    await page.keyboard.up("Control");
+
+    await expect(page.getByText(/Ctrl\+Shift\+K recorded/i)).toBeVisible();
+    await expect(page.locator(".settings-shortcut__keys kbd")).toHaveText(["Ctrl", "Shift", "K"]);
+    await expect(
+      page.getByText(
+        "Press and hold to record. Releasing transcribes and pastes automatically.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+  });
+
+  test("downloading a Settings model does not restart onboarding", async ({ page }) => {
+    await page.goto("/?view=hub&fixture=hub");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    const turbo = page.locator(".model-pill").filter({ hasText: "Large v3 Turbo q5" });
+    await turbo.getByRole("button", { name: "Download" }).click();
+
+    await expect(page.getByRole("heading", { name: "Quiet by default." })).toBeVisible();
+    await expect(turbo.getByRole("button", { name: "Use" })).toBeVisible();
+    await expect(page.getByText(/Choose Use, then save Settings/i)).toBeVisible();
+    await expect(page.getByText("Welcome", { exact: true })).toHaveCount(0);
+  });
+
   test("dictionary and snippet records can be edited rather than duplicated", async ({ page }) => {
     await page.goto("/?view=hub&fixture=hub");
     await page.getByRole("button", { name: "Dictionary" }).click();

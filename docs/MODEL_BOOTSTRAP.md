@@ -28,6 +28,17 @@ The Tauri bundle also includes `resources/ACKNOWLEDGEMENTS.md`.
 
 Atmospeak returns to bundled defaults as soon as the override toggle is off.
 
+## Managed Optional Models
+
+Settings can install checksum-pinned models into `%LOCALAPPDATA%\Atmospeak\models`.
+The current-generation choices are:
+
+- `large-v3-turbo-q5` — multilingual Large v3 Turbo q5, about 548 MB.
+- `distil-large-v3.5` — current English Distil-Whisper, about 1.45 GB.
+
+The bundled `base.en` model remains the fallback if an optional model is missing.
+The older `distil-large-v3` identifier remains supported for existing installs.
+
 ## Refreshing Bundled Assets
 
 Official whisper.cpp Windows releases are published at:

@@ -180,6 +180,84 @@
 
 /* ── Settings / Advanced ── */
 .hub-shell .settings-panel { display: flex; flex-direction: column; gap: 18px; padding: 26px 34px 40px; max-width: 720px; }
+.hub-shell .settings-shortcut { display: flex; flex-direction: column; gap: 10px; }
+.hub-shell .settings-shortcut__label,
+.hub-shell .settings-gesture legend {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.hub-shell .settings-shortcut__recorder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  padding: 12px;
+  background: var(--paper);
+}
+.hub-shell .settings-shortcut__keys,
+.hub-shell .settings-shortcut__actions,
+.hub-shell .settings-shortcut__presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.hub-shell .settings-shortcut__keys kbd {
+  min-width: 38px;
+  border: 1px solid rgba(18,17,19,.24);
+  border-bottom-width: 3px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fff;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+.hub-shell .settings-shortcut__keys kbd.is-down {
+  border-color: #467a5f;
+  background: #dff2e6;
+  color: #183f2c;
+  box-shadow: 0 0 0 2px rgba(70,122,95,.16);
+}
+.hub-shell .settings-shortcut__message { margin: 0; }
+.hub-shell .settings-shortcut__presets button,
+.hub-shell .settings-gesture button {
+  border: 1px solid var(--line);
+  padding: 9px 12px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.hub-shell .settings-shortcut__presets button {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.hub-shell .settings-shortcut__presets button.is-selected,
+.hub-shell .settings-gesture button.is-selected {
+  border-color: var(--c-dusk);
+  background: rgba(72,86,150,.1);
+  box-shadow: inset 4px 0 0 var(--c-dusk);
+}
+.hub-shell .settings-gesture {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.hub-shell .settings-gesture legend { margin-bottom: 8px; }
+.hub-shell .settings-gesture button {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+}
+.hub-shell .settings-gesture button strong { font-size: 14px; }
+.hub-shell .settings-gesture button span { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .hub-shell .instruction-card { background: #fffffe; border: 1px solid rgba(18,17,19,0.08); border-left: 2px solid var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
 .hub-shell .instruction-card h3 { font-size: 20px; }
 .hub-shell .instruction-card p { margin: 0; font-size: 13.5px; line-height: 1.55; color: rgba(27,26,29,0.66); }
@@ -198,6 +276,7 @@
 .hub-shell .model-pill--active { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 6%, #fbfbf7); }
 .hub-shell .model-pill strong { font-weight: 600; font-size: 14px; font-family: var(--font-body); }
 .hub-shell .model-pill span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(27,26,29,0.5); }
+.hub-shell .model-pill small { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 .hub-shell .model-pill__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .hub-shell .model-pill__actions .button { min-height: 30px; padding: 0 10px; font-size: 10px; }
 .hub-shell .runtime-events { display: flex; flex-direction: column; gap: 8px; }
@@ -329,8 +408,14 @@
 
   .stat-row,
   .hub-shell .model-grid,
-  .hub-shell .inline-form {
+  .hub-shell .inline-form,
+  .hub-shell .settings-gesture {
     grid-template-columns: 1fr;
+  }
+
+  .hub-shell .settings-shortcut__recorder {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .hub-shell .home-facts {

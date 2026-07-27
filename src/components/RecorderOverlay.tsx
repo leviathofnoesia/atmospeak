@@ -28,6 +28,7 @@ interface RecorderOverlayProps {
   phase?: RecorderPhase;
   modelStatus: ModelStatus | null;
   hotkeyLabel?: string;
+  shortcutArmed?: boolean;
   mode?: DictationMode;
   notice?: string;
   liveTranscript?: LiveTranscript;
@@ -250,6 +251,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     bubbleSize = "medium",
     hostApp = "your cursor",
     hotkeyLabel = "your shortcut",
+    shortcutArmed = false,
     mode = "pushToTalk",
     accent = "dusk",
     theme = "dark",
@@ -288,28 +290,15 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     if (overflowing) el.scrollLeft = el.scrollWidth;
   }, [transcript, state]);
 
-  // the orb wakes (blooms) when the user reaches for a hotkey modifier
-  const armedRef = useRef<HTMLDivElement>(null);
+  // The native global hook owns this signal. A WebView key listener only works
+  // while the dock itself has focus and creates misleading feedback when the
+  // user is typing in another application.
   useEffect(() => {
-    const setArmed = (on: boolean) => {
-      const el = dockRef.current;
-      if (!el) return;
-      if (on && state === "rest") el.setAttribute("data-armed", "");
-      else el.removeAttribute("data-armed");
-    };
-    const isMod = (e: KeyboardEvent) => e.altKey || e.ctrlKey || e.metaKey;
-    const down = (e: KeyboardEvent) => setArmed(isMod(e));
-    const up = () => setArmed(false);
-    const blur = () => setArmed(false);
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    window.addEventListener("blur", blur);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-      window.removeEventListener("blur", blur);
-    };
-  }, [state]);
+    const element = dockRef.current;
+    if (!element) return;
+    if (shortcutArmed && state === "rest") element.setAttribute("data-armed", "");
+    else element.removeAttribute("data-armed");
+  }, [shortcutArmed, state]);
 
   // press → potential OS-window drag; a clean tap on the body starts dictation
   const onPointerDown = (e: React.PointerEvent) => {
@@ -371,7 +360,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   const modelReady = modelStatus?.ready ?? true;
 
   return (
-    <div className={clsx("dock-wrap", theme === "dark" && "dark-bg")} style={wrapStyle} ref={armedRef}>
+    <div className={clsx("dock-wrap", theme === "dark" && "dark-bg")} style={wrapStyle}>
       <div
         className="dock"
         ref={dockRef}

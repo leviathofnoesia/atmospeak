@@ -16,6 +16,16 @@ interface ModelManagementProps {
   onDelete: (modelId: string) => Promise<void>;
 }
 
+const MODEL_DETAILS: Record<string, string> = {
+  "tiny.en": "Fastest English option for short drafts.",
+  "base.en": "Bundled English default with the smallest no-download setup.",
+  "small.en": "More accurate English model for names, accents, and jargon.",
+  "medium.en": "Accuracy-first English model with a larger memory footprint.",
+  "distil-large-v3": "Previous-generation distilled English model; retained for existing installs.",
+  "large-v3-turbo-q5": "New: multilingual Large v3 Turbo, quantized to about 548 MB.",
+  "distil-large-v3.5": "New: latest distilled English model with stronger short-form robustness.",
+};
+
 export function ModelManagement({
   settings,
   inventory,
@@ -29,7 +39,8 @@ export function ModelManagement({
     <>
       <PanelTitle icon={<Cpu size={22} />} title="Voice models" />
       <p className="muted">
-        Balanced is bundled. Larger optional models stay on this device and can be removed anytime.
+        Balanced is bundled. Large v3 Turbo q5 and Distil Large v3.5 are the newest optional
+        choices; every download stays on this device and is SHA-256 verified.
       </p>
       <div className="model-grid">
         {inventory?.models.map((model) => {
@@ -44,6 +55,7 @@ export function ModelManagement({
                 {model.sizeMb ? `${model.sizeMb} MB · ` : ""}
                 {!model.installed ? "not installed" : active ? "active" : model.bundled ? "bundled" : "installed"}
               </span>
+              <small>{MODEL_DETAILS[model.id] ?? "Local whisper.cpp speech recognition model."}</small>
               {!model.bundled ? (
                 <div className="model-pill__actions">
                   {downloading ? (

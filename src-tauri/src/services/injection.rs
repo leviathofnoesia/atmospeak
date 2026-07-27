@@ -29,7 +29,10 @@ pub fn inject_text(
         match restore_foreground(target) {
             Ok(true) => {
                 restored_target = true;
-                thread::sleep(Duration::from_millis(40));
+                // `restore_foreground` verifies both the top-level window and
+                // its GUI thread's focused control. Leave a small final margin
+                // for the target's activation handler before Ctrl+V.
+                thread::sleep(Duration::from_millis(75));
             }
             Ok(false) => {}
             Err(error) => {
@@ -219,7 +222,9 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
-            ASFW_ANY, AllowSetForegroundWindow, IsWindow, SetForegroundWindow,
+            ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, GUITHREADINFO,
+            GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow, SW_RESTORE,
+            SetForegroundWindow, ShowWindow,
         };
 
         if target.hwnd == 0 || !hwnd_is_valid(target.hwnd) {
@@ -229,15 +234,41 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
         if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
             return Ok(false);
         }
-        let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
-        let ok = unsafe { SetForegroundWindow(hwnd) }.as_bool();
-        if ok {
-            Ok(true)
-        } else {
-            Err(anyhow!(
-                "SetForegroundWindow returned false (elevated/UIPI?)"
-            ))
+
+        let target_has_keyboard_focus = || {
+            let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
+            if thread_id == 0 {
+                return false;
+            }
+            let mut info = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..Default::default()
+            };
+            unsafe { GetGUIThreadInfo(thread_id, &mut info) }.is_ok()
+                && info.hwndActive == hwnd
+                && !info.hwndFocus.0.is_null()
+        };
+
+        if unsafe { GetForegroundWindow() } == hwnd && target_has_keyboard_focus() {
+            return Ok(true);
         }
+
+        let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+        // SetForegroundWindow may report success before Windows has completed
+        // the foreground transition. Restore and retry briefly, then verify the
+        // actual foreground HWND before sending Ctrl+V.
+        for _ in 0..10 {
+            let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
+            let _ = unsafe { BringWindowToTop(hwnd) };
+            let _ = unsafe { SetForegroundWindow(hwnd) };
+            if unsafe { GetForegroundWindow() } == hwnd && target_has_keyboard_focus() {
+                return Ok(true);
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
+        Err(anyhow!(
+            "Windows did not restore keyboard focus to the dictation target (elevated/UIPI?)"
+        ))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -268,21 +299,25 @@ fn send_paste_shortcut() -> Result<()> {
         }
     }
 
-    let inputs = [
+    let stages = [
         keyboard_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0)),
         keyboard_input(VK_V, KEYBD_EVENT_FLAGS(0)),
         keyboard_input(VK_V, KEYEVENTF_KEYUP),
         keyboard_input(VK_CONTROL, KEYEVENTF_KEYUP),
     ];
-    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-    if sent == inputs.len() as u32 {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "Windows SendInput sent {sent} of {} events",
-            inputs.len()
-        ))
+    for (index, input) in stages.into_iter().enumerate() {
+        let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+        if sent != 1 {
+            return Err(anyhow!(
+                "Windows SendInput failed at paste stage {}",
+                index + 1
+            ));
+        }
+        if index == 0 || index == 2 {
+            thread::sleep(Duration::from_millis(15));
+        }
     }
+    Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]

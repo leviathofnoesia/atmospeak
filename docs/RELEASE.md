@@ -76,3 +76,22 @@ bun run release:test-install
 The script installs the NSIS build into a temp directory, checks the executable
 and bundled runtime/model resources, launches briefly, uninstalls silently, and
 verifies the executable is removed.
+
+## Native Push-to-Talk Gate
+
+Before packaging, run the isolated Windows/WebView2 push-to-talk harness:
+
+```powershell
+bun run validation:native-ptt
+```
+
+The harness completes setup against a debug-only deterministic audio fixture,
+saves a non-preset `Ctrl+Alt+F12` shortcut through Settings, sends the native
+key-down/key-up sequence, and verifies that key release produces one resident
+host transcript, one injected database session, and exactly one paste into a
+real Windows text box. The fixture seam is unavailable in release builds.
+
+This repeatable automation protects the release-to-inject behavior, but it does
+not replace the human Elgato Wave:3 gates. Tests 001 and 005 must still pass
+with deliberate speech and be recorded in
+`tests/manual/production-run-log.md` before publication.

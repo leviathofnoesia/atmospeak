@@ -142,6 +142,76 @@ function Stop-ProcessesUnderInstallDir {
   throw "Installed processes did not exit: $($remaining.ProcessId -join ', ')"
 }
 
+function Test-PathUnderDirectory {
+  param([string]$Path, [string]$Directory)
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return $false
+  }
+  $resolvedDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd('\') + '\'
+  $resolvedPath = [System.IO.Path]::GetFullPath($Path.Trim('"'))
+  return $resolvedPath.StartsWith(
+    $resolvedDirectory,
+    [System.StringComparison]::OrdinalIgnoreCase
+  )
+}
+
+function Remove-TestInstallShortcuts {
+  param([string]$Directory)
+  $shortcutRoots = @(
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
+    (Join-Path $env:USERPROFILE "Desktop")
+  )
+  $shell = New-Object -ComObject WScript.Shell
+  foreach ($root in $shortcutRoots) {
+    Get-ChildItem -LiteralPath $root -Filter "Atmospeak.lnk" -File -Recurse -ErrorAction SilentlyContinue |
+      ForEach-Object {
+        $target = $shell.CreateShortcut($_.FullName).TargetPath
+        if (Test-PathUnderDirectory -Path $target -Directory $Directory) {
+          Remove-Item -LiteralPath $_.FullName -Force
+        }
+      }
+  }
+}
+
+function Remove-TestInstallRegistration {
+  param([string]$Directory)
+  $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Atmospeak"
+  if (Test-Path $uninstallKey) {
+    $location = (Get-ItemProperty $uninstallKey -ErrorAction Stop).InstallLocation
+    if (Test-PathUnderDirectory -Path $location -Directory $Directory) {
+      Remove-Item -LiteralPath $uninstallKey -Recurse -Force
+    }
+  }
+  $productKey = "HKCU:\Software\atmospeak\Atmospeak"
+  if (Test-Path $productKey) {
+    $location = (Get-Item $productKey).GetValue("")
+    if (Test-PathUnderDirectory -Path $location -Directory $Directory) {
+      Remove-Item -LiteralPath $productKey -Recurse -Force
+    }
+  }
+}
+
+function Assert-NoRealInstallRegistration {
+  param([string]$Directory)
+  $locations = @()
+  $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Atmospeak"
+  if (Test-Path $uninstallKey) {
+    $locations += (Get-ItemProperty $uninstallKey -ErrorAction Stop).InstallLocation
+  }
+  $productKey = "HKCU:\Software\atmospeak\Atmospeak"
+  if (Test-Path $productKey) {
+    $locations += (Get-Item $productKey).GetValue("")
+  }
+  foreach ($location in $locations) {
+    if (
+      -not [string]::IsNullOrWhiteSpace($location) -and
+      -not (Test-PathUnderDirectory -Path $location -Directory $Directory)
+    ) {
+      throw "Refusing installer smoke while a real Atmospeak installation is registered at $location"
+    }
+  }
+}
+
 function Get-FreeTcpPort {
   $listener = [System.Net.Sockets.TcpListener]::new(
     [System.Net.IPAddress]::Loopback,
@@ -165,6 +235,30 @@ if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
 
 if (-not $InstallerPath -or -not (Test-Path $InstallerPath)) {
   throw "Installer not found. Run scripts/package-release.ps1 first."
+}
+
+$ProfileDir = "$InstallDir-profile"
+Assert-NoRealInstallRegistration -Directory $InstallDir
+Remove-TestInstallShortcuts -Directory $InstallDir
+Remove-TestInstallRegistration -Directory $InstallDir
+
+trap {
+  try {
+    Stop-ProcessesUnderInstallDir -Directory $InstallDir
+  } catch {
+    Write-Warning "Emergency installed-process cleanup failed: $($_.Exception.Message)"
+  }
+  try {
+    Remove-TestInstallShortcuts -Directory $InstallDir
+    Remove-TestInstallRegistration -Directory $InstallDir
+  } catch {
+    Write-Warning "Emergency installer shell cleanup failed: $($_.Exception.Message)"
+  }
+  if (Test-Path -LiteralPath $ProfileDir) {
+    Remove-Item -LiteralPath $ProfileDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  [Console]::Error.WriteLine($_.ToString())
+  exit 1
 }
 
 if (Test-Path $InstallDir) {
@@ -192,7 +286,6 @@ if (-not (Test-Path (Join-Path $InstallDir "resources\whisper-runtime\whisper-cl
   throw "Bundled whisper runtime not found in installed resources."
 }
 
-$ProfileDir = "$InstallDir-profile"
 if (Test-Path $ProfileDir) {
   Remove-Item $ProfileDir -Recurse -Force
 }
@@ -245,6 +338,7 @@ finally {
   catch {
     Write-Warning "Installed-process cleanup failed: $($_.Exception.Message)"
   }
+  Remove-TestInstallShortcuts -Directory $InstallDir
 }
 
 $Uninstaller = Get-ChildItem $InstallDir -Filter "*uninst*.exe" -File -ErrorAction SilentlyContinue |
@@ -264,6 +358,8 @@ if ($uninstall.ExitCode -ne 0) {
 
 Wait-ForPathRemoval -Path $AppExe
 Stop-ProcessesUnderInstallDir -Directory $InstallDir
+Remove-TestInstallShortcuts -Directory $InstallDir
+Remove-TestInstallRegistration -Directory $InstallDir
 if (Test-Path $ProfileDir) {
   Remove-Item $ProfileDir -Recurse -Force
 }

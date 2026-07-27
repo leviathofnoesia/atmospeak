@@ -367,6 +367,26 @@ export function getModelInventory(): Promise<ModelInventory> {
           : null,
         sizeMb: 1450,
       },
+      {
+        id: "large-v3-turbo-q5",
+        label: "Large v3 Turbo q5",
+        installed: mockInstalledModels.has("large-v3-turbo-q5"),
+        bundled: false,
+        path: mockInstalledModels.has("large-v3-turbo-q5")
+          ? "mock://models/ggml-large-v3-turbo-q5_0.bin"
+          : null,
+        sizeMb: 548,
+      },
+      {
+        id: "distil-large-v3.5",
+        label: "Distil Large v3.5",
+        installed: mockInstalledModels.has("distil-large-v3.5"),
+        bundled: false,
+        path: mockInstalledModels.has("distil-large-v3.5")
+          ? "mock://models/ggml-distil-large-v3.5.bin"
+          : null,
+        sizeMb: 1450,
+      },
     ];
     return {
       activeModelId: mockSnapshot.settings.advancedRuntimeEnabled

@@ -24,13 +24,24 @@ interface ShortcutTestState {
   message: string;
 }
 
+interface ShortcutCaptureState {
+  arming: boolean;
+  active: boolean;
+  keys: string[];
+  message: string;
+}
+
 interface SettingsPanelProps {
   settings: AppSettings;
   setSettings: (settings: AppSettings) => void;
   microphones: MicrophoneInfo[];
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
+  shortcutCapture: ShortcutCaptureState;
   onTestShortcut: () => void;
+  onRecordShortcut: () => void;
+  onCancelShortcutCapture: () => void;
+  onShortcutChange: (hotkey: string) => void;
   onToggleShortcutsPaused: () => Promise<void>;
   onShowFloatingControl: () => Promise<void>;
   onResetDockPosition: () => Promise<void>;
@@ -50,7 +61,11 @@ export function SettingsPanel({
   microphones,
   shortcutStatus,
   shortcutTest,
+  shortcutCapture,
   onTestShortcut,
+  onRecordShortcut,
+  onCancelShortcutCapture,
+  onShortcutChange,
   onToggleShortcutsPaused,
   onShowFloatingControl,
   onResetDockPosition,
@@ -63,6 +78,15 @@ export function SettingsPanel({
   advanced,
   modelManagement,
 }: SettingsPanelProps) {
+  const shortcutKeys = (
+    shortcutCapture.active && shortcutCapture.keys.length > 0
+      ? shortcutCapture.keys
+      : settings.hotkey.split("+")
+  ).map((key) => key.trim());
+  const shortcutSaved =
+    shortcutStatus?.registered === true &&
+    shortcutStatus.hotkey.toLowerCase() === settings.hotkey.toLowerCase();
+
   return (
     <div>
       <div className="hub__head">
@@ -91,35 +115,82 @@ export function SettingsPanel({
           ))}
         </select>
       </label>
-      <label>
-        <span>Shortcut</span>
-        <select
-          aria-label="Shortcut"
-          value={settings.hotkey}
-          onChange={(event) => setSettings({ ...settings, hotkey: event.currentTarget.value })}
-        >
+      <div className="settings-shortcut">
+        <span className="settings-shortcut__label">Dictation shortcut</span>
+        <div className="settings-shortcut__recorder">
+          <span className="settings-shortcut__keys" aria-live="polite" aria-label="Shortcut keys">
+            {shortcutKeys.map((key, index) => (
+              <kbd
+                key={`${key}-${index}`}
+                className={shortcutCapture.keys.includes(key) ? "is-down" : ""}
+              >
+                {key}
+              </kbd>
+            ))}
+          </span>
+          <span className="settings-shortcut__actions">
+            {shortcutCapture.active ? (
+              <button type="button" className="button button--ghost" onClick={onCancelShortcutCapture}>
+                Cancel recording
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button button--ghost"
+                disabled={shortcutTest.active}
+                onClick={onRecordShortcut}
+              >
+                Record any chord
+              </button>
+            )}
+            <button
+              type="button"
+              className="button button--ghost"
+              disabled={!shortcutSaved || shortcutCapture.active || shortcutTest.active}
+              onClick={onTestShortcut}
+            >
+              {shortcutTest.active ? "Listening..." : "Test active shortcut"}
+            </button>
+          </span>
+        </div>
+        <p className="muted settings-shortcut__message">
+          {shortcutCapture.message ||
+            (shortcutSaved
+              ? shortcutTest.message || shortcutStatus?.message
+              : "Save settings to activate and test this shortcut.")}
+        </p>
+        <div className="settings-shortcut__presets" aria-label="Shortcut quick picks">
           {shortcutOptions.map((option) => (
-            <option key={option} value={option}>
+            <button
+              type="button"
+              className={settings.hotkey === option ? "is-selected" : ""}
+              key={option}
+              onClick={() => onShortcutChange(option)}
+            >
               {option}
-            </option>
+            </button>
           ))}
-        </select>
-      </label>
-      <label>
-        <span>Mode</span>
-        <select
-          value={settings.mode}
-          onChange={(event) =>
-            setSettings({
-              ...settings,
-              mode: event.currentTarget.value as AppSettings["mode"],
-            })
-          }
+        </div>
+      </div>
+      <fieldset className="settings-gesture">
+        <legend>Gesture</legend>
+        <button
+          type="button"
+          className={settings.mode === "pushToTalk" ? "is-selected" : ""}
+          onClick={() => setSettings({ ...settings, mode: "pushToTalk" })}
         >
-          <option value="pushToTalk">Push to talk</option>
-          <option value="toggle">Toggle</option>
-        </select>
-      </label>
+          <strong>Hold to talk</strong>
+          <span>Press and hold to record. Releasing transcribes and pastes automatically.</span>
+        </button>
+        <button
+          type="button"
+          className={settings.mode === "toggle" ? "is-selected" : ""}
+          onClick={() => setSettings({ ...settings, mode: "toggle" })}
+        >
+          <strong>Tap to toggle</strong>
+          <span>Press once to start and again to transcribe and paste.</span>
+        </button>
+      </fieldset>
       <ToggleRow
         icon={<Clipboard size={18} />}
         label="Auto-paste into focused app"
@@ -231,9 +302,6 @@ export function SettingsPanel({
       <div className="settings-actions">
         <button type="button" className="button button--primary" onClick={() => void onSave()}>
           Save settings
-        </button>
-        <button type="button" className="button button--ghost" onClick={onTestShortcut}>
-          Test active shortcut
         </button>
         <button type="button" className="button button--ghost" onClick={() => void onToggleShortcutsPaused()}>
           {shortcutStatus?.paused ? "Resume shortcuts" : "Pause shortcuts"}

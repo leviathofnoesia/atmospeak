@@ -86,6 +86,8 @@ const MODEL_COPY: Record<string, { tag: string; desc: string }> = {
   "small.en": { tag: "most accurate", desc: "Names, jargon, accents. Needs a little more room." },
   "medium.en": { tag: "high accuracy", desc: "A larger English model for accuracy-first dictation." },
   "distil-large-v3": { tag: "fast + accurate", desc: "Large-model accuracy distilled for faster English transcription." },
+  "large-v3-turbo-q5": { tag: "new · multilingual", desc: "Quantized Large v3 Turbo for stronger accuracy without the full 1.5 GB download." },
+  "distil-large-v3.5": { tag: "new · English", desc: "The newest distilled English model, tuned for robust short-form transcription." },
   "base": { tag: "multilingual", desc: "Auto-detect and non-English dictation with a local model." },
 };
 

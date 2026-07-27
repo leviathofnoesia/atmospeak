@@ -135,6 +135,71 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
 
 ## Next Real-Recording Batch
 
+## 2026-07-27 - Native push-to-talk release automation
+
+- Automated native fixture gate: **pass twice consecutively**
+- Custom Settings shortcut: `Ctrl+Alt+F12`
+- Capture mode: push-to-talk
+- Release behavior: stopped capture, transcribed with `asr_backend: host`, and
+  pasted exactly once into a native Windows text box
+- Session ids: `4b4f14bf-2d56-416f-8508-a324f4dd1a1b`,
+  `02659d39-811a-401a-b509-7f094508f338`
+- Transcript/target output: `The porcelain moon hums over the studio.`
+- Stage metrics: `capture_stop_ms=0`, `asr_ms=895/850`,
+  `inject_ms=43/44`, `total_ms=989/947`
+- Sound-check metrics: 3244 ms capture, 1800 ms active speech,
+  -28.19 dBFS RMS, -10.93 dBFS peak, 18.70 dB SNR, 0% clipping,
+  token similarity 1.0, resident host ASR
+- Scope: isolated debug profile and deterministic fixture. This proves the
+  native key-release-to-paste path, captured-target restoration, and arbitrary
+  Settings hotkey wiring. It does **not** satisfy production tests 001 or 005;
+  both remain pending with real Elgato Wave:3 speech.
+
+### Shortcut persistence regression
+
+- Reproduced the feedback-only failure by leaving native shortcut capture and
+  test modes armed before saving a custom chord.
+- After the fix, Save cleared both transient modes, persisted
+  `Ctrl+Alt+F12`, updated the native orb label, started listening from that
+  exact chord, and injected once on release.
+- Verified twice consecutively with native session ids
+  `0c89f210-a4fa-4dc5-bbd7-f6e8c5873458` and
+  `e7069c1d-cca8-4ad5-9ccf-322c8c99f936`.
+- Host ASR: 941/996 ms; total release-to-result pipeline: 1163/1222 ms.
+
+### Installed Ctrl+CapsLock regression
+
+- Found and removed an installer-smoke Start-menu shortcut and registry entry
+  that incorrectly targeted `AtmospeakInstallTest` under `%TEMP%`.
+- Restored the real installation and Start-menu target under
+  `%LOCALAPPDATA%\Atmospeak`.
+- Verified the persisted production chord `Ctrl+CapsLock` twice through the
+  complete fixture pipeline, including release-to-host-ASR and exactly one
+  native paste. Session ids: `7094c139-32f2-403e-bc13-b74bfd23cfb9` and
+  `ff6c3d5d-b14b-4972-99e1-94f802470bba`.
+- Verified the rebuilt installed release with an external native editor
+  focused: Ctrl lead-key feedback was visible globally, CapsLock produced the
+  native listening event, and the orb rendered `data-state=listening`.
+- Replaced the dock's focus-local WebView keyboard animation with registered
+  native shortcut key-edge events. The installer harness now refuses to
+  overwrite a real installation and cleans test-only registry/shortcut state.
+
+### Installed v0.4.0 elevated-Terminal regression
+
+- Confirmed Windows Terminal PID `21832` was elevated while Atmospeak ran at
+  normal user integrity, reproducing the security boundary that hid physical
+  keys from the former low-level runtime hook.
+- Replaced keyed runtime activation with a Windows system-registered hotkey;
+  push-to-talk release is detected by bounded key-state monitoring.
+- Verified the packaged and installed `0.4.0` executable from
+  `%LOCALAPPDATA%\Atmospeak` with the real elevated Windows Terminal focused:
+  `Ctrl+CapsLock` produced the native listening event and the orb entered
+  `data-state=listening`. The probe cancelled without transcription or
+  injection so it did not alter the terminal session.
+- Re-ran the exact `Ctrl+CapsLock` fixture pipeline through release-triggered
+  host ASR and one native paste. Session id
+  `1e928be6-b0bf-498a-b4ad-78105711ae38`; ASR `1008 ms`; total `1102 ms`.
+
 Run these first because they establish whether the core production loop is healthy before spending time on polish, update, and destructive recovery cases:
 
 1. `001` - Notepad one-shot sentence.

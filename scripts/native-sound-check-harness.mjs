@@ -34,6 +34,17 @@ if (pages.length !== 1) {
 }
 const page = pages[0];
 await page.waitForLoadState("domcontentloaded");
+try {
+  await page.waitForFunction(
+    () => typeof window.__TAURI_INTERNALS__?.invoke === "function",
+    undefined,
+    { timeout: 15_000 },
+  );
+} catch (error) {
+  throw new Error(
+    `Native Tauri bridge did not become ready at ${page.url()}: ${error}`,
+  );
+}
 await page.evaluate(() => {
   window.__atmospeakHeartbeat = 0;
   window.__atmospeakHeartbeatTimer = window.setInterval(() => {
@@ -81,8 +92,11 @@ const result = await invoke("finish_sound_check", {
 }, 120_000);
 const finishElapsedMs = Date.now() - finishStartedAt;
 const heartbeatAfterFinish = await page.evaluate(() => window.__atmospeakHeartbeat);
-const minimumHeartbeats = Math.max(1, Math.floor(finishElapsedMs / 200));
-if (heartbeatAfterFinish - heartbeatBeforeFinish < minimumHeartbeats) {
+const minimumHeartbeats = Math.floor(finishElapsedMs / 200);
+if (
+  minimumHeartbeats > 0 &&
+  heartbeatAfterFinish - heartbeatBeforeFinish < minimumHeartbeats
+) {
   throw new Error(
     `The WebView stopped responding during sound-check finish: ${JSON.stringify({
       finishElapsedMs,
@@ -96,6 +110,15 @@ if (result.deviceName !== microphone.name) {
 }
 if (result.durationMs < 2_000 || result.durationMs > 12_000) {
   throw new Error(`Sound-check capture duration was invalid: ${JSON.stringify(result)}`);
+}
+if (!result.passed) {
+  throw new Error(`Native sound check did not pass: ${JSON.stringify(result)}`);
+}
+if (result.asrBackend !== "host") {
+  throw new Error(`Native sound check did not use the resident host: ${JSON.stringify(result)}`);
+}
+if (result.tokenSimilarity < 0.5 || result.transcript.trim().split(/\s+/).length < 4) {
+  throw new Error(`Native sound-check transcript was not intelligible: ${JSON.stringify(result)}`);
 }
 
 await page.evaluate(() => window.clearInterval(window.__atmospeakHeartbeatTimer));
