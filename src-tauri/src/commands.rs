@@ -347,6 +347,7 @@ pub async fn complete_onboarding(
         .lock()
         .load_settings()
         .map_err(|error| error.to_string())?;
+    let previous_start_at_login = persisted.start_at_login;
     let calibration = persisted
         .audio_calibration
         .filter(|calibration| calibration.asr_backend == "host")
@@ -374,14 +375,22 @@ pub async fn complete_onboarding(
     let hotkey = settings.hotkey.clone();
     let start_at_login = settings.start_at_login;
     let shortcut = tauri::async_runtime::spawn_blocking(move || {
-        startup::set_start_at_login(start_at_login).map_err(|error| error.to_string())?;
-        Ok::<_, String>(shortcuts::register_shortcut(
+        let shortcut = shortcuts::register_shortcut(
             &shortcut_app,
-            shortcut_status,
-            shortcuts_paused,
+            shortcut_status.clone(),
+            shortcuts_paused.clone(),
             &hotkey,
             false,
-        ))
+        );
+        if !shortcut.registered {
+            return Ok::<_, String>(shortcut);
+        }
+        if let Err(error) = startup::set_start_at_login(start_at_login) {
+            let _ = startup::set_start_at_login(previous_start_at_login);
+            shortcuts::set_paused(&shortcut_app, shortcut_status, shortcuts_paused, true);
+            return Err(error.to_string());
+        }
+        Ok(shortcut)
     })
     .await
     .map_err(|error| error.to_string())??;

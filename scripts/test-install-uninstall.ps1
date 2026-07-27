@@ -239,7 +239,12 @@ try {
 }
 finally {
   Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-  Stop-ProcessesUnderInstallDir -Directory $InstallDir
+  try {
+    Stop-ProcessesUnderInstallDir -Directory $InstallDir
+  }
+  catch {
+    Write-Warning "Installed-process cleanup failed: $($_.Exception.Message)"
+  }
 }
 
 $Uninstaller = Get-ChildItem $InstallDir -Filter "*uninst*.exe" -File -ErrorAction SilentlyContinue |

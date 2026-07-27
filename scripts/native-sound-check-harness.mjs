@@ -41,11 +41,26 @@ await page.evaluate(() => {
   }, 50);
 });
 
-const invoke = (command, args = {}) =>
-  page.evaluate(
-    ({ command, args }) => window.__TAURI_INTERNALS__.invoke(command, args),
-    { command, args },
-  );
+const invoke = async (command, args = {}, timeoutMs = 30_000) => {
+  let timeout;
+  try {
+    return await Promise.race([
+      page.evaluate(
+        ({ command, args }) => window.__TAURI_INTERNALS__.invoke(command, args),
+        { command, args },
+      ),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new Error(`Native command "${command}" did not finish within ${timeoutMs}ms.`),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 const microphones = await invoke("list_microphones");
 const microphone =
   microphones.find((candidate) =>
@@ -63,7 +78,7 @@ const heartbeatBeforeFinish = await page.evaluate(() => window.__atmospeakHeartb
 const finishStartedAt = Date.now();
 const result = await invoke("finish_sound_check", {
   expectedPhrase: "The porcelain moon hums over the studio.",
-});
+}, 120_000);
 const finishElapsedMs = Date.now() - finishStartedAt;
 const heartbeatAfterFinish = await page.evaluate(() => window.__atmospeakHeartbeat);
 const minimumHeartbeats = Math.max(1, Math.floor(finishElapsedMs / 200));

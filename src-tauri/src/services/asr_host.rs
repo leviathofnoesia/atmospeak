@@ -23,11 +23,12 @@ use crate::services::proc;
 /// Set `ATMOSPEAK_WHISPER_HOST=0` to force the one-shot CLI backend.
 const HOST_ENV: &str = "ATMOSPEAK_WHISPER_HOST";
 
-/// Model load has to finish before the server binds its port.
-const READY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Timeout budgets scale with model size so advanced runtime overrides and the
+/// largest managed models do not fall back merely because a CPU-only machine is
+/// slow. Base/tiny remain bounded more tightly.
+const SMALL_MODEL_MAX_BYTES: u64 = 200 * 1024 * 1024;
+const MEDIUM_MODEL_MAX_BYTES: u64 = 700 * 1024 * 1024;
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
-/// Generous enough for long-form dictation; the model itself is already warm.
-const INFERENCE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn is_disabled() -> bool {
     matches!(
@@ -53,14 +54,16 @@ impl Drop for Running {
 pub struct AsrHost {
     server_exe: PathBuf,
     model_path: PathBuf,
+    ready_timeout: Duration,
     running: Mutex<Option<Running>>,
     client: reqwest::blocking::Client,
 }
 
 impl AsrHost {
     pub fn new(server_exe: PathBuf, model_path: PathBuf) -> Result<Self> {
+        let (ready_timeout, inference_timeout) = model_timeout_budget(&model_path);
         let client = reqwest::blocking::Client::builder()
-            .timeout(INFERENCE_TIMEOUT)
+            .timeout(inference_timeout)
             // Loopback only; a proxy would break the connection and is never wanted here.
             .no_proxy()
             .build()
@@ -68,6 +71,7 @@ impl AsrHost {
         Ok(Self {
             server_exe,
             model_path,
+            ready_timeout,
             running: Mutex::new(None),
             client,
         })
@@ -147,7 +151,7 @@ impl AsrHost {
 
     fn wait_until_ready(&self, running: &mut Running) -> Result<()> {
         let url = format!("http://127.0.0.1:{}/", running.port);
-        let deadline = Instant::now() + READY_TIMEOUT;
+        let deadline = Instant::now() + self.ready_timeout;
 
         while Instant::now() < deadline {
             if let Ok(Some(status)) = running.child.try_wait() {
@@ -169,7 +173,7 @@ impl AsrHost {
 
         Err(anyhow!(
             "whisper-server did not become ready within {}s",
-            READY_TIMEOUT.as_secs()
+            self.ready_timeout.as_secs()
         ))
     }
 
@@ -229,6 +233,23 @@ impl AsrHost {
 
     pub fn shutdown(&self) {
         *self.running.lock() = None;
+    }
+}
+
+fn model_timeout_budget(model_path: &Path) -> (Duration, Duration) {
+    let bytes = std::fs::metadata(model_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(u64::MAX);
+    timeout_budget_for_model_bytes(bytes)
+}
+
+fn timeout_budget_for_model_bytes(bytes: u64) -> (Duration, Duration) {
+    if bytes <= SMALL_MODEL_MAX_BYTES {
+        (Duration::from_secs(120), Duration::from_secs(300))
+    } else if bytes <= MEDIUM_MODEL_MAX_BYTES {
+        (Duration::from_secs(240), Duration::from_secs(600))
+    } else {
+        (Duration::from_secs(600), Duration::from_secs(1_800))
     }
 }
 
@@ -319,5 +340,21 @@ mod tests {
         .expect("client builds");
         let error = host.ensure_running().expect_err("must not start");
         assert!(error.to_string().contains("whisper-server.exe not found"));
+    }
+
+    #[test]
+    fn timeout_budget_scales_for_large_and_advanced_models() {
+        assert_eq!(
+            timeout_budget_for_model_bytes(150 * 1024 * 1024),
+            (Duration::from_secs(120), Duration::from_secs(300))
+        );
+        assert_eq!(
+            timeout_budget_for_model_bytes(500 * 1024 * 1024),
+            (Duration::from_secs(240), Duration::from_secs(600))
+        );
+        assert_eq!(
+            timeout_budget_for_model_bytes(2 * 1024 * 1024 * 1024),
+            (Duration::from_secs(600), Duration::from_secs(1_800))
+        );
     }
 }

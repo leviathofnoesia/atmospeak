@@ -6,7 +6,7 @@
 | **Author** | _TBD_ |
 | **Date** | 2026-07-24 |
 | **Status** | Implemented in tree (0.2.0) — mic 001–012 evidence still operator-pending |
-| **Repo** | `C:\Users\billy\Documents\atmospeak` (`leviathofnoesia/atmospeak`) |
+| **Repo** | `<repository-root>` (`leviathofnoesia/atmospeak`) |
 | **App version** | 0.2.0 (`package.json`, `src-tauri/tauri.conf.json`, `Cargo.toml`) |
 | **Stack** | Tauri 2 + React 19 + Rust + SQLite (rusqlite bundled) + bundled whisper.cpp CLI |
 
