@@ -9,15 +9,15 @@ use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
-    cancel_model_download, cancel_recording, cancel_sound_check, complete_onboarding,
-    delete_dictionary_entry, delete_model, delete_session, delete_snippet, download_model,
-    finish_sound_check, get_app_snapshot, get_last_stage_metrics, get_model_inventory,
-    get_model_status, get_recording_level, get_runtime_events, get_shortcut_status,
-    handle_dictation_action, inject_text, list_microphones, mic_check_start, mic_check_stop,
-    open_windows_sound_settings, register_setup_shortcut, reset_overlay_position,
+    cancel_model_download, cancel_recording, cancel_shortcut_capture, cancel_sound_check,
+    complete_onboarding, delete_dictionary_entry, delete_model, delete_session, delete_snippet,
+    download_model, finish_sound_check, get_app_snapshot, get_last_stage_metrics,
+    get_model_inventory, get_model_status, get_recording_level, get_runtime_events,
+    get_shortcut_status, handle_dictation_action, inject_text, list_microphones, mic_check_start,
+    mic_check_stop, open_windows_sound_settings, register_setup_shortcut, reset_overlay_position,
     save_overlay_position, save_settings, set_shortcut_test_active, set_shortcuts_paused,
-    show_main_window, show_overlay_window, start_recording, start_sound_check, stop_recording,
-    upsert_dictionary_entry, upsert_snippet,
+    show_main_window, show_overlay_window, start_recording, start_shortcut_capture,
+    start_sound_check, stop_recording, upsert_dictionary_entry, upsert_snippet,
 };
 use services::{
     app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, window_manager,
@@ -63,12 +63,17 @@ pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
                 }
             };
 
+            // Publish the host before warming it. A sound check started during
+            // model load can then wait on this same host instead of incorrectly
+            // reporting that no resident backend exists (or spawning a second
+            // process).
+            app.state::<AppState>().set_asr_host(host.clone());
             match host.ensure_running() {
                 Ok(_) => {
-                    app.state::<AppState>().set_asr_host(host);
                     metrics::emit_runtime(&app, "asr-host-ready", "Resident speech model is warm.");
                 }
                 Err(error) => {
+                    app.state::<AppState>().shutdown_asr_host();
                     metrics::emit_runtime(
                         &app,
                         "asr-host-error",
@@ -196,6 +201,8 @@ pub fn run() {
             show_main_window,
             set_shortcut_test_active,
             register_setup_shortcut,
+            start_shortcut_capture,
+            cancel_shortcut_capture,
             save_overlay_position,
             get_runtime_events,
             get_last_stage_metrics,

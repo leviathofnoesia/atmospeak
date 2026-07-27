@@ -10,6 +10,9 @@
   conservative normalization, and actionable sound-check failures.
 - Restores the supplied six-step setup, editorial hub, native dock dragging,
   position persistence, model management, and motionless idle dock.
+- Repairs setup shortcut validation so its temporary Windows hook is genuinely
+  unpaused, keyed chords preserve modifier state, and completion waits for a
+  full press-and-release gesture.
 - Replaces title-only installer smoke testing with WebView2 DOM assertions and
   adds canonical Home/History screenshot regression coverage.
 
@@ -48,7 +51,7 @@ production tests 001 and 005, and the seven-day daily-driver gate are complete.
   CLI retry of audio the host already handled correctly.
 - Normal launches now stay in the tray after onboarding. Tray hide/show preserves the
   saved dock position; resetting it is a separate explicit action.
-- Updater and release URLs consistently target `leviathofnoesia/wind-speak`.
+- Updater and release URLs consistently target `leviathofnoesia/atmospeak`.
 
 ### Companion dock (design handoff)
 - Imported the Claude Design project and closed the integration gaps. The dock port

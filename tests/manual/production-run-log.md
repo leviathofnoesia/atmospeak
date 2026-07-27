@@ -9,9 +9,9 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
   - Website download CTAs replaced by the temporary repair notice.
   - Direct v0.3.0 artifact and `latest.json` URLs return 404.
 - Automated recovery evidence:
-  - `cargo test --manifest-path src-tauri/Cargo.toml`: **41 passed**
-  - `bun run test`: **16 passed**
-  - `bun run e2e`: **9 passed**, including canonical 1000x660 Home/History
+  - `cargo test --manifest-path src-tauri/Cargo.toml`: **46 passed**
+  - `bun run test`: **19 passed**
+  - `bun run e2e`: **10 passed**, including canonical 1000x660 Home/History
     screenshots with a maximum two-pixel difference, 125%/150% scaling, 360px
     overflow, setup-without-skip, nested diagnostics, editable hub records, and
     a motionless idle overlay.
@@ -28,6 +28,28 @@ This file tracks evidence for the 100-test production matrix in `tests/manual/pr
     in the observed sample; hidden debug overlay: **0% over 10s**.
   - Native move/restart check: `(140,160)` persisted exactly; deliberate reset
     removed the saved-position file without the move event recreating it.
+  - The first shortcut repair was rejected after a physical `Ctrl+Win` attempt
+    remained stuck in “Listening for keys.” Its `Ctrl+Alt+D` probe did not prove
+    the selected default and is not treated as acceptance evidence.
+  - Replacement native shortcut harness: the rendered setup page recorded
+    `Ctrl+Alt+K`, lit `Ctrl`, `Alt`, and `K` independently while held, required
+    the same chord again, and unlocked Continue only after native
+    `pressed`/`released` events. The same fresh native process also registered
+    and exercised exact `Ctrl+Shift+F12` and modifier-only `Ctrl+Win` chords.
+  - Follow-up responsiveness repair moved chord assembly out of React and into
+    the native hook, with UI events dispatched off the low-level hook thread.
+    A fresh native run painted `Ctrl`, then `Ctrl+Alt`, then `Ctrl+Alt+K` after
+    each individual key-down; peak measured native-event delivery was **3 ms**,
+    the WebView console was clean, and release completed `Ctrl+Alt+K` once.
+  - Focus-specific retest exposed that the global hook path behaved differently
+    while the onboarding WebView owned focus. Recording now uses focused
+    `keydown`/`keyup` events with synchronous visual updates; only “Test
+    selected” uses the native global hook. A native focused-WebView run painted
+    `Ctrl`, `Ctrl+Alt`, and `Ctrl+Alt+K` at **46 / 18 / 16 ms**, completed the
+    chord on release, then passed the separate global test with a clean console.
+  - The runtime no longer substitutes a preset when the requested shortcut is
+    invalid or unavailable; the selected normalized chord is the registered
+    chord or setup reports a failure.
 - Real hardware discovery:
   - `Microphone (Elgato Wave:3)` was enumerated by the native app.
   - Ambient input measured about -47.8 dBFS RMS and correctly failed the speech

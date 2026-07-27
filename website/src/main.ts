@@ -1,6 +1,16 @@
 import "./styles.css";
 import { APP_VERSION } from "./version";
 
+const releaseBaseUrl =
+  "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
+const releaseArtifacts = {
+  setup: `atmospeak_${APP_VERSION}_x64-setup.exe`,
+  msi: `atmospeak_${APP_VERSION}_x64_en-US.msi`,
+  portable: `atmospeak_${APP_VERSION}_x64-portable.zip`,
+  checksums: "SHA256SUMS.txt",
+  updater: "latest.json",
+} as const;
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("Missing app root");
@@ -54,12 +64,12 @@ function hero() {
 
   const actions = document.createElement("div");
   actions.className = "actions";
-  const paused = document.createElement("a");
-  paused.className = "button button-primary";
-  paused.href = "#recovery-notice";
-  paused.textContent = "Downloads paused";
+  const download = document.createElement("a");
+  download.className = "button button-primary";
+  download.href = releaseUrl(releaseArtifacts.setup);
+  download.textContent = `Download v${APP_VERSION}`;
   actions.append(
-    paused,
+    download,
     siteButton("Read install docs", "#docs"),
   );
   content.append(actions);
@@ -250,28 +260,78 @@ function downloadSection() {
 
   const header = document.createElement("div");
   header.className = "section-head";
-  header.append(kicker("+ RELEASE STATUS / RECOVERY"));
+  header.append(kicker("+ RELEASE / WINDOWS X64"));
   const heading = document.createElement("h2");
   heading.id = "downloads-title";
-  heading.textContent = "Downloads temporarily paused";
+  heading.textContent = `Atmospeak v${APP_VERSION}`;
   const copy = document.createElement("p");
   copy.textContent =
-    "Version 0.3.0 did not meet Atmospeak's first-run, microphone, performance, or interface standards. It has been withdrawn while 0.3.1 is validated.";
+    "Install the corrective Windows release, use the portable build, or verify every file against the published checksums.";
   header.append(heading, copy);
   section.append(header);
 
-  const notice = document.createElement("article");
-  notice.id = "recovery-notice";
-  notice.className = "release-notice";
-  notice.append(kicker("+ WHAT HAPPENS NEXT"));
-  const title = document.createElement("h3");
-  title.textContent = "0.3.1 is being tested before publication.";
-  const detail = document.createElement("p");
-  detail.textContent =
-    "Downloads will return only after first-run setup, real-device dictation, dock interaction, installation, and a daily-driver test pass. No broken artifact is being offered in the meantime.";
-  notice.append(title, detail);
-  section.append(notice);
+  const grid = document.createElement("div");
+  grid.className = "download-grid";
+  grid.append(
+    downloadCard(
+      "Setup EXE",
+      "Recommended",
+      "Standard Windows installer with the bundled offline English model.",
+      releaseArtifacts.setup,
+      true,
+    ),
+    downloadCard(
+      "MSI",
+      "Managed install",
+      "Windows Installer package for users who prefer MSI deployment.",
+      releaseArtifacts.msi,
+    ),
+    downloadCard(
+      "Portable ZIP",
+      "No installer",
+      "Extract and run Atmospeak without installing it system-wide.",
+      releaseArtifacts.portable,
+    ),
+    downloadCard(
+      "Checksums",
+      "Verify files",
+      "SHA-256 hashes for every published v0.3.1 release artifact.",
+      releaseArtifacts.checksums,
+    ),
+    downloadCard(
+      "Updater metadata",
+      "latest.json",
+      "Signed metadata used by Atmospeak's built-in update checker.",
+      releaseArtifacts.updater,
+    ),
+  );
+  section.append(grid);
   return section;
+}
+
+function downloadCard(
+  titleText: string,
+  labelText: string,
+  description: string,
+  artifact: string,
+  primary = false,
+) {
+  const card = document.createElement("article");
+  card.className = primary ? "download-card is-primary" : "download-card";
+  card.append(kicker(`+ ${labelText}`));
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  const copy = document.createElement("p");
+  copy.textContent = description;
+  const link = document.createElement("a");
+  link.href = releaseUrl(artifact);
+  link.textContent = `Download ${artifact}`;
+  card.append(title, copy, link);
+  return card;
+}
+
+function releaseUrl(artifact: string) {
+  return `${releaseBaseUrl}/${artifact}`;
 }
 
 function docsSection() {

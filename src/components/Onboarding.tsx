@@ -29,6 +29,12 @@ interface PasteTestState {
   passed: boolean;
   message: string;
 }
+interface ShortcutCaptureState {
+  arming: boolean;
+  active: boolean;
+  keys: string[];
+  message: string;
+}
 interface SoundCheckState {
   active: boolean;
   result: SoundCheckResult | null;
@@ -44,6 +50,7 @@ interface OnboardingProps {
   modelDownload: ModelDownloadProgress | null;
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
+  shortcutCapture: ShortcutCaptureState;
   micCheck: MicCheckState;
   soundCheck: SoundCheckState;
   onStartMicCheck: () => Promise<void>;
@@ -52,6 +59,9 @@ interface OnboardingProps {
   onFinishSoundCheck: () => Promise<void>;
   onOpenWindowsSoundSettings: () => Promise<void>;
   onTestShortcut: () => void;
+  onRecordShortcut: () => void;
+  onCancelShortcutTest: () => void;
+  onShortcutChange: (hotkey: string) => void;
   pasteTest: PasteTestState;
   onPasteTest: () => Promise<void>;
   onSelectModel: (modelId: string) => void;
@@ -128,6 +138,7 @@ export function Onboarding(props: OnboardingProps) {
     modelDownload,
     shortcutStatus,
     shortcutTest,
+    shortcutCapture,
     micCheck,
     soundCheck,
     onStartMicCheck,
@@ -136,6 +147,9 @@ export function Onboarding(props: OnboardingProps) {
     onFinishSoundCheck,
     onOpenWindowsSoundSettings,
     onTestShortcut,
+    onRecordShortcut,
+    onCancelShortcutTest,
+    onShortcutChange,
     pasteTest,
     onPasteTest,
     onSelectModel,
@@ -166,7 +180,11 @@ export function Onboarding(props: OnboardingProps) {
     return true;
   })();
   const progressPct = (step / (STEPS.length - 1)) * 100;
-  const hotkeyChips = settings.hotkey.split("+").map((part) => part.trim());
+  const selectedHotkeyChips = settings.hotkey.split("+").map((part) => part.trim());
+  const hotkeyChips =
+    shortcutCapture.active && shortcutCapture.keys.length
+      ? shortcutCapture.keys
+      : selectedHotkeyChips;
   const completeSetup = async () => {
     setCompleting(true);
     setCompletionError("");
@@ -379,21 +397,60 @@ export function Onboarding(props: OnboardingProps) {
                 <div>
                   <div className="ob-kick">Step 03 · Your key</div>
                   <h1 className="ob-h">Choose your <em>key.</em></h1>
-                  <p className="ob-lede">One key summons the companion from anywhere. Pick a familiar one, then test it.</p>
+                  <p className="ob-lede">Record any modifier chord you prefer, then prove that the same chord works system-wide.</p>
                 </div>
                 <div className="ob-keyfield">
-                  <span className="ob-keys">
-                    {hotkeyChips.map((k, i) => <kbd key={i}>{k}</kbd>)}
+                  <span className="ob-keys" aria-live="polite" aria-label="Shortcut keys">
+                    {hotkeyChips.map((key, index) => (
+                      <kbd
+                        key={`${key}-${index}`}
+                        className={shortcutCapture.keys.includes(key) ? "is-down" : ""}
+                      >
+                        {key}
+                      </kbd>
+                    ))}
                   </span>
-                  <button className="ob-preset" onClick={onTestShortcut}>Test shortcut</button>
+                  <span className="ob-keyactions">
+                    <button
+                      className={`ob-preset${shortcutCapture.active ? " is-recording" : ""}`}
+                      type="button"
+                      disabled={shortcutTest.active || shortcutCapture.active || shortcutCapture.arming}
+                      onClick={onRecordShortcut}
+                    >
+                      {shortcutCapture.arming
+                        ? "Arming..."
+                        : shortcutCapture.active
+                          ? "Recording keys..."
+                          : "Record shortcut"}
+                    </button>
+                    <button
+                      className="ob-preset"
+                      type="button"
+                      disabled={shortcutTest.active || shortcutCapture.active || shortcutCapture.arming}
+                      onClick={onTestShortcut}
+                    >
+                      {shortcutTest.active
+                        ? "Testing..."
+                        : shortcutTest.detected
+                          ? "Test again"
+                          : "Test selected"}
+                    </button>
+                  </span>
                 </div>
-                <p className="ob-keyhint">{shortcutTest.message || shortcutStatus?.message || "Press your shortcut to confirm the desktop runtime hears it."}</p>
+                <p className="ob-keyhint">
+                  {shortcutCapture.message ||
+                    shortcutTest.message ||
+                    shortcutStatus?.message ||
+                    "Record a chord, then test the selected shortcut."}
+                </p>
+                <div className="ob-kick">Quick picks</div>
                 <div className="ob-presets">
                   {shortcutOptions.map((opt) => (
                     <button
                       key={opt}
                       className={`ob-preset${settings.hotkey === opt ? " sel" : ""}`}
-                      onClick={() => setSettings({ ...settings, hotkey: opt })}
+                      type="button"
+                      onClick={() => onShortcutChange(opt)}
                     >
                       {opt}
                     </button>
@@ -461,7 +518,7 @@ export function Onboarding(props: OnboardingProps) {
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{soundCheck.result?.deviceName ?? "not checked"}</b></div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Resident ASR <b>{soundCheck.result?.asrBackend ?? "not checked"}</b> · SNR {soundCheck.result?.snrDb.toFixed(1) ?? "—"} dB</div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> <b>{activeModel?.label ?? "Balanced"}</b> model · runs offline</div>
-                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{hotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "hold to talk" : "tap to toggle"}</div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{selectedHotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "hold to talk" : "tap to toggle"}</div>
                 </div>
                 <div className="ob-ready-actions">
                   <button className="ob-preset" onClick={() => void onPasteTest()} disabled={pasteTest.running}>
@@ -477,14 +534,28 @@ export function Onboarding(props: OnboardingProps) {
           </div>
 
           <div className="ob-nav">
-            {step > 0 && <button className="pill-btn ghost" onClick={() => setStep(step - 1)}>Back</button>}
+            {step > 0 && (
+              <button
+                className="pill-btn ghost"
+                type="button"
+                onClick={() => {
+                  if (step === 3) onCancelShortcutTest();
+                  setStep(step - 1);
+                }}
+              >
+                Back
+              </button>
+            )}
             <div className="ob-progress"><i style={{ width: `${progressPct}%` }} /></div>
             {step < STEPS.length - 1 ? (
               <>
                 <button
                   className={`pill-btn${canContinue ? "" : " ghost"}`}
                   disabled={!canContinue}
-                  onClick={() => setStep(step + 1)}
+                  onClick={() => {
+                    if (step === 3) onCancelShortcutTest();
+                    setStep(step + 1);
+                  }}
                   style={canContinue ? {} : { opacity: 0.4, cursor: "not-allowed" }}
                 >
                   {step === 0 ? "◇ Begin" : "Continue"} {canContinue && step > 0 ? <Glyph d={ICONS.arrow} size={15} /> : null}

@@ -9,7 +9,7 @@ use crate::{
     },
     services::{
         app_state::AppState,
-        dictation_engine::{self, DispatchResult, EngineAction},
+        dictation_engine::{self, EngineAction},
         injection, model_downloader, overlay_window, proc, runtime, shortcuts, sound_check,
         startup, window_manager,
     },
@@ -53,11 +53,14 @@ pub fn list_microphones(state: State<'_, AppState>) -> CommandResult<Vec<Microph
 }
 
 #[tauri::command]
-pub fn save_settings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    settings: AppSettings,
-) -> CommandResult<AppSnapshot> {
+pub async fn save_settings(app: AppHandle, settings: AppSettings) -> CommandResult<AppSnapshot> {
+    tauri::async_runtime::spawn_blocking(move || save_settings_blocking(app, settings))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResult<AppSnapshot> {
+    let state = app.state::<AppState>();
     let previous_settings = state
         .database
         .lock()
@@ -95,7 +98,15 @@ pub fn save_settings(
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
         || previous_settings.advanced_whisper_cli_path != settings.advanced_whisper_cli_path;
-    startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
+    let setup_complete = settings.onboarding_complete
+        && settings.onboarding_version == crate::ONBOARDING_VERSION
+        && settings
+            .audio_calibration
+            .as_ref()
+            .is_some_and(|calibration| calibration.asr_backend == "host");
+    if setup_complete {
+        startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
+    }
     let database = state.database.lock();
     database
         .save_settings(&settings)
@@ -104,13 +115,15 @@ pub fn save_settings(
         .prune_sessions(settings.transcript_retention_days)
         .map_err(|e| e.to_string())?;
     let _ = runtime::model_status(&app, &settings);
-    shortcuts::register_shortcut(
-        &app,
-        state.shortcut_status.clone(),
-        state.shortcuts_paused.clone(),
-        &settings.hotkey,
-        *state.shortcuts_paused.lock(),
-    );
+    if setup_complete {
+        shortcuts::register_shortcut(
+            &app,
+            state.shortcut_status.clone(),
+            state.shortcuts_paused.clone(),
+            &settings.hotkey,
+            *state.shortcuts_paused.lock(),
+        );
+    }
     // The overlay lives in its own webview and reads settings once on mount, so
     // appearance and hotkey changes have to be pushed to it.
     let _ = app.emit("wind-speak://settings-changed", settings.clone());
@@ -140,16 +153,24 @@ pub fn set_shortcuts_paused(
 }
 
 #[tauri::command]
-pub fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
-    window_manager::show_overlay(&app, crate::ONBOARDING_VERSION).map_err(|e| e.to_string())
+pub async fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        window_manager::show_overlay(&app, crate::ONBOARDING_VERSION)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn show_main_window(app: AppHandle) -> CommandResult<()> {
-    let setup = !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION);
-    window_manager::ensure_main(&app, setup)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+pub async fn show_main_window(app: AppHandle) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let setup = !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION);
+        window_manager::ensure_main(&app, setup).map(|_| ())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -176,14 +197,47 @@ pub fn register_setup_shortcut(
     state: State<'_, AppState>,
     hotkey: String,
 ) -> ShortcutStatus {
+    state.set_shortcut_capture_active(false);
     state.set_shortcut_test_active(true);
-    shortcuts::register_shortcut(
+    // Setup must not install or replace the global keyboard hook. The hook is
+    // registered exactly once by `complete_onboarding`, after calibration has
+    // passed. During setup the focused WebView verifies the physical chord.
+    let status = shortcuts::validate_shortcut(&hotkey, true);
+    *state.shortcut_status.lock() = status.clone();
+    let _ = app.emit("wind-speak://shortcut-status", status.clone());
+    status
+}
+
+#[tauri::command]
+pub fn start_shortcut_capture(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    current_hotkey: String,
+) -> ShortcutStatus {
+    state.set_shortcut_test_active(false);
+    state.set_shortcut_capture_active(false);
+    let status = shortcuts::register_shortcut(
         &app,
         state.shortcut_status.clone(),
         state.shortcuts_paused.clone(),
-        &hotkey,
+        &current_hotkey,
         false,
-    )
+    );
+    state.set_shortcut_capture_active(status.registered);
+    status
+}
+
+#[tauri::command]
+pub fn cancel_shortcut_capture(app: AppHandle, state: State<'_, AppState>) {
+    state.set_shortcut_capture_active(false);
+    if !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION) {
+        shortcuts::set_paused(
+            &app,
+            state.shortcut_status.clone(),
+            state.shortcuts_paused.clone(),
+            true,
+        );
+    }
 }
 
 #[tauri::command]
@@ -229,10 +283,10 @@ pub fn handle_dictation_action(
         "cancel" => EngineAction::Cancel,
         other => return Err(format!("unknown dictation action: {other}")),
     };
-    match engine.dispatch_with_ack(engine_action)? {
-        DispatchResult::Accepted => Ok("accepted".to_string()),
-        DispatchResult::Ignored { reason } => Ok(format!("ignored:{reason}")),
-        DispatchResult::Rejected { reason } => Err(reason),
+    if engine.dispatch_fire_and_forget(engine_action) {
+        Ok("accepted".to_string())
+    } else {
+        Err("dictation engine is not running".to_string())
     }
 }
 
@@ -247,8 +301,11 @@ pub fn mic_check_stop(state: State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub fn start_sound_check(app: AppHandle, device_name: String) -> CommandResult<()> {
-    sound_check::start(&app, device_name).map_err(|error| error.to_string())
+pub async fn start_sound_check(app: AppHandle, device_name: String) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || sound_check::start(&app, device_name))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -280,7 +337,7 @@ pub fn open_windows_sound_settings() -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub fn complete_onboarding(
+pub async fn complete_onboarding(
     app: AppHandle,
     state: State<'_, AppState>,
     mut settings: AppSettings,
@@ -290,6 +347,7 @@ pub fn complete_onboarding(
         .lock()
         .load_settings()
         .map_err(|error| error.to_string())?;
+    let previous_start_at_login = persisted.start_at_login;
     let calibration = persisted
         .audio_calibration
         .filter(|calibration| calibration.asr_backend == "host")
@@ -311,32 +369,48 @@ pub fn complete_onboarding(
     settings.audio_calibration = Some(calibration);
     settings.onboarding_complete = true;
     settings.onboarding_version = crate::ONBOARDING_VERSION.to_string();
-    startup::set_start_at_login(settings.start_at_login).map_err(|error| error.to_string())?;
+    let shortcut_app = app.clone();
+    let shortcut_status = state.shortcut_status.clone();
+    let shortcuts_paused = state.shortcuts_paused.clone();
+    let hotkey = settings.hotkey.clone();
+    let start_at_login = settings.start_at_login;
+    let shortcut = tauri::async_runtime::spawn_blocking(move || {
+        let shortcut = shortcuts::register_shortcut(
+            &shortcut_app,
+            shortcut_status.clone(),
+            shortcuts_paused.clone(),
+            &hotkey,
+            false,
+        );
+        if !shortcut.registered {
+            return Ok::<_, String>(shortcut);
+        }
+        if let Err(error) = startup::set_start_at_login(start_at_login) {
+            let _ = startup::set_start_at_login(previous_start_at_login);
+            shortcuts::set_paused(&shortcut_app, shortcut_status, shortcuts_paused, true);
+            return Err(error.to_string());
+        }
+        Ok(shortcut)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    if !shortcut.registered {
+        return Err(shortcut.message);
+    }
     state
         .database
         .lock()
         .save_settings(&settings)
         .map_err(|error| error.to_string())?;
-    let shortcut = shortcuts::register_shortcut(
-        &app,
-        state.shortcut_status.clone(),
-        state.shortcuts_paused.clone(),
-        &settings.hotkey,
-        false,
-    );
-    if !shortcut.registered {
-        settings.onboarding_complete = false;
-        settings.onboarding_version.clear();
-        state
-            .database
-            .lock()
-            .save_settings(&settings)
-            .map_err(|error| error.to_string())?;
-        return Err(shortcut.message);
-    }
     let _ = app.emit("atmospeak://settings-changed", settings.clone());
     let _ = app.emit("wind-speak://settings-changed", settings);
-    window_manager::finish_setup(&app).map_err(|error| error.to_string())?;
+
+    let window_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || window_manager::finish_setup(&window_app))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+
     state
         .database
         .lock()

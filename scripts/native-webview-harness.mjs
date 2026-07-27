@@ -30,14 +30,18 @@ if (pages.length !== 1) {
 }
 
 const page = pages[0];
+if (page.url() === "about:blank") {
+  await page.waitForURL((url) => url.toString() !== "about:blank", { timeout: 10_000 });
+}
 await page.waitForLoadState("domcontentloaded");
 const url = page.url();
-const bodyText = await page.locator("body").innerText();
 
 if (expected === "setup") {
   if (!url.includes("view=setup")) {
     throw new Error(`Expected setup route, received ${url}`);
   }
+  await page.getByText("Welcome", { exact: true }).first().waitFor({ timeout: 10_000 });
+  const bodyText = await page.locator("body").innerText();
   if (!bodyText.includes("Welcome") || !bodyText.includes("Speak. It listens.")) {
     throw new Error("Native setup DOM is missing the supplied Welcome content.");
   }
@@ -68,7 +72,10 @@ console.log(
     expected,
     url,
     pageCount: pages.length,
-    welcomeVisible: bodyText.includes("Welcome"),
+    welcomeVisible:
+      expected === "setup"
+        ? await page.getByText("Welcome", { exact: true }).first().isVisible()
+        : false,
     overlayAbsent: browser.contexts().flatMap((context) => context.pages()).length === 1,
   }),
 );

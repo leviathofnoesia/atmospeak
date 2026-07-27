@@ -12,7 +12,7 @@ Atmospeak ships Windows-first release artifacts:
 ## Local Release Build
 
 ```powershell
-$env:ATMOSPEAK_RELEASE_REPO = "leviathofnoesia/wind-speak"
+$env:ATMOSPEAK_RELEASE_REPO = "leviathofnoesia/atmospeak"
 $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$env:USERPROFILE\.tauri\atmospeak\updater.key"
 bun run release:build
 ```
@@ -26,12 +26,35 @@ download and the updater artifact both use the NSIS `.exe`.
 
 ## GitHub Release
 
-Upload every file from `release/` to the `leviathofnoesia/wind-speak` release
+Upload every file from `release/` to the `leviathofnoesia/atmospeak` release
 tag matching the application version. The updater endpoint is:
+
+```text
+https://github.com/leviathofnoesia/atmospeak/releases/latest/download/latest.json
+```
+
+### Repository-rename updater bridge
+
+Atmospeak builds released before the repository rename poll the legacy feed:
 
 ```text
 https://github.com/leviathofnoesia/wind-speak/releases/latest/download/latest.json
 ```
+
+Version 0.3.1 is the signed bridge release. Before publishing it:
+
+1. Publish the signed installer, installer signature, checksums, and
+   `latest.json` in the renamed `leviathofnoesia/atmospeak` repository.
+2. Confirm both the legacy URL above and the new Atmospeak URL return the same
+   `latest.json` through GitHub's repository-rename redirect.
+3. Confirm both feeds resolve the installer named by `latest.json` and that its
+   signature matches the embedded Tauri updater public key.
+4. Install an older build that uses the legacy endpoint and verify it discovers
+   and installs 0.3.1.
+
+The 0.3.1 binary uses the new Atmospeak endpoint. Do not retire or break
+GitHub's legacy repository redirect until all supported pre-0.3.1 installations
+have been upgraded or otherwise sunset.
 
 ## Unsigned Windows Prototype
 

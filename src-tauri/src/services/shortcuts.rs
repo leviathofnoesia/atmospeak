@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
-use std::{collections::HashSet, sync::Arc};
+use serde::Serialize;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 #[cfg(not(target_os = "windows"))]
@@ -19,13 +20,28 @@ struct ParsedShortcut {
     win: bool,
     alt: bool,
     shift: bool,
-    key: Option<ShortcutKey>,
+    key: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ShortcutKey {
-    Space,
-    D,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutKeyEvent {
+    pub code: u32,
+    pub key: String,
+    pub pressed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutCaptureEvent {
+    pub keys: Vec<String>,
+    pub completed: Option<String>,
+    pub error: Option<String>,
+    pub timestamp_ms: u128,
+}
+
+fn sync_runtime_pause_state(shortcuts_paused: &Arc<Mutex<bool>>, paused: bool) {
+    *shortcuts_paused.lock() = paused;
 }
 
 pub fn register_shortcut(
@@ -35,6 +51,12 @@ pub fn register_shortcut(
     requested_hotkey: &str,
     paused: bool,
 ) -> ShortcutStatus {
+    // Registration and the hook must agree about whether input is live. Setup
+    // starts globally paused, then temporarily arms the chosen chord for its
+    // mandatory test. Updating only ShortcutStatus leaves the Windows hook
+    // silently discarding every key event.
+    sync_runtime_pause_state(&shortcuts_paused, paused);
+
     #[cfg(target_os = "windows")]
     {
         windows_keyboard_hook::register_shortcut(
@@ -102,6 +124,36 @@ pub fn register_shortcut(
     }
 }
 
+pub fn validate_shortcut(requested_hotkey: &str, paused: bool) -> ShortcutStatus {
+    let Some(candidate) = shortcut_candidates(requested_hotkey).into_iter().next() else {
+        return ShortcutStatus {
+            registered: false,
+            hotkey: String::new(),
+            paused,
+            message:
+                "That shortcut is not valid. Record a modifier plus a key, or a chord with at least two modifiers."
+                    .to_string(),
+        };
+    };
+    match parse_shortcut(&candidate.label) {
+        Ok(_) => ShortcutStatus {
+            registered: true,
+            hotkey: candidate.label.clone(),
+            paused,
+            message: format!(
+                "{} is valid. Press the same chord once to confirm it.",
+                candidate.label
+            ),
+        },
+        Err(error) => ShortcutStatus {
+            registered: false,
+            hotkey: String::new(),
+            paused,
+            message: format!("That shortcut is not valid: {error}"),
+        },
+    }
+}
+
 pub fn set_paused(
     app: &AppHandle,
     shortcut_status: Arc<Mutex<ShortcutStatus>>,
@@ -126,26 +178,11 @@ pub fn set_paused(
 }
 
 fn shortcut_candidates(requested_hotkey: &str) -> Vec<ShortcutCandidate> {
-    let mut labels = vec![requested_hotkey.trim().to_string()];
-    labels.extend([
-        "Ctrl+Win".to_string(),
-        "Ctrl+Win+Space".to_string(),
-        "Ctrl+Alt+Space".to_string(),
-        "Ctrl+Shift+Space".to_string(),
-        "Ctrl+Alt+D".to_string(),
-    ]);
-
-    let mut seen = HashSet::new();
-    labels
-        .into_iter()
-        .filter_map(|label| {
-            let normalized = normalize_label(&label).ok()?;
-            if !seen.insert(normalized.clone()) || parse_shortcut(&normalized).is_err() {
-                return None;
-            }
-            Some(ShortcutCandidate { label: normalized })
-        })
-        .collect()
+    normalize_label(requested_hotkey)
+        .ok()
+        .filter(|label| parse_shortcut(label).is_ok())
+        .map(|label| vec![ShortcutCandidate { label }])
+        .unwrap_or_default()
 }
 
 fn normalize_label(label: &str) -> Result<String> {
@@ -171,24 +208,28 @@ fn normalize_label(label: &str) -> Result<String> {
             "alt" | "option" => has_alt = true,
             "shift" => has_shift = true,
             "win" | "windows" | "super" | "cmd" | "meta" => has_win = true,
-            "space" => key = Some("Space"),
-            "d" => key = Some("D"),
-            _ => return Err(anyhow!("unsupported shortcut part: {part}")),
+            _ => {
+                let canonical = canonical_key_name(&part)
+                    .ok_or_else(|| anyhow!("unsupported shortcut key: {part}"))?;
+                if key.replace(canonical).is_some() {
+                    return Err(anyhow!("shortcut can contain only one non-modifier key"));
+                }
+            }
         }
     }
 
-    let mut modifiers = Vec::new();
+    let mut modifiers: Vec<String> = Vec::new();
     if has_ctrl {
-        modifiers.push("Ctrl");
+        modifiers.push("Ctrl".into());
     }
     if has_win {
-        modifiers.push("Win");
+        modifiers.push("Win".into());
     }
     if has_alt {
-        modifiers.push("Alt");
+        modifiers.push("Alt".into());
     }
     if has_shift {
-        modifiers.push("Shift");
+        modifiers.push("Shift".into());
     }
     if modifiers.is_empty() {
         return Err(anyhow!("shortcut must include a modifier"));
@@ -218,13 +259,13 @@ fn parse_shortcut(label: &str) -> Result<ParsedShortcut> {
             "Ctrl" => parsed.ctrl = true,
             "Shift" => parsed.shift = true,
             "Win" => parsed.win = true,
-            "Space" => {
-                parsed.key = Some(ShortcutKey::Space);
+            _ => {
+                let key = key_name_to_vk(part)
+                    .ok_or_else(|| anyhow!("unsupported shortcut key: {part}"))?;
+                if parsed.key.replace(key).is_some() {
+                    return Err(anyhow!("shortcut can contain only one non-modifier key"));
+                }
             }
-            "D" => {
-                parsed.key = Some(ShortcutKey::D);
-            }
-            _ => return Err(anyhow!("unsupported shortcut part: {part}")),
         }
     }
 
@@ -266,31 +307,186 @@ fn to_tauri_shortcut(parsed: ParsedShortcut) -> Result<Shortcut> {
         ));
     };
     let code = match key {
-        ShortcutKey::Space => Code::Space,
-        ShortcutKey::D => Code::KeyD,
+        0x20 => Code::Space,
+        0x41 => Code::KeyA,
+        0x42 => Code::KeyB,
+        0x43 => Code::KeyC,
+        0x44 => Code::KeyD,
+        0x45 => Code::KeyE,
+        0x46 => Code::KeyF,
+        0x47 => Code::KeyG,
+        0x48 => Code::KeyH,
+        0x49 => Code::KeyI,
+        0x4A => Code::KeyJ,
+        0x4B => Code::KeyK,
+        0x4C => Code::KeyL,
+        0x4D => Code::KeyM,
+        0x4E => Code::KeyN,
+        0x4F => Code::KeyO,
+        0x50 => Code::KeyP,
+        0x51 => Code::KeyQ,
+        0x52 => Code::KeyR,
+        0x53 => Code::KeyS,
+        0x54 => Code::KeyT,
+        0x55 => Code::KeyU,
+        0x56 => Code::KeyV,
+        0x57 => Code::KeyW,
+        0x58 => Code::KeyX,
+        0x59 => Code::KeyY,
+        0x5A => Code::KeyZ,
+        _ => {
+            return Err(anyhow!(
+                "this shortcut key is not supported on this platform"
+            ));
+        }
     };
     Ok(Shortcut::new(Some(modifiers), code))
 }
 
+fn canonical_key_name(part: &str) -> Option<String> {
+    let lower = part.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "space" => Some("Space".into()),
+        "enter" | "return" => Some("Enter".into()),
+        "tab" => Some("Tab".into()),
+        "escape" | "esc" => Some("Escape".into()),
+        "backspace" => Some("Backspace".into()),
+        "delete" | "del" => Some("Delete".into()),
+        "insert" | "ins" => Some("Insert".into()),
+        "home" => Some("Home".into()),
+        "end" => Some("End".into()),
+        "pageup" | "page up" | "pgup" => Some("PageUp".into()),
+        "pagedown" | "page down" | "pgdn" => Some("PageDown".into()),
+        "left" | "arrowleft" => Some("Left".into()),
+        "right" | "arrowright" => Some("Right".into()),
+        "up" | "arrowup" => Some("Up".into()),
+        "down" | "arrowdown" => Some("Down".into()),
+        "capslock" | "caps lock" => Some("CapsLock".into()),
+        "printscreen" | "print screen" => Some("PrintScreen".into()),
+        "scrolllock" | "scroll lock" => Some("ScrollLock".into()),
+        "pause" => Some("Pause".into()),
+        "semicolon" | ";" => Some("Semicolon".into()),
+        "equals" | "equal" | "=" => Some("Equals".into()),
+        "comma" | "," => Some("Comma".into()),
+        "minus" | "-" => Some("Minus".into()),
+        "period" | "." => Some("Period".into()),
+        "slash" | "/" => Some("Slash".into()),
+        "backquote" | "grave" | "`" => Some("Backquote".into()),
+        "bracketleft" | "[" => Some("BracketLeft".into()),
+        "backslash" | "\\" => Some("Backslash".into()),
+        "bracketright" | "]" => Some("BracketRight".into()),
+        "quote" | "'" => Some("Quote".into()),
+        "numpadadd" => Some("NumpadAdd".into()),
+        "numpadsubtract" => Some("NumpadSubtract".into()),
+        "numpadmultiply" => Some("NumpadMultiply".into()),
+        "numpaddivide" => Some("NumpadDivide".into()),
+        "numpaddecimal" => Some("NumpadDecimal".into()),
+        _ => {
+            if lower.len() == 1 {
+                let byte = lower.as_bytes()[0];
+                if byte.is_ascii_alphabetic() {
+                    return Some(lower.to_ascii_uppercase());
+                }
+                if byte.is_ascii_digit() {
+                    return Some(lower);
+                }
+            }
+            if let Some(number) = lower
+                .strip_prefix('f')
+                .and_then(|value| value.parse::<u8>().ok())
+            {
+                if (1..=24).contains(&number) {
+                    return Some(format!("F{number}"));
+                }
+            }
+            if let Some(number) = lower
+                .strip_prefix("numpad")
+                .and_then(|value| value.parse::<u8>().ok())
+            {
+                if number <= 9 {
+                    return Some(format!("Numpad{number}"));
+                }
+            }
+            None
+        }
+    }
+}
+
+fn key_name_to_vk(part: &str) -> Option<u32> {
+    let canonical = canonical_key_name(part)?;
+    match canonical.as_str() {
+        "Space" => Some(0x20),
+        "Enter" => Some(0x0D),
+        "Tab" => Some(0x09),
+        "Escape" => Some(0x1B),
+        "Backspace" => Some(0x08),
+        "Delete" => Some(0x2E),
+        "Insert" => Some(0x2D),
+        "Home" => Some(0x24),
+        "End" => Some(0x23),
+        "PageUp" => Some(0x21),
+        "PageDown" => Some(0x22),
+        "Left" => Some(0x25),
+        "Up" => Some(0x26),
+        "Right" => Some(0x27),
+        "Down" => Some(0x28),
+        "CapsLock" => Some(0x14),
+        "PrintScreen" => Some(0x2C),
+        "ScrollLock" => Some(0x91),
+        "Pause" => Some(0x13),
+        "Semicolon" => Some(0xBA),
+        "Equals" => Some(0xBB),
+        "Comma" => Some(0xBC),
+        "Minus" => Some(0xBD),
+        "Period" => Some(0xBE),
+        "Slash" => Some(0xBF),
+        "Backquote" => Some(0xC0),
+        "BracketLeft" => Some(0xDB),
+        "Backslash" => Some(0xDC),
+        "BracketRight" => Some(0xDD),
+        "Quote" => Some(0xDE),
+        "NumpadMultiply" => Some(0x6A),
+        "NumpadAdd" => Some(0x6B),
+        "NumpadSubtract" => Some(0x6D),
+        "NumpadDecimal" => Some(0x6E),
+        "NumpadDivide" => Some(0x6F),
+        _ if canonical.len() == 1 => Some(canonical.as_bytes()[0] as u32),
+        _ if canonical.starts_with('F') => canonical[1..]
+            .parse::<u32>()
+            .ok()
+            .filter(|number| (1..=24).contains(number))
+            .map(|number| 0x6F + number),
+        _ if canonical.starts_with("Numpad") => canonical[6..]
+            .parse::<u32>()
+            .ok()
+            .filter(|number| *number <= 9)
+            .map(|number| 0x60 + number),
+        _ => None,
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod windows_keyboard_hook {
-    use super::{ParsedShortcut, ShortcutKey, parse_shortcut, shortcut_candidates};
+    use super::{
+        ParsedShortcut, ShortcutCaptureEvent, ShortcutKeyEvent, normalize_label, parse_shortcut,
+        shortcut_candidates,
+    };
     use crate::models::ShortcutStatus;
     use parking_lot::Mutex as ParkingMutex;
     use std::{
+        collections::{HashMap, HashSet},
         sync::{Arc, LazyLock, Mutex as StdMutex, mpsc},
         thread,
-        time::Duration,
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
     use tauri::{AppHandle, Emitter, Manager};
     use windows::Win32::{
-        Foundation::{LPARAM, LRESULT, WPARAM},
-        System::Threading::GetCurrentThreadId,
+        Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
+        System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
         UI::{
             Input::KeyboardAndMouse::{
-                GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_ESCAPE, VK_LCONTROL, VK_LMENU,
+                GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LMENU,
                 VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
-                VK_SPACE,
             },
             WindowsAndMessaging::{
                 CallNextHookEx, GetMessageW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
@@ -311,6 +507,8 @@ mod windows_keyboard_hook {
         shortcuts_paused: Option<Arc<ParkingMutex<bool>>>,
         hotkey: ParsedShortcut,
         runtime: ShortcutRuntimeState,
+        capture: ShortcutCaptureRuntime,
+        ui_tx: Option<mpsc::Sender<HookUiEvent>>,
     }
 
     impl Default for HookContext {
@@ -326,6 +524,8 @@ mod windows_keyboard_hook {
                     key: None,
                 },
                 runtime: ShortcutRuntimeState::default(),
+                capture: ShortcutCaptureRuntime::default(),
+                ui_tx: None,
             }
         }
     }
@@ -334,6 +534,19 @@ mod windows_keyboard_hook {
     struct ShortcutRuntimeState {
         active: bool,
         capturing: bool,
+    }
+
+    #[derive(Clone, Default)]
+    struct ShortcutCaptureRuntime {
+        pressed: HashMap<u32, String>,
+        chord: HashSet<String>,
+    }
+
+    #[derive(Clone, Debug)]
+    enum HookUiEvent {
+        Key(ShortcutKeyEvent),
+        Capture(ShortcutCaptureEvent),
+        Signal(&'static str),
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -368,7 +581,7 @@ mod windows_keyboard_hook {
                 registered: false,
                 hotkey: String::new(),
                 paused,
-                message: "Global shortcut unavailable. Choose Ctrl+Win, Ctrl+Win+Space, Ctrl+Alt+Space, Ctrl+Shift+Space, or Ctrl+Alt+D.".to_string(),
+                message: "That shortcut is not valid. Record a modifier plus a key, or a chord with at least two modifiers.".to_string(),
             };
             *shortcut_status.lock() = status.clone();
             let _ = app.emit("wind-speak://shortcut-status", status.clone());
@@ -426,6 +639,26 @@ mod windows_keyboard_hook {
         shortcuts_paused: Arc<ParkingMutex<bool>>,
         hotkey: ParsedShortcut,
     ) -> Result<(), String> {
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let ui_app = app.clone();
+        thread::Builder::new()
+            .name("atmospeak-shortcut-ui-events".to_string())
+            .spawn(move || {
+                while let Ok(event) = ui_rx.recv() {
+                    match event {
+                        HookUiEvent::Key(payload) => {
+                            let _ = ui_app.emit("atmospeak://shortcut-key", payload);
+                        }
+                        HookUiEvent::Capture(payload) => {
+                            let _ = ui_app.emit("atmospeak://shortcut-capture", payload);
+                        }
+                        HookUiEvent::Signal(payload) => {
+                            let _ = ui_app.emit("wind-speak://shortcut", payload);
+                        }
+                    }
+                }
+            })
+            .map_err(|error| error.to_string())?;
         {
             let mut context = HOOK_CONTEXT
                 .lock()
@@ -435,6 +668,8 @@ mod windows_keyboard_hook {
                 shortcuts_paused: Some(shortcuts_paused),
                 hotkey,
                 runtime: ShortcutRuntimeState::default(),
+                capture: ShortcutCaptureRuntime::default(),
+                ui_tx: Some(ui_tx),
             };
         }
 
@@ -469,7 +704,15 @@ mod windows_keyboard_hook {
     fn run_hook_thread(ready_tx: mpsc::Sender<Result<u32, String>>) {
         unsafe {
             let thread_id = GetCurrentThreadId();
-            let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) {
+            let module = match GetModuleHandleW(None) {
+                Ok(module) => HINSTANCE(module.0),
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
+            let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), Some(module), 0)
+            {
                 Ok(hook) => hook,
                 Err(error) => {
                     let _ = ready_tx.send(Err(error.to_string()));
@@ -514,6 +757,37 @@ mod windows_keyboard_hook {
         let Some(app) = context.app.clone() else {
             return false;
         };
+        let capture_active = app
+            .try_state::<crate::services::app_state::AppState>()
+            .is_some_and(|state| state.shortcut_capture_active());
+        let test_active = app
+            .try_state::<crate::services::app_state::AppState>()
+            .is_some_and(|state| state.shortcut_test_active());
+        if capture_active {
+            let event = match label_for_vk(event_vk) {
+                Some(key) => context.capture.handle_event(event_vk, key, key_down),
+                None => ShortcutCaptureEvent {
+                    keys: context.capture.pressed_keys(),
+                    completed: None,
+                    error: Some("That key is not supported. Try another chord.".to_string()),
+                    timestamp_ms: timestamp_ms(),
+                },
+            };
+            if let Some(tx) = context.ui_tx.as_ref() {
+                let _ = tx.send(HookUiEvent::Capture(event));
+            }
+            return true;
+        }
+        if test_active
+            && let Some(key) = label_for_vk(event_vk)
+            && let Some(tx) = context.ui_tx.as_ref()
+        {
+            let _ = tx.send(HookUiEvent::Key(ShortcutKeyEvent {
+                code: event_vk,
+                key,
+                pressed: key_down,
+            }));
+        }
         if context
             .shortcuts_paused
             .as_ref()
@@ -522,7 +796,9 @@ mod windows_keyboard_hook {
         {
             if context.runtime.active {
                 context.runtime = ShortcutRuntimeState::default();
-                let _ = app.emit("wind-speak://shortcut", "released");
+                if let Some(tx) = context.ui_tx.as_ref() {
+                    let _ = tx.send(HookUiEvent::Signal("released"));
+                }
                 crate::services::dictation_engine::route_shortcut_payload(&app, "released");
             }
             return false;
@@ -538,7 +814,9 @@ mod windows_keyboard_hook {
                 ShortcutSignal::Released => "released",
                 ShortcutSignal::Cancel => "cancel",
             };
-            let _ = app.emit("wind-speak://shortcut", payload);
+            if let Some(tx) = context.ui_tx.as_ref() {
+                let _ = tx.send(HookUiEvent::Signal(payload));
+            }
             // Setup validates the hook with the real chord, but must never start
             // dictation or create an overlay before calibration is complete.
             let testing_only = app
@@ -549,6 +827,63 @@ mod windows_keyboard_hook {
             }
         }
         outcome.consume
+    }
+
+    impl ShortcutCaptureRuntime {
+        fn handle_event(&mut self, code: u32, key: String, pressed: bool) -> ShortcutCaptureEvent {
+            if pressed {
+                self.pressed.insert(code, key.clone());
+                self.chord.insert(key);
+            } else {
+                self.pressed.remove(&code);
+            }
+
+            let keys = self.pressed_keys();
+            let mut completed = None;
+            let mut error = None;
+            if !pressed && self.pressed.is_empty() && !self.chord.is_empty() {
+                let candidate = ordered_keys(self.chord.iter().cloned()).join("+");
+                match normalize_label(&candidate) {
+                    Ok(label) => completed = Some(label),
+                    Err(reason) => error = Some(reason.to_string()),
+                }
+                self.chord.clear();
+            }
+
+            ShortcutCaptureEvent {
+                keys,
+                completed,
+                error,
+                timestamp_ms: timestamp_ms(),
+            }
+        }
+
+        fn pressed_keys(&self) -> Vec<String> {
+            ordered_keys(self.pressed.values().cloned())
+        }
+    }
+
+    fn ordered_keys(keys: impl IntoIterator<Item = String>) -> Vec<String> {
+        let unique = keys.into_iter().collect::<HashSet<_>>();
+        let mut ordered = ["Ctrl", "Win", "Alt", "Shift"]
+            .into_iter()
+            .filter(|key| unique.contains(*key))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut normal = unique
+            .into_iter()
+            .filter(|key| !matches!(key.as_str(), "Ctrl" | "Win" | "Alt" | "Shift"))
+            .collect::<Vec<_>>();
+        normal.sort();
+        ordered.extend(normal);
+        ordered
+    }
+
+    fn timestamp_ms() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
     }
 
     impl ShortcutRuntimeState {
@@ -596,13 +931,16 @@ mod windows_keyboard_hook {
             if self.capturing && key_up && relevant && !modifiers_down {
                 self.capturing = false;
                 return ShortcutEventOutcome {
-                    consume: true,
+                    consume: false,
                     signal: None,
                 };
             }
 
             ShortcutEventOutcome {
-                consume: relevant && (combo_down || self.active || self.capturing),
+                // Do not consume a keyed chord's modifiers before its key is
+                // pressed. Consumed modifier-down events never enter Windows'
+                // async key state, so Space/D could not complete the chord.
+                consume: relevant && (combo_down || self.active),
                 signal: None,
             }
         }
@@ -678,11 +1016,59 @@ mod windows_keyboard_hook {
         }
 
         fn key_vk(self) -> Option<u32> {
-            self.key.map(|key| match key {
-                ShortcutKey::Space => vk_value(VK_SPACE),
-                ShortcutKey::D => vk_value(VK_D),
-            })
+            self.key
         }
+    }
+
+    fn label_for_vk(vk: u32) -> Option<String> {
+        let label = match vk {
+            0x08 => "Backspace",
+            0x09 => "Tab",
+            0x0D => "Enter",
+            0x10 | 0xA0 | 0xA1 => "Shift",
+            0x11 | 0xA2 | 0xA3 => "Ctrl",
+            0x12 | 0xA4 | 0xA5 => "Alt",
+            0x13 => "Pause",
+            0x14 => "CapsLock",
+            0x1B => "Escape",
+            0x20 => "Space",
+            0x21 => "PageUp",
+            0x22 => "PageDown",
+            0x23 => "End",
+            0x24 => "Home",
+            0x25 => "Left",
+            0x26 => "Up",
+            0x27 => "Right",
+            0x28 => "Down",
+            0x2C => "PrintScreen",
+            0x2D => "Insert",
+            0x2E => "Delete",
+            0x5B | 0x5C => "Win",
+            0x6A => "NumpadMultiply",
+            0x6B => "NumpadAdd",
+            0x6D => "NumpadSubtract",
+            0x6E => "NumpadDecimal",
+            0x6F => "NumpadDivide",
+            0x91 => "ScrollLock",
+            0xBA => "Semicolon",
+            0xBB => "Equals",
+            0xBC => "Comma",
+            0xBD => "Minus",
+            0xBE => "Period",
+            0xBF => "Slash",
+            0xC0 => "Backquote",
+            0xDB => "BracketLeft",
+            0xDC => "Backslash",
+            0xDD => "BracketRight",
+            0xDE => "Quote",
+            _ if (0x30..=0x39).contains(&vk) || (0x41..=0x5A).contains(&vk) => {
+                return char::from_u32(vk).map(|key| key.to_string());
+            }
+            _ if (0x60..=0x69).contains(&vk) => return Some(format!("Numpad{}", vk - 0x60)),
+            _ if (0x70..=0x87).contains(&vk) => return Some(format!("F{}", vk - 0x6F)),
+            _ => return None,
+        };
+        Some(label.to_string())
     }
 
     fn modifier_down(
@@ -739,11 +1125,12 @@ mod windows_keyboard_hook {
     #[cfg(test)]
     mod tests {
         use super::{
-            ShortcutEventOutcome, ShortcutRuntimeState, ShortcutSignal, parse_shortcut, vk_value,
+            ShortcutCaptureRuntime, ShortcutEventOutcome, ShortcutRuntimeState, ShortcutSignal,
+            parse_shortcut, vk_value,
         };
         use std::collections::HashSet;
         use windows::Win32::UI::Input::KeyboardAndMouse::{
-            VK_ESCAPE, VK_LCONTROL, VK_LWIN, VK_SPACE,
+            VK_D, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_SPACE,
         };
 
         #[test]
@@ -795,6 +1182,30 @@ mod windows_keyboard_hook {
         }
 
         #[test]
+        fn native_capture_reports_each_pressed_key_and_completes_on_release() {
+            let mut capture = ShortcutCaptureRuntime::default();
+            let ctrl = capture.handle_event(0xA2, "Ctrl".to_string(), true);
+            assert_eq!(ctrl.keys, vec!["Ctrl"]);
+            assert_eq!(ctrl.completed, None);
+
+            let alt = capture.handle_event(0xA4, "Alt".to_string(), true);
+            assert_eq!(alt.keys, vec!["Ctrl", "Alt"]);
+
+            let key = capture.handle_event(0x4B, "K".to_string(), true);
+            assert_eq!(key.keys, vec!["Ctrl", "Alt", "K"]);
+
+            assert_eq!(
+                capture.handle_event(0x4B, "K".to_string(), false).keys,
+                vec!["Ctrl", "Alt"]
+            );
+            let _ = capture.handle_event(0xA4, "Alt".to_string(), false);
+            let completed = capture.handle_event(0xA2, "Ctrl".to_string(), false);
+            assert!(completed.keys.is_empty());
+            assert_eq!(completed.completed.as_deref(), Some("Ctrl+Alt+K"));
+            assert_eq!(completed.error, None);
+        }
+
+        #[test]
         fn keyed_ctrl_win_space_waits_for_space_before_pressing() {
             let hotkey = parse_shortcut("Ctrl+Win+Space").expect("parse shortcut");
             let mut runtime = ShortcutRuntimeState::default();
@@ -816,7 +1227,7 @@ mod windows_keyboard_hook {
             assert_eq!(
                 send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LWIN), true),
                 ShortcutEventOutcome {
-                    consume: true,
+                    consume: false,
                     signal: None
                 }
             );
@@ -835,6 +1246,41 @@ mod windows_keyboard_hook {
                     vk_value(VK_SPACE),
                     false
                 ),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Released)
+                }
+            );
+        }
+
+        #[test]
+        fn keyed_ctrl_alt_d_leaves_modifiers_live_until_d() {
+            let hotkey = parse_shortcut("Ctrl+Alt+D").expect("parse shortcut");
+            let mut runtime = ShortcutRuntimeState::default();
+            let mut pressed = HashSet::new();
+
+            assert!(
+                !send_key(
+                    &mut runtime,
+                    hotkey,
+                    &mut pressed,
+                    vk_value(VK_LCONTROL),
+                    true,
+                )
+                .consume
+            );
+            assert!(
+                !send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_LMENU), true,).consume
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_D), true),
+                ShortcutEventOutcome {
+                    consume: true,
+                    signal: Some(ShortcutSignal::Pressed)
+                }
+            );
+            assert_eq!(
+                send_key(&mut runtime, hotkey, &mut pressed, vk_value(VK_D), false),
                 ShortcutEventOutcome {
                     consume: true,
                     signal: Some(ShortcutSignal::Released)
@@ -891,39 +1337,64 @@ mod windows_keyboard_hook {
             vk: u32,
             is_down: bool,
         ) -> ShortcutEventOutcome {
-            if is_down {
-                pressed.insert(vk);
-            } else {
-                pressed.remove(&vk);
-            }
-            runtime.handle_event(hotkey, vk, is_down, !is_down, |candidate| {
+            let outcome = runtime.handle_event(hotkey, vk, is_down, !is_down, |candidate| {
                 pressed.contains(&candidate)
-            })
+            });
+            // A low-level hook that consumes an event prevents Windows from
+            // updating GetAsyncKeyState for that key.
+            if !outcome.consume {
+                if is_down {
+                    pressed.insert(vk);
+                } else {
+                    pressed.remove(&vk);
+                }
+            }
+            outcome
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ShortcutKey, parse_shortcut, shortcut_candidates};
+    use super::{parse_shortcut, shortcut_candidates, sync_runtime_pause_state};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
 
     #[test]
-    fn requested_shortcut_is_first_and_deduplicated() {
+    fn setup_registration_unpauses_the_runtime_hook_state() {
+        let paused = Arc::new(Mutex::new(true));
+        sync_runtime_pause_state(&paused, false);
+        assert!(!*paused.lock());
+    }
+
+    #[test]
+    fn requested_shortcut_is_normalized_without_silent_fallbacks() {
         let labels = shortcut_candidates("control + alt + space")
             .into_iter()
             .map(|candidate| candidate.label)
             .collect::<Vec<_>>();
-        assert_eq!(labels[0], "Ctrl+Alt+Space");
+        assert_eq!(labels, vec!["Ctrl+Alt+Space"]);
+    }
+
+    #[test]
+    fn accepts_arbitrary_keyboard_keys() {
         assert_eq!(
-            labels,
-            vec![
-                "Ctrl+Alt+Space",
-                "Ctrl+Win",
-                "Ctrl+Win+Space",
-                "Ctrl+Shift+Space",
-                "Ctrl+Alt+D"
-            ]
+            shortcut_candidates("shift + ctrl + k")[0].label,
+            "Ctrl+Shift+K"
         );
+        assert_eq!(
+            shortcut_candidates("win + alt + f12")[0].label,
+            "Win+Alt+F12"
+        );
+        assert_eq!(
+            shortcut_candidates("ctrl + shift + bracketleft")[0].label,
+            "Ctrl+Shift+BracketLeft"
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_non_modifier_keys() {
+        assert!(shortcut_candidates("Ctrl+K+L").is_empty());
     }
 
     #[test]
@@ -940,6 +1411,6 @@ mod tests {
         let parsed = parse_shortcut("Ctrl+Win+Space").expect("parse shortcut");
         assert!(parsed.ctrl);
         assert!(parsed.win);
-        assert_eq!(parsed.key, Some(ShortcutKey::Space));
+        assert_eq!(parsed.key, Some(0x20));
     }
 }

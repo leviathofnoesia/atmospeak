@@ -24,6 +24,7 @@ pub struct AppState {
     pub shortcut_status: Arc<Mutex<ShortcutStatus>>,
     pub shortcuts_paused: Arc<Mutex<bool>>,
     pub shortcut_test_active: Arc<Mutex<bool>>,
+    pub shortcut_capture_active: Arc<Mutex<bool>>,
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
     pub retention_sweeper_cancel: Arc<AtomicBool>,
@@ -63,6 +64,7 @@ impl AppState {
             shortcut_status: Arc::new(Mutex::new(ShortcutStatus::default())),
             shortcuts_paused: Arc::new(Mutex::new(false)),
             shortcut_test_active: Arc::new(Mutex::new(false)),
+            shortcut_capture_active: Arc::new(Mutex::new(false)),
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(Vec::new())),
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
@@ -125,6 +127,14 @@ impl AppState {
 
     pub fn set_shortcut_test_active(&self, active: bool) {
         *self.shortcut_test_active.lock() = active;
+    }
+
+    pub fn shortcut_capture_active(&self) -> bool {
+        *self.shortcut_capture_active.lock()
+    }
+
+    pub fn set_shortcut_capture_active(&self, active: bool) {
+        *self.shortcut_capture_active.lock() = active;
     }
 
     pub fn last_target_window(&self) -> Option<isize> {

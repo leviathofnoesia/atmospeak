@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ReleaseRepo)) {
-  $ReleaseRepo = "leviathofnoesia/wind-speak"
+  $ReleaseRepo = "leviathofnoesia/atmospeak"
 }
 
 $Package = Get-Content (Join-Path $Root "package.json") -Raw | ConvertFrom-Json

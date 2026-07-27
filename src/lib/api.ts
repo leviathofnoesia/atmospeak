@@ -30,7 +30,7 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/wind-speak/releases/latest/download";
+const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
 const releaseVersion = "0.3.1";
 const mockInstalledModels = new Set(["base.en"]);
 
@@ -504,6 +504,19 @@ export function registerSetupShortcut(hotkey: string): Promise<ShortcutStatus> {
     paused: false,
     message: `Global shortcut registered: ${hotkey}.`,
   }));
+}
+
+export function startShortcutCapture(currentHotkey: string): Promise<ShortcutStatus> {
+  return command("start_shortcut_capture", { currentHotkey }, () => ({
+    registered: true,
+    hotkey: currentHotkey,
+    paused: false,
+    message: "Keyboard capture ready.",
+  }));
+}
+
+export function cancelShortcutCapture(): Promise<void> {
+  return command("cancel_shortcut_capture", undefined, () => undefined);
 }
 
 export function showMainWindow(): Promise<void> {

@@ -16,6 +16,31 @@ test("fresh browser fixture exposes setup v2 without a skip path", async ({ page
   await expect(page.getByRole("button", { name: /Atmospeak companion/i })).toHaveCount(0);
 });
 
+test("shortcut step offers custom recording and visibly arms the exact test", async ({ page }) => {
+  await page.goto("/?view=setup&fixture=shortcut");
+  await page.getByRole("button", { name: /begin/i }).click();
+  await page.getByRole("button", { name: /continue/i }).click();
+  await page.getByRole("button", { name: /continue/i }).click();
+
+  const continueButton = page.getByRole("button", { name: /continue/i });
+  await expect(continueButton).toBeDisabled();
+  await page.getByRole("button", { name: /record shortcut/i }).click();
+  await page.keyboard.down("Control");
+  await expect(page.locator("kbd.is-down")).toHaveText(["Ctrl"]);
+  await page.keyboard.down("Alt");
+  await expect(page.locator("kbd.is-down")).toHaveText(["Ctrl", "Alt"]);
+  await page.keyboard.down("K");
+  await expect(page.locator("kbd.is-down")).toHaveText(["Ctrl", "Alt", "K"]);
+  await page.keyboard.up("K");
+  await page.keyboard.up("Alt");
+  await page.keyboard.up("Control");
+  await expect(page.getByText(/Ctrl\+Alt\+K recorded/i).first()).toBeVisible();
+  await page.getByRole("button", { name: /test selected/i }).click();
+  await expect(page.getByRole("button", { name: /testing/i })).toBeDisabled();
+  await page.getByRole("button", { name: /back/i }).click();
+  await expect(page.getByRole("heading", { name: /A voice model/i })).toBeVisible();
+});
+
 test.describe("canonical editorial hub", () => {
   test.use({ viewport: { width: 1000, height: 660 } });
 
