@@ -134,6 +134,12 @@ export interface MicrophoneInfo {
   available: boolean;
 }
 
+export interface ShortcutKeyEvent {
+  code: number;
+  key: string;
+  pressed: boolean;
+}
+
 export interface MicLevel {
   rmsDbfs: number;
   peakDbfs: number;

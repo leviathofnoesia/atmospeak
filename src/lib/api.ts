@@ -506,6 +506,19 @@ export function registerSetupShortcut(hotkey: string): Promise<ShortcutStatus> {
   }));
 }
 
+export function startShortcutCapture(currentHotkey: string): Promise<ShortcutStatus> {
+  return command("start_shortcut_capture", { currentHotkey }, () => ({
+    registered: true,
+    hotkey: currentHotkey,
+    paused: false,
+    message: "Keyboard capture ready.",
+  }));
+}
+
+export function cancelShortcutCapture(): Promise<void> {
+  return command("cancel_shortcut_capture", undefined, () => undefined);
+}
+
 export function showMainWindow(): Promise<void> {
   return command("show_main_window", undefined, () => undefined);
 }

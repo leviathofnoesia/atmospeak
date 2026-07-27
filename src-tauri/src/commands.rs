@@ -176,6 +176,7 @@ pub fn register_setup_shortcut(
     state: State<'_, AppState>,
     hotkey: String,
 ) -> ShortcutStatus {
+    state.set_shortcut_capture_active(false);
     state.set_shortcut_test_active(true);
     shortcuts::register_shortcut(
         &app,
@@ -184,6 +185,38 @@ pub fn register_setup_shortcut(
         &hotkey,
         false,
     )
+}
+
+#[tauri::command]
+pub fn start_shortcut_capture(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    current_hotkey: String,
+) -> ShortcutStatus {
+    state.set_shortcut_test_active(false);
+    state.set_shortcut_capture_active(false);
+    let status = shortcuts::register_shortcut(
+        &app,
+        state.shortcut_status.clone(),
+        state.shortcuts_paused.clone(),
+        &current_hotkey,
+        false,
+    );
+    state.set_shortcut_capture_active(status.registered);
+    status
+}
+
+#[tauri::command]
+pub fn cancel_shortcut_capture(app: AppHandle, state: State<'_, AppState>) {
+    state.set_shortcut_capture_active(false);
+    if !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION) {
+        shortcuts::set_paused(
+            &app,
+            state.shortcut_status.clone(),
+            state.shortcuts_paused.clone(),
+            true,
+        );
+    }
 }
 
 #[tauri::command]

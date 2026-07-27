@@ -60,6 +60,7 @@ function onboardingProps(overrides: Record<string, unknown> = {}) {
     modelDownload: null,
     shortcutStatus: null,
     shortcutTest: { active: false, detected: false, message: "" },
+    shortcutCapture: { arming: false, active: false, keys: [], message: "" },
     micCheck: { active: false, passed: true, level: 0.7, message: "Healthy signal" },
     soundCheck: { active: false, result: passingSoundCheck, message: "Heard clearly" },
     onStartMicCheck: vi.fn(async () => undefined),
@@ -68,6 +69,7 @@ function onboardingProps(overrides: Record<string, unknown> = {}) {
     onFinishSoundCheck: vi.fn(async () => undefined),
     onOpenWindowsSoundSettings: vi.fn(async () => undefined),
     onTestShortcut: vi.fn(),
+    onRecordShortcut: vi.fn(),
     onCancelShortcutTest: vi.fn(),
     onShortcutChange: vi.fn(),
     pasteTest: { running: false, passed: false, message: "" },
@@ -106,7 +108,7 @@ describe("Onboarding", () => {
 
     const continueButton = screen.getByRole("button", { name: /continue/i });
     expect(continueButton).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: /test shortcut/i }));
+    await user.click(screen.getByRole("button", { name: /test selected/i }));
     expect(props.onTestShortcut).toHaveBeenCalledOnce();
     expect(props.onComplete).not.toHaveBeenCalled();
   });
@@ -126,7 +128,7 @@ describe("Onboarding", () => {
     await user.click(screen.getByRole("button", { name: /continue/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
-    expect(screen.getByRole("button", { name: /listening for keys/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /testing/i })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /back/i }));
     expect(props.onCancelShortcutTest).toHaveBeenCalledOnce();
   });
@@ -142,6 +144,28 @@ describe("Onboarding", () => {
     await user.click(screen.getByRole("button", { name: "Ctrl+Alt+D" }));
 
     expect(props.onShortcutChange).toHaveBeenCalledWith("Ctrl+Alt+D");
+  });
+
+  it("records custom chords and lights each held key like a keyboard tester", async () => {
+    const user = userEvent.setup();
+    const props = onboardingProps({
+      shortcutCapture: {
+        arming: false,
+        active: true,
+        keys: ["Ctrl", "Shift", "K"],
+        message: "Hold the keys you want together.",
+      },
+    });
+    render(<Onboarding {...props} />);
+
+    await user.click(screen.getByRole("button", { name: /begin/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    for (const key of ["Ctrl", "Shift", "K"]) {
+      expect(screen.getByText(key, { selector: "kbd" })).toHaveClass("is-down");
+    }
+    expect(screen.getByRole("button", { name: /recording keys/i })).toBeDisabled();
   });
 
   it("offers a real retry after a failed host-backed sound check", async () => {

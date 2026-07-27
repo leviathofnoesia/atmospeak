@@ -30,6 +30,9 @@ if (pages.length !== 1) {
 }
 
 const page = pages[0];
+if (page.url() === "about:blank") {
+  await page.waitForURL((url) => url.toString() !== "about:blank", { timeout: 10_000 });
+}
 await page.waitForLoadState("domcontentloaded");
 const url = page.url();
 const bodyText = await page.locator("body").innerText();

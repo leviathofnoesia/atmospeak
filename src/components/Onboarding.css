@@ -205,6 +205,21 @@
 .ob-keyfield { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 22px; border: 1px solid rgba(18,17,19,0.14); background: #fbfbf7; }
 .ob-keys { display: flex; align-items: center; gap: 8px; }
 .ob-keys kbd { font-family: var(--font-mono); font-size: 15px; min-width: 38px; height: 40px; padding: 0 12px; display: grid; place-items: center; color: var(--ink); background: #fff; border: 1px solid rgba(18,17,19,0.18); border-bottom-width: 2.5px; border-radius: 7px; letter-spacing: 0.02em; }
+.ob-keys kbd.is-down {
+  color: #173d25;
+  background: #d9f3dd;
+  border-color: #356b45;
+  border-bottom-color: #214d31;
+  box-shadow: inset 0 0 0 1px rgba(53,107,69,0.2), 0 0 0 2px rgba(110,176,126,0.14);
+  transform: translateY(1px);
+}
+.ob-keyactions { display: flex; align-items: center; gap: 8px; }
+.ob-preset.is-recording {
+  color: #214d31;
+  background: #d9f3dd;
+  border-color: #356b45;
+  opacity: 1;
+}
 .ob-keyhint { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; color: rgba(27,26,29,0.5); margin-top: -6px; }
 .ob-presets { display: flex; gap: 8px; flex-wrap: wrap; }
 .ob-preset { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; padding: 8px 13px; border: 1px solid rgba(18,17,19,0.14); background: transparent; cursor: pointer; color: rgba(27,26,29,0.7); transition: all 0.18s; }
