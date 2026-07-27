@@ -95,6 +95,12 @@ pub fn save_settings(
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
         || previous_settings.advanced_whisper_cli_path != settings.advanced_whisper_cli_path;
+    let setup_complete = settings.onboarding_complete
+        && settings.onboarding_version == crate::ONBOARDING_VERSION
+        && settings
+            .audio_calibration
+            .as_ref()
+            .is_some_and(|calibration| calibration.asr_backend == "host");
     startup::set_start_at_login(settings.start_at_login).map_err(|e| e.to_string())?;
     let database = state.database.lock();
     database
@@ -104,13 +110,15 @@ pub fn save_settings(
         .prune_sessions(settings.transcript_retention_days)
         .map_err(|e| e.to_string())?;
     let _ = runtime::model_status(&app, &settings);
-    shortcuts::register_shortcut(
-        &app,
-        state.shortcut_status.clone(),
-        state.shortcuts_paused.clone(),
-        &settings.hotkey,
-        *state.shortcuts_paused.lock(),
-    );
+    if setup_complete {
+        shortcuts::register_shortcut(
+            &app,
+            state.shortcut_status.clone(),
+            state.shortcuts_paused.clone(),
+            &settings.hotkey,
+            *state.shortcuts_paused.lock(),
+        );
+    }
     // The overlay lives in its own webview and reads settings once on mount, so
     // appearance and hotkey changes have to be pushed to it.
     let _ = app.emit("wind-speak://settings-changed", settings.clone());
@@ -178,13 +186,13 @@ pub fn register_setup_shortcut(
 ) -> ShortcutStatus {
     state.set_shortcut_capture_active(false);
     state.set_shortcut_test_active(true);
-    shortcuts::register_shortcut(
-        &app,
-        state.shortcut_status.clone(),
-        state.shortcuts_paused.clone(),
-        &hotkey,
-        false,
-    )
+    // Setup must not install or replace the global keyboard hook. The hook is
+    // registered exactly once by `complete_onboarding`, after calibration has
+    // passed. During setup the focused WebView verifies the physical chord.
+    let status = shortcuts::validate_shortcut(&hotkey, true);
+    *state.shortcut_status.lock() = status.clone();
+    let _ = app.emit("wind-speak://shortcut-status", status.clone());
+    status
 }
 
 #[tauri::command]
@@ -280,8 +288,11 @@ pub fn mic_check_stop(state: State<'_, AppState>) -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub fn start_sound_check(app: AppHandle, device_name: String) -> CommandResult<()> {
-    sound_check::start(&app, device_name).map_err(|error| error.to_string())
+pub async fn start_sound_check(app: AppHandle, device_name: String) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || sound_check::start(&app, device_name))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

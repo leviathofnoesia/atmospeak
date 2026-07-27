@@ -124,6 +124,36 @@ pub fn register_shortcut(
     }
 }
 
+pub fn validate_shortcut(requested_hotkey: &str, paused: bool) -> ShortcutStatus {
+    let Some(candidate) = shortcut_candidates(requested_hotkey).into_iter().next() else {
+        return ShortcutStatus {
+            registered: false,
+            hotkey: String::new(),
+            paused,
+            message:
+                "That shortcut is not valid. Record a modifier plus a key, or a chord with at least two modifiers."
+                    .to_string(),
+        };
+    };
+    match parse_shortcut(&candidate.label) {
+        Ok(_) => ShortcutStatus {
+            registered: true,
+            hotkey: candidate.label.clone(),
+            paused,
+            message: format!(
+                "{} is valid. Press the same chord once to confirm it.",
+                candidate.label
+            ),
+        },
+        Err(error) => ShortcutStatus {
+            registered: false,
+            hotkey: String::new(),
+            paused,
+            message: format!("That shortcut is not valid: {error}"),
+        },
+    }
+}
+
 pub fn set_paused(
     app: &AppHandle,
     shortcut_status: Arc<Mutex<ShortcutStatus>>,

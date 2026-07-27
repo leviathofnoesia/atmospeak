@@ -143,38 +143,42 @@ const maxPaintLatencyMs = Math.max(...paintChecks.map(({ paintLatencyMs }) => pa
 
 await page.getByRole("button", { name: /test selected/i }).click();
 await page.getByText(/Press your dictation shortcut/i).waitFor();
-sendVirtualKeys([0xA2, 0xA4, 0x4B]);
+for (const { playwright } of physicalKeys) {
+  await page.keyboard.down(playwright);
+}
 const testLitKeys = await page.locator("kbd.is-down").allTextContents();
 if (JSON.stringify(testLitKeys) !== JSON.stringify(["Ctrl", "Alt", "K"])) {
-  throw new Error(`Exact-test lighting was wrong: ${JSON.stringify(testLitKeys)}`);
+  throw new Error(
+    `Exact-test lighting was wrong: ${JSON.stringify(testLitKeys)}; events=${JSON.stringify(await probe())}; status=${JSON.stringify(await page.locator(".ob-keyhint").innerText())}`,
+  );
 }
-sendVirtualKeys([0xA2, 0xA4, 0x4B], true);
-await page.getByText(/Ctrl\+Alt\+K detected by the desktop runtime/i).waitFor();
+for (const { playwright } of [...physicalKeys].reverse()) {
+  await page.keyboard.up(playwright);
+}
+await page.getByText(/Ctrl\+Alt\+K matched\. It will activate when setup is complete/i).waitFor();
 if (await page.getByRole("button", { name: /^continue$/i }).isDisabled()) {
   throw new Error("Continue remained disabled after the exact native chord passed.");
 }
 
-async function verifyChord(label, keys) {
+async function verifySetupChord(label) {
   await resetProbe();
   const status = await invoke("register_setup_shortcut", { hotkey: label });
   if (!status.registered || status.hotkey !== label) {
-    throw new Error(`Runtime did not register exact chord ${label}: ${JSON.stringify(status)}`);
+    throw new Error(`Setup did not accept exact chord ${label}: ${JSON.stringify(status)}`);
   }
-  injectVirtualKeys(keys);
-  const events = await probe();
-  const signals = events
+  const signals = (await probe())
     .filter(({ event }) => event === "wind-speak://shortcut")
     .map(({ payload }) => payload);
-  if (!signals.includes("pressed") || !signals.includes("released")) {
-    throw new Error(`${label} did not produce pressed/released: ${JSON.stringify(events)}`);
+  if (signals.length) {
+    throw new Error(`Setup installed a global hook before calibration: ${JSON.stringify(signals)}`);
   }
   await invoke("set_shortcut_test_active", { active: false });
-  return { label, signals };
+  return { label, accepted: true, globalHookInstalled: false };
 }
 
 const verified = [
-  await verifyChord("Ctrl+Shift+F12", [0xA2, 0xA0, 0x7B]),
-  await verifyChord("Ctrl+Win", [0xA2, 0x5B]),
+  await verifySetupChord("Ctrl+Shift+F12"),
+  await verifySetupChord("Ctrl+Win"),
 ];
 
 if (consoleProblems.length) {
