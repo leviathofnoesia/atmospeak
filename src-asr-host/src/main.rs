@@ -155,6 +155,15 @@ fn main() -> Result<()> {
                     write_error(&mut output, Some(session_id), "model is not loaded", true)?;
                     continue;
                 }
+                if let Some(active) = session.as_ref() {
+                    write_error(
+                        &mut output,
+                        Some(session_id),
+                        &format!("session {} is already active", active.id),
+                        true,
+                    )?;
+                    continue;
+                }
                 session = Some(Session {
                     id: session_id,
                     language,
