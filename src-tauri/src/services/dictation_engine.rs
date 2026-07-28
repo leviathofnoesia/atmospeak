@@ -180,6 +180,7 @@ struct Worker {
     active_recording: Option<RecordingStarted>,
     settle_deadline: Option<Instant>,
     last_gesture_id: Option<u64>,
+    last_gesture_edge: Option<(u64, ShortcutSignal, u64)>,
     last_registration_generation: u64,
 }
 
@@ -268,6 +269,7 @@ pub fn spawn(app: AppHandle) -> EngineHandle {
                 active_recording: None,
                 settle_deadline: None,
                 last_gesture_id: None,
+                last_gesture_edge: None,
                 last_registration_generation: 0,
             };
             worker.run(rx);
@@ -378,7 +380,14 @@ impl Worker {
             return result;
         }
         if let Some(gesture) = gesture.as_ref()
-            && self.last_gesture_id == Some(gesture.gesture_id)
+            && (self.last_gesture_id == Some(gesture.gesture_id)
+                || self
+                    .last_gesture_edge
+                    .is_some_and(|(generation, signal, received_at)| {
+                        generation == gesture.registration_generation
+                            && signal == gesture.signal
+                            && gesture.received_at_ms.saturating_sub(received_at) <= 75
+                    }))
         {
             let result = DispatchResult::Ignored {
                 reason: "duplicate gesture",
@@ -388,6 +397,11 @@ impl Worker {
         }
         if let Some(gesture) = gesture.as_ref() {
             self.last_gesture_id = Some(gesture.gesture_id);
+            self.last_gesture_edge = Some((
+                gesture.registration_generation,
+                gesture.signal,
+                gesture.received_at_ms,
+            ));
             self.last_registration_generation = self
                 .last_registration_generation
                 .max(gesture.registration_generation);
@@ -499,10 +513,9 @@ impl Worker {
         match self.run_pipeline_from_listening(gesture.map(|gesture| (gesture, state_before))) {
             Ok(_) => DispatchResult::Accepted,
             Err(error) => {
-                self.state = EngineState::Error;
-                self.active_recording = None;
-                self.settle_from_terminal();
-                self.emit_phase(DictationPhase::Error, None, error, None, None);
+                if self.state != EngineState::Error {
+                    self.fail_pipeline(error.clone());
+                }
                 DispatchResult::Accepted
             }
         }
@@ -549,7 +562,22 @@ impl Worker {
         if self.state != EngineState::Listening {
             return Err("no active recording to stop".to_string());
         }
-        self.run_pipeline_from_listening(None)
+        match self.run_pipeline_from_listening(None) {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if self.state != EngineState::Error {
+                    self.fail_pipeline(error.clone());
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn fail_pipeline(&mut self, error: String) {
+        self.state = EngineState::Error;
+        self.active_recording = None;
+        self.settle_from_terminal();
+        self.emit_phase(DictationPhase::Error, None, error, None, None);
     }
 
     fn cancel_any(&mut self) -> Result<(), String> {
@@ -702,7 +730,9 @@ impl Worker {
                         },
                     );
                 }
-                return Err(error.to_string());
+                let error = error.to_string();
+                self.fail_pipeline(error.clone());
+                return Err(error);
             }
         };
         let capture_stop_ms = capture_started.elapsed().as_millis() as u64;
@@ -711,7 +741,9 @@ impl Worker {
                 host.cancel_session(&captured.id);
             }
             let _ = std::fs::remove_file(&captured.path);
-            return Err(error.to_string());
+            let error = error.to_string();
+            self.fail_pipeline(error.clone());
+            return Err(error);
         }
         if let Err(error) = recorder::prepare_for_dictation(&mut captured) {
             if let Some(host) = captured.streaming_host.take() {
@@ -726,7 +758,9 @@ impl Worker {
                 ),
             );
             let _ = std::fs::remove_file(&captured.path);
-            return Err(error.to_string());
+            let error = error.to_string();
+            self.fail_pipeline(error.clone());
+            return Err(error);
         }
 
         let snapshot = state
@@ -841,22 +875,22 @@ impl Worker {
                 });
 
                 let inject_started = Instant::now();
-            let injection_result = if snapshot.settings.auto_inject {
-                Some(injection::inject_text(
+                let injection_result = if snapshot.settings.auto_inject {
+                    Some(injection::inject_text(
                         &cleaned_text,
                         snapshot.settings.restore_clipboard,
                         preferred,
-                )?)
-            } else {
-                if let Err(error) = injection::copy_text_to_clipboard(&cleaned_text) {
-                    metrics::emit_runtime(
-                        &app,
-                        "clipboard-copy-error",
-                        format!("session={} {error}", finished.id),
-                    );
-                }
-                None
-            };
+                    )?)
+                } else {
+                    if let Err(error) = injection::copy_text_to_clipboard(&cleaned_text) {
+                        metrics::emit_runtime(
+                            &app,
+                            "clipboard-copy-error",
+                            format!("session={} {error}", finished.id),
+                        );
+                    }
+                    None
+                };
                 let paste_ms = inject_started.elapsed().as_millis() as u64;
                 timer.mark_inject(paste_ms);
 

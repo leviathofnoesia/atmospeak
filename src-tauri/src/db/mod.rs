@@ -383,20 +383,20 @@ impl Database {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<Option<String>> {
-        let audio_path = self
-            .connection
+        let transaction = self.connection.unchecked_transaction()?;
+        let audio_path = transaction
             .query_row(
                 "select audio_path from transcript_sessions where id = ?1",
                 params![id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        self.connection
-            .execute("delete from transcript_sessions where id = ?1", params![id])?;
-        self.connection.execute(
+        transaction.execute("delete from transcript_sessions where id = ?1", params![id])?;
+        transaction.execute(
             "delete from dictation_metrics where session_id = ?1",
             params![id],
         )?;
+        transaction.commit()?;
         Ok(audio_path)
     }
 
@@ -405,21 +405,23 @@ impl Database {
             return Ok(Vec::new());
         }
         let cutoff = Utc::now() - chrono::Duration::days(retention_days as i64);
-        let mut statement = self
-            .connection
+        let transaction = self.connection.unchecked_transaction()?;
+        let mut statement = transaction
             .prepare("select audio_path from transcript_sessions where created_at < ?1")?;
         let audio_paths = statement
             .query_map(params![cutoff.to_rfc3339()], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        self.connection.execute(
+        transaction.execute(
             "delete from transcript_sessions where created_at < ?1",
             params![cutoff.to_rfc3339()],
         )?;
-        self.connection.execute(
+        transaction.execute(
             "delete from dictation_metrics
              where session_id not in (select id from transcript_sessions)",
             [],
         )?;
+        drop(statement);
+        transaction.commit()?;
         Ok(audio_paths)
     }
 }

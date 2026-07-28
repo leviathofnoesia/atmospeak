@@ -37,6 +37,10 @@ struct Session {
     prompt: String,
     profile: TranscriptionProfile,
     audio: Vec<f32>,
+    /// Absolute sample position represented by audio[0]. Keeping this lets us
+    /// discard committed audio without losing event timestamps.
+    audio_base_samples: u64,
+    total_samples_received: u64,
     committed: String,
     chunk_start: usize,
     last_vad_check: usize,
@@ -152,6 +156,8 @@ fn main() -> Result<()> {
                     prompt: initial_prompt,
                     profile,
                     audio: Vec::new(),
+                    audio_base_samples: 0,
+                    total_samples_received: 0,
                     committed: String::new(),
                     chunk_start: 0,
                     last_vad_check: 0,
@@ -199,6 +205,7 @@ fn main() -> Result<()> {
                     as u64;
                 active.max_backlog_ms = active.max_backlog_ms.max(backlog_ms);
                 let frame = pcm_bytes_to_f32(&pcm_s16le)?;
+                active.total_samples_received += frame.len() as u64;
                 active.audio.extend_from_slice(&frame);
 
                 let chunk_len = active.audio.len().saturating_sub(active.chunk_start);
@@ -270,7 +277,7 @@ fn main() -> Result<()> {
                         &mut output,
                     )?;
                 }
-                let audio_ms = samples_to_ms(active.audio.len());
+                let audio_ms = samples_to_ms(active.total_samples_received as usize);
                 let processed_during_recording_ms = audio_ms.saturating_sub(tail_audio_ms);
                 let model = model
                     .as_ref()
@@ -321,7 +328,14 @@ fn main() -> Result<()> {
 }
 
 fn emit_preview<W: Write>(model: &Model, session: &mut Session, output: &mut W) -> Result<()> {
-    let start = session.audio.len().saturating_sub(PREVIEW_SAMPLES);
+    // A preview is only a hypothesis for the uncommitted tail. Without this
+    // clamp, the rolling window can include a committed chunk and visibly
+    // repeat it in the dock.
+    let start = session
+        .audio
+        .len()
+        .saturating_sub(PREVIEW_SAMPLES)
+        .max(session.chunk_start);
     let text = transcribe(
         model,
         &session.audio[start..],
@@ -340,7 +354,9 @@ fn emit_preview<W: Write>(model: &Model, session: &mut Session, output: &mut W) 
             session_id: session.id.clone(),
             revision: session.revision,
             text,
-            covered_through_ms: samples_to_ms(session.audio.len()),
+            covered_through_ms: samples_to_ms(
+                session.audio_base_samples as usize + session.audio.len(),
+            ),
         },
     )
 }
@@ -355,8 +371,8 @@ fn finalize_chunk<W: Write>(model: &Model, session: &mut Session, output: &mut W
         session.profile,
     )?;
     session.committed = merge_overlap(&session.committed, &text);
-    let start_ms = samples_to_ms(session.chunk_start);
-    let end_ms = samples_to_ms(end);
+    let start_ms = samples_to_ms(session.audio_base_samples as usize + session.chunk_start);
+    let end_ms = samples_to_ms(session.audio_base_samples as usize + end);
     write_event(
         output,
         &AsrEvent::StableSegment {
@@ -368,8 +384,16 @@ fn finalize_chunk<W: Write>(model: &Model, session: &mut Session, output: &mut W
         },
     )?;
     session.segment_index += 1;
-    session.chunk_start = end.saturating_sub(OVERLAP_SAMPLES);
-    session.last_vad_check = session.chunk_start;
+    // Keep only the audio needed to bridge the next chunk. This bounds host
+    // memory for arbitrarily long recordings while retaining the 500 ms
+    // acoustic overlap used at the next boundary.
+    let retain_from = end.saturating_sub(OVERLAP_SAMPLES);
+    session.audio.drain(..retain_from);
+    session.audio_base_samples += retain_from as u64;
+    session.chunk_start = 0;
+    // The retained overlap was already evaluated; wait for fresh audio before
+    // scheduling another VAD pass.
+    session.last_vad_check = session.audio.len();
     session.speech_active = false;
     Ok(())
 }
@@ -474,7 +498,12 @@ fn strip_overlap(committed: &str, next: &str) -> String {
 
 fn overlap_count(left: &[&str], right: &[&str]) -> usize {
     let maximum = left.len().min(right.len()).min(12);
-    (1..=maximum)
+    // We know chunks overlap in samples, but Whisper's text-only segment API
+    // does not provide word timestamps. A single matching boundary word is
+    // ambiguous ("very very very good" is a real example), so never erase it
+    // merely because its spelling matches. Longer matches are the conservative
+    // textual fallback until word-level timing is available.
+    (2..=maximum)
         .rev()
         .find(|count| {
             left[left.len() - count..]
@@ -566,7 +595,10 @@ mod tests {
             strip_overlap("the porcelain moon", "porcelain moon hums"),
             "hums"
         );
-        assert_eq!(merge_overlap("very very", "very good"), "very very good");
+        assert_eq!(
+            merge_overlap("very very", "very good"),
+            "very very very good"
+        );
     }
 
     #[test]

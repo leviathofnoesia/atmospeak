@@ -41,6 +41,7 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
         start_asr_host(app);
         return;
     }
+    let generation = app.state::<AppState>().begin_streaming_asr_warmup();
     let app = app.clone();
     std::thread::Builder::new()
         .name("atmospeak-streaming-asr-warmup".into())
@@ -109,7 +110,12 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                 threads,
             ) {
                 Ok(host) => {
-                    app.state::<AppState>().set_streaming_asr(host);
+                    if !app
+                        .state::<AppState>()
+                        .set_streaming_asr_if_current(generation, host)
+                    {
+                        return;
+                    }
                     metrics::emit_runtime(
                         &app,
                         "streaming-asr-ready",
@@ -140,7 +146,12 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                         threads,
                     ) {
                         Ok(host) => {
-                            app.state::<AppState>().set_streaming_asr(host);
+                            if !app
+                                .state::<AppState>()
+                                .set_streaming_asr_if_current(generation, host)
+                            {
+                                return;
+                            }
                             metrics::emit_runtime(
                                 &app,
                                 "streaming-asr-ready",

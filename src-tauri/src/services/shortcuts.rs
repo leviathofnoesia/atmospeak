@@ -497,11 +497,11 @@ mod windows_keyboard_hook {
                 RIM_TYPEKEYBOARD, RegisterRawInputDevices,
             },
             WindowsAndMessaging::{
-                CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, GetMessageW,
-                HWND_MESSAGE, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, RI_KEY_BREAK,
-                RegisterClassW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
-                WINDOW_EX_STYLE, WINDOW_STYLE, WM_HOTKEY, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
-                WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW,
+                CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+                GetMessageW, HWND_MESSAGE, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, RI_KEY_BREAK,
+                RegisterClassW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+                WH_KEYBOARD_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_HOTKEY, WM_INPUT, WM_KEYDOWN,
+                WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW,
             },
         },
     };
@@ -795,6 +795,11 @@ mod windows_keyboard_hook {
                 if message.message == WM_HOTKEY && message.wParam.0 as i32 == RUNTIME_HOTKEY_ID {
                     handle_registered_hotkey_pressed();
                 }
+                // WM_INPUT is delivered to the message-only raw-input window.
+                // Retrieving it is not enough: dispatch it so its window proc
+                // can turn the key-break edge into a Hold release gesture.
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
             }
 
             if system_hotkey_registered {

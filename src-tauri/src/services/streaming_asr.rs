@@ -1,11 +1,11 @@
 use std::{
     io::{Read, Write},
     path::PathBuf,
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread,
     time::{Duration, Instant},
@@ -25,7 +25,10 @@ use crate::{
 };
 
 pub struct StreamingAsr {
-    stdin: Mutex<ChildStdin>,
+    // A dedicated writer owns the blocking pipe. Public operations only enqueue
+    // bounded frames, so a wedged child cannot hold a mutex and prevent cancel
+    // or shutdown from recovering it.
+    writer: SyncSender<Vec<u8>>,
     events: Mutex<Receiver<AsrEvent>>,
     child: Mutex<Child>,
     sequence: AtomicU64,
@@ -95,6 +98,18 @@ impl StreamingAsr {
             .stdin
             .take()
             .ok_or_else(|| anyhow!("streaming host stdin is unavailable"))?;
+        let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(256);
+        thread::Builder::new()
+            .name("atmospeak-asr-writer".to_string())
+            .spawn(move || {
+                let mut stdin = stdin;
+                while let Ok(frame) = writer_rx.recv() {
+                    if stdin.write_all(&frame).is_err() || stdin.flush().is_err() {
+                        break;
+                    }
+                }
+            })
+            .context("failed to start streaming command writer")?;
         let mut stdout = child
             .stdout
             .take()
@@ -184,7 +199,7 @@ impl StreamingAsr {
             })
             .context("failed to start streaming event reader")?;
         let host = Arc::new(Self {
-            stdin: Mutex::new(stdin),
+            writer: writer_tx,
             events: Mutex::new(event_rx),
             child: Mutex::new(child),
             sequence: AtomicU64::new(0),
@@ -325,11 +340,12 @@ impl StreamingAsr {
         if payload.is_empty() || payload.len() > MAX_FRAME_SIZE {
             bail!("invalid outgoing streaming frame length");
         }
-        let mut stdin = self.stdin.lock();
-        stdin.write_all(&(payload.len() as u32).to_le_bytes())?;
-        stdin.write_all(&payload)?;
-        stdin.flush()?;
-        Ok(())
+        let mut frame = Vec::with_capacity(payload.len() + 4);
+        frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        frame.extend_from_slice(&payload);
+        self.writer
+            .try_send(frame)
+            .map_err(|error| anyhow!("streaming host command queue is unavailable: {error}"))
     }
 
     fn recv_timeout(&self, timeout: Duration) -> Result<AsrEvent> {

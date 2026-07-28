@@ -40,6 +40,7 @@ pub struct AppState {
     last_metrics: Mutex<Option<StageMetrics>>,
     asr_host: Mutex<Option<Arc<AsrHost>>>,
     streaming_asr: Mutex<Option<Arc<StreamingAsr>>>,
+    streaming_asr_generation: AtomicU64,
 }
 
 impl AppState {
@@ -83,6 +84,7 @@ impl AppState {
             last_metrics: Mutex::new(None),
             asr_host: Mutex::new(None),
             streaming_asr: Mutex::new(None),
+            streaming_asr_generation: AtomicU64::new(0),
         })
     }
 
@@ -150,11 +152,41 @@ impl AppState {
         }
     }
 
+    /// Invalidates every in-flight warmup and returns the generation owned by
+    /// the caller about to create a new host.
+    pub fn begin_streaming_asr_warmup(&self) -> u64 {
+        self.streaming_asr_generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn set_streaming_asr_if_current(&self, generation: u64, host: Arc<StreamingAsr>) -> bool {
+        // Coordinate the generation test and publication with shutdown's slot
+        // lock. A shutdown that wins either invalidates us before this point or
+        // removes this just-published host immediately afterwards.
+        let mut candidate = Some(host);
+        let previous = {
+            let mut slot = self.streaming_asr.lock();
+            if self.streaming_asr_generation.load(Ordering::Acquire) != generation {
+                None
+            } else {
+                Some(slot.replace(candidate.take().expect("candidate host is available")))
+            }
+        };
+        let Some(previous) = previous else {
+            candidate.expect("stale warmup retains its host").shutdown();
+            return false;
+        };
+        if let Some(previous) = previous {
+            previous.shutdown();
+        }
+        true
+    }
+
     pub fn streaming_asr(&self) -> Option<Arc<StreamingAsr>> {
         self.streaming_asr.lock().clone()
     }
 
     pub fn shutdown_streaming_asr(&self) {
+        self.streaming_asr_generation.fetch_add(1, Ordering::AcqRel);
         if let Some(host) = self.streaming_asr.lock().take() {
             host.shutdown();
         }

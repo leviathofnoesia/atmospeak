@@ -211,7 +211,7 @@ const Frame = ({
           textTransform: "uppercase",
         }}
       >
-        {folio} · v0.3.1 · Windows x64
+        {folio} · v0.5.0 · Windows x64
       </div>
     </div>
     {children}
@@ -739,7 +739,7 @@ const Outro = () => {
           gap: 28,
         }}
       >
-        <Kicker light>Atmospeak v0.3.1 · Windows x64</Kicker>
+        <Kicker light>Atmospeak v0.5.0 · Windows x64</Kicker>
         <div
           style={{
             fontFamily: "Cormorant",

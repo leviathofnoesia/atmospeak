@@ -201,12 +201,21 @@ impl RecorderService {
                 .host
                 .start_session(id.clone(), start.prompt, start.profile)
             {
-                Ok(()) => Some(start_streaming_worker(
-                    start.host,
+                Ok(()) => match start_streaming_worker(
+                    start.host.clone(),
                     id.clone(),
                     samples.clone(),
                     recording_path.clone(),
-                )),
+                ) {
+                    Ok(streaming) => Some(streaming),
+                    Err(error) => {
+                        start.host.cancel_session(&id);
+                        eprintln!(
+                            "streaming worker unavailable, retaining batch fallback: {error}"
+                        );
+                        None
+                    }
+                },
                 Err(error) => {
                     eprintln!(
                         "streaming ASR session unavailable, retaining batch fallback: {error}"
@@ -224,53 +233,70 @@ impl RecorderService {
         let stream_sender_i16 = stream_sender.clone();
         let stream_sender_u16 = stream_sender;
 
-        let stream = match supported_config.sample_format() {
-            SampleFormat::F32 => device.build_input_stream(
-                &stream_config,
-                move |data: &[f32], _| {
-                    capture_input_streaming(
-                        data,
-                        channels,
-                        sample_rate,
-                        &capture_samples,
-                        stream_sender_f32.as_ref(),
-                    )
-                },
-                error_callback,
-                None,
-            )?,
-            SampleFormat::I16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _| {
-                    capture_input_streaming(
-                        data,
-                        channels,
-                        sample_rate,
-                        &capture_samples,
-                        stream_sender_i16.as_ref(),
-                    )
-                },
-                error_callback,
-                None,
-            )?,
-            SampleFormat::U16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _| {
-                    capture_input_streaming(
-                        data,
-                        channels,
-                        sample_rate,
-                        &capture_samples,
-                        stream_sender_u16.as_ref(),
-                    )
-                },
-                error_callback,
-                None,
-            )?,
-            format => return Err(anyhow!("unsupported microphone sample format: {format:?}")),
+        let stream_result = match supported_config.sample_format() {
+            SampleFormat::F32 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _| {
+                        capture_input_streaming(
+                            data,
+                            channels,
+                            sample_rate,
+                            &capture_samples,
+                            stream_sender_f32.as_ref(),
+                        )
+                    },
+                    error_callback,
+                    None,
+                )
+                .map_err(anyhow::Error::from),
+            SampleFormat::I16 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _| {
+                        capture_input_streaming(
+                            data,
+                            channels,
+                            sample_rate,
+                            &capture_samples,
+                            stream_sender_i16.as_ref(),
+                        )
+                    },
+                    error_callback,
+                    None,
+                )
+                .map_err(anyhow::Error::from),
+            SampleFormat::U16 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[u16], _| {
+                        capture_input_streaming(
+                            data,
+                            channels,
+                            sample_rate,
+                            &capture_samples,
+                            stream_sender_u16.as_ref(),
+                        )
+                    },
+                    error_callback,
+                    None,
+                )
+                .map_err(anyhow::Error::from),
+            format => Err(anyhow!("unsupported microphone sample format: {format:?}")),
+        };
+        let stream = match stream_result {
+            Ok(stream) => stream,
+            Err(error) => {
+                abort_streaming_start(&mut streaming, &id, &recording_path);
+                return Err(error.into());
+            }
         };
 
-        stream.play().context("failed to start microphone stream")?;
+        if let Err(error) = stream.play().context("failed to start microphone stream") {
+            drop(stream);
+            abort_streaming_start(&mut streaming, &id, &recording_path);
+            return Err(error);
+        }
 
         let started_at = Utc::now();
         *active = Some(ActiveRecording {
@@ -300,6 +326,7 @@ impl RecorderService {
             .duration_override_ms
             .unwrap_or_else(|| active.started_instant.elapsed().as_millis() as u64);
         if Duration::from_millis(duration_ms) < Duration::from_millis(250) {
+            cleanup_abandoned_recording(active, &self.recordings_dir);
             return Err(anyhow!("recording was too short to transcribe"));
         }
 
@@ -365,9 +392,8 @@ impl RecorderService {
                     let _ = worker.join();
                 }
                 streaming.host.cancel_session(&active.id);
-                let _ = std::fs::remove_file(
-                    self.recordings_dir.join(format!("{}.wav", active.id)),
-                );
+                let _ =
+                    std::fs::remove_file(self.recordings_dir.join(format!("{}.wav", active.id)));
             }
             Ok(())
         } else {
@@ -429,6 +455,35 @@ impl RecorderService {
     }
 }
 
+fn abort_streaming_start(
+    streaming: &mut Option<ActiveStreaming>,
+    session_id: &str,
+    recording_path: &std::path::Path,
+) {
+    if let Some(mut streaming) = streaming.take() {
+        // Drop the callback sender before joining so the worker can observe the
+        // closed queue even when CPAL stream construction failed.
+        drop(streaming.sender.take());
+        streaming.host.cancel_session(session_id);
+        if let Some(worker) = streaming.worker.take() {
+            let _ = worker.join();
+        }
+    }
+    let _ = std::fs::remove_file(recording_path);
+}
+
+fn cleanup_abandoned_recording(mut active: ActiveRecording, recordings_dir: &std::path::Path) {
+    drop(active._stream.take());
+    if let Some(mut streaming) = active.streaming.take() {
+        drop(streaming.sender.take());
+        streaming.host.cancel_session(&active.id);
+        if let Some(worker) = streaming.worker.take() {
+            let _ = worker.join();
+        }
+    }
+    let _ = std::fs::remove_file(recordings_dir.join(format!("{}.wav", active.id)));
+}
+
 /// Complete recorder-worker draining after the capture edge has already been
 /// acknowledged. This keeps shortcut latency independent of sidecar backlog.
 pub fn finalize_capture(captured: &mut CapturedRecording) -> Result<()> {
@@ -438,17 +493,17 @@ pub fn finalize_capture(captured: &mut CapturedRecording) -> Result<()> {
     if let Some(dropped) = captured.streaming_dropped.take() {
         captured.streaming_frames_dropped = dropped.load(Ordering::Relaxed);
     }
-    if let Some(write_failed) = captured.streaming_write_failed.take() {
-        if write_failed.load(Ordering::Relaxed) {
-            return Err(anyhow!("failed to persist the streaming audio capture"));
-        }
-        captured.audio_prepared = true;
-    }
     if let Some(samples) = captured.pending_samples.take() {
         captured.samples = match Arc::try_unwrap(samples) {
             Ok(samples) => samples.into_inner(),
             Err(samples) => samples.lock().clone(),
         };
+    }
+    if let Some(write_failed) = captured.streaming_write_failed.take() {
+        // A failed streaming WAV must not discard the capture that was already
+        // buffered in memory. Mark it unprepared so the batch path can rebuild
+        // a file from those samples instead of aborting the dictation here.
+        captured.audio_prepared = !write_failed.load(Ordering::Relaxed);
     }
     if captured.samples.is_empty() {
         Err(anyhow!("microphone did not capture any samples"))
@@ -705,7 +760,7 @@ fn start_streaming_worker(
     session_id: String,
     captured_samples: Arc<Mutex<Vec<f32>>>,
     recording_path: PathBuf,
-) -> ActiveStreaming {
+) -> Result<ActiveStreaming> {
     let (tx, rx) = mpsc::sync_channel::<InputFrame>(200);
     let dropped = Arc::new(AtomicU64::new(0));
     let worker_host = host.clone();
@@ -803,17 +858,17 @@ fn start_streaming_worker(
                 let _ = writer.join();
             }
         })
-        .ok();
-    ActiveStreaming {
+        .context("failed to start streaming audio worker")?;
+    Ok(ActiveStreaming {
         host,
         sender: Some(StreamingFrameSender {
             tx,
             dropped: dropped.clone(),
         }),
-        worker,
+        worker: Some(worker),
         dropped,
         write_failed,
-    }
+    })
 }
 
 #[derive(Default)]
@@ -869,8 +924,12 @@ fn capture_input_streaming<T: Copy + IntoF32>(
             samples: mono,
         }) {
             Ok(()) => {}
-            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Full(frame)) | Err(TrySendError::Disconnected(frame)) => {
                 streaming.dropped.fetch_add(1, Ordering::Relaxed);
+                // The streaming queue is deliberately bounded, but the local
+                // batch fallback must remain lossless when it applies pressure
+                // or the worker has gone away.
+                samples.lock().extend_from_slice(&frame.samples);
             }
         }
     } else {
@@ -1001,7 +1060,7 @@ mod tests {
         };
         let captured = Arc::new(Mutex::new(Vec::new()));
         capture_input_streaming(&[0.1_f32; 320], 1, 16_000, &captured, Some(&sender));
-        assert!(captured.lock().is_empty());
+        assert_eq!(captured.lock().len(), 320);
         assert_eq!(dropped.load(Ordering::Relaxed), 1);
     }
 
