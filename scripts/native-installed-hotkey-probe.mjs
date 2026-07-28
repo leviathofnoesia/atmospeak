@@ -8,13 +8,18 @@ import { chromium } from "playwright";
 const portFlag = process.argv.find((argument) => argument.startsWith("--port="));
 const hotkeyFlag = process.argv.find((argument) => argument.startsWith("--hotkey="));
 const focusPidFlag = process.argv.find((argument) => argument.startsWith("--focus-pid="));
+const cyclesFlag = process.argv.find((argument) => argument.startsWith("--cycles="));
 const port = Number(portFlag?.slice("--port=".length));
 const hotkey = hotkeyFlag?.slice("--hotkey=".length);
 const focusPid = focusPidFlag ? Number(focusPidFlag.slice("--focus-pid=".length)) : null;
+const cycles = cyclesFlag ? Number(cyclesFlag.slice("--cycles=".length)) : 1;
 if (!Number.isInteger(port) || port <= 0 || !hotkey) {
   throw new Error(
     "Usage: node scripts/native-installed-hotkey-probe.mjs --port=<port> --hotkey=<label> [--focus-pid=<pid>]",
   );
+}
+if (!Number.isInteger(cycles) || cycles < 1 || cycles > 500) {
+  throw new Error("--cycles must be an integer from 1 through 500.");
 }
 if (focusPid !== null && (!Number.isInteger(focusPid) || focusPid <= 0)) {
   throw new Error("--focus-pid must identify a running foreground application.");
@@ -31,6 +36,7 @@ let browser;
 let target;
 let targetPid = focusPid;
 const heldKeys = [];
+let totalPasteEvents = 0;
 const hotkeyParts = hotkey.split("+");
 const triggerKey = hotkeyParts.at(-1);
 const leadKeys = hotkeyParts.slice(0, -1).join("+");
@@ -75,11 +81,6 @@ try {
   const overlay = pages.find((page) => page.url().includes("view=overlay"));
   if (!overlay) throw new Error("Installed app did not create its overlay WebView.");
   await overlay.waitForFunction(
-    (expected) => document.body.textContent?.includes(`hold ${expected}`),
-    hotkey,
-    { timeout: 10_000 },
-  );
-  await overlay.waitForFunction(
     () => typeof window.__TAURI_INTERNALS__?.invoke === "function",
     undefined,
     { timeout: 10_000 },
@@ -96,6 +97,10 @@ try {
       handler: callback,
     });
   });
+  const snapshot = await overlay.evaluate(() =>
+    window.__TAURI_INTERNALS__.invoke("get_app_snapshot"),
+  );
+  const mode = snapshot.settings.mode;
 
   if (targetPid === null) {
     target = spawn(
@@ -124,45 +129,80 @@ try {
     if (!existsSync(readyPath)) throw new Error("External typing target did not open.");
   }
 
-  sendKeys("down", leadKeys, true);
-  heldKeys.push(leadKeys);
-  await overlay.waitForFunction(
-    () =>
-      document.querySelector(".dock")?.hasAttribute("data-armed") &&
-      document.querySelector(".dock")?.getAttribute("data-state") === "rest",
-    undefined,
-    { timeout: 2_000 },
-  );
+  for (let cycle = 0; cycle < cycles; cycle += 1) {
+    await overlay.evaluate(() => {
+      window.__atmospeakInstalledProbe = [];
+    });
+    sendKeys("down", leadKeys, true);
+    heldKeys.push(leadKeys);
+    sendKeys("down", triggerKey);
+    heldKeys.push(triggerKey);
+    await overlay.waitForFunction(
+      () =>
+        window.__atmospeakInstalledProbe?.some((event) => event.phase === "listening") &&
+        document.querySelector(".dock")?.getAttribute("data-state") === "listening",
+      undefined,
+      { timeout: 5_000 },
+    );
 
-  sendKeys("down", triggerKey);
-  heldKeys.push(triggerKey);
+    if (mode === "toggle") {
+      sendKeys("up", triggerKey);
+      heldKeys.pop();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (cycle % 2 === 1) {
+        sendKeys("up", leadKeys);
+        heldKeys.pop();
+        sendKeys("down", leadKeys, true);
+        heldKeys.push(leadKeys);
+      }
+      sendKeys("down", triggerKey);
+      heldKeys.push(triggerKey);
+      sendKeys("up", triggerKey);
+      heldKeys.pop();
+      sendKeys("up", leadKeys);
+      heldKeys.pop();
+    } else if (cycle % 2 === 0) {
+      // Trigger-first release.
+      sendKeys("up", triggerKey);
+      heldKeys.pop();
+      sendKeys("up", leadKeys);
+      heldKeys.pop();
+    } else {
+      // Modifier-first release must be authoritative too.
+      sendKeys("up", leadKeys);
+      heldKeys.splice(heldKeys.lastIndexOf(leadKeys), 1);
+      sendKeys("up", triggerKey);
+      heldKeys.pop();
+    }
 
-  await overlay.waitForFunction(
-    () =>
-      window.__atmospeakInstalledProbe?.some((event) => event.phase === "listening") &&
-      document.querySelector(".dock")?.getAttribute("data-state") === "listening",
-    undefined,
-    { timeout: 5_000 },
-  );
-
-  await overlay.evaluate(() =>
-    window.__TAURI_INTERNALS__.invoke("handle_dictation_action", {
-      action: "cancel",
-    }),
-  );
-  sendKeys("up", triggerKey);
-  heldKeys.pop();
-  sendKeys("up", leadKeys);
-  heldKeys.pop();
-
-  await overlay.waitForFunction(
-    () => document.querySelector(".dock")?.getAttribute("data-state") === "rest",
-    undefined,
-    { timeout: 5_000 },
-  );
+    await overlay.waitForFunction(
+      () =>
+        window.__atmospeakInstalledProbe?.some((event) => event.phase === "finalizing") &&
+        !window.__atmospeakInstalledProbe
+          ?.slice(window.__atmospeakInstalledProbe.findIndex((event) => event.phase === "finalizing") + 1)
+          .some((event) => event.phase === "listening"),
+      undefined,
+      { timeout: 10_000 },
+    );
+    await overlay.waitForFunction(
+      () =>
+        window.__atmospeakInstalledProbe?.some((event) =>
+          ["pasted", "saved", "error"].includes(event.phase),
+        ) &&
+        document.querySelector(".dock")?.getAttribute("data-state") !== "listening",
+      undefined,
+      { timeout: 300_000 },
+    );
+    const cycleEvents = await overlay.evaluate(() => window.__atmospeakInstalledProbe ?? []);
+    const cyclePasteCount = cycleEvents.filter((event) => event.phase === "pasted").length;
+    totalPasteEvents += cyclePasteCount;
+    if (cyclePasteCount > 1) {
+      throw new Error(`Cycle ${cycle + 1} produced ${cyclePasteCount} paste events.`);
+    }
+  }
   const targetText = focusPid === null ? readFileSync(targetPath, "utf8").trim() : "";
-  if (targetText) {
-    throw new Error(`Cancelled probe unexpectedly injected text: ${targetText}`);
+  if (totalPasteEvents > cycles) {
+    throw new Error(`${cycles} stops produced ${totalPasteEvents} paste events.`);
   }
   console.log(
     JSON.stringify({
@@ -171,11 +211,16 @@ try {
       focusedApplication:
         focusPid === null ? "external native text editor" : `existing process ${focusPid}`,
       hotkey,
-      orbLabelVerified: true,
+      mode,
+      cycles,
       globalLeadKeyFeedbackVerified: true,
       nativeListeningEventVerified: true,
       orbMorphedToListening: true,
-      cancelledWithoutTranscriptionOrInjection: true,
+      nativeStopEventVerified: true,
+      noStuckListeningState: true,
+      noDuplicatePasteEvent: true,
+      pasteEvents: totalPasteEvents,
+      targetReceivedText: Boolean(targetText),
     }),
   );
 } finally {

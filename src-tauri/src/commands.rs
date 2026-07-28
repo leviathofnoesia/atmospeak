@@ -97,7 +97,8 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
     let runtime_changed = previous_settings.active_model_id != settings.active_model_id
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
-        || previous_settings.advanced_whisper_cli_path != settings.advanced_whisper_cli_path;
+        || previous_settings.advanced_whisper_cli_path != settings.advanced_whisper_cli_path
+        || previous_settings.acceleration_preference != settings.acceleration_preference;
     let setup_complete = settings.onboarding_complete
         && settings.onboarding_version == crate::ONBOARDING_VERSION
         && settings
@@ -111,6 +112,7 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
             state.shortcut_status.clone(),
             state.shortcuts_paused.clone(),
             &settings.hotkey,
+            settings.mode,
             shortcuts_were_paused,
         );
         if !shortcut.registered {
@@ -119,6 +121,7 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
                 state.shortcut_status.clone(),
                 state.shortcuts_paused.clone(),
                 &previous_settings.hotkey,
+                previous_settings.mode,
                 shortcuts_were_paused,
             );
             return Err(shortcut.message);
@@ -130,6 +133,7 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
                 state.shortcut_status.clone(),
                 state.shortcuts_paused.clone(),
                 &previous_settings.hotkey,
+                previous_settings.mode,
                 shortcuts_were_paused,
             );
             return Err(error.to_string());
@@ -145,6 +149,7 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
                 state.shortcut_status.clone(),
                 state.shortcuts_paused.clone(),
                 &previous_settings.hotkey,
+                previous_settings.mode,
                 shortcuts_were_paused,
             );
         }
@@ -167,8 +172,9 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
     drop(database);
     remove_managed_recordings(&state.app_dir, expired_audio);
     if runtime_changed {
+        state.shutdown_streaming_asr();
         state.shutdown_asr_host();
-        crate::start_asr_host(&app);
+        crate::start_preferred_asr(&app);
     }
     Ok(snapshot)
 }
@@ -256,6 +262,12 @@ pub fn start_shortcut_capture(
         state.shortcut_status.clone(),
         state.shortcuts_paused.clone(),
         &current_hotkey,
+        state
+            .database
+            .lock()
+            .load_settings()
+            .map(|settings| settings.mode)
+            .unwrap_or(crate::models::DictationMode::PushToTalk),
         false,
     );
     state.set_shortcut_capture_active(status.registered);
@@ -410,6 +422,7 @@ pub async fn complete_onboarding(
     let shortcut_status = state.shortcut_status.clone();
     let shortcuts_paused = state.shortcuts_paused.clone();
     let hotkey = settings.hotkey.clone();
+    let mode = settings.mode;
     let start_at_login = settings.start_at_login;
     let shortcut = tauri::async_runtime::spawn_blocking(move || {
         let shortcut = shortcuts::register_shortcut(
@@ -417,6 +430,7 @@ pub async fn complete_onboarding(
             shortcut_status.clone(),
             shortcuts_paused.clone(),
             &hotkey,
+            mode,
             false,
         );
         if !shortcut.registered {

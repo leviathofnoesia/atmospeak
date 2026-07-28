@@ -1,5 +1,8 @@
 use std::{
-    sync::mpsc::{self, Receiver, Sender, SyncSender},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, Sender, SyncSender},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -10,8 +13,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
     models::{
-        DictationMode, DictationPhase, DictationResult, NativeDictationEvent, RecordingStarted,
-        StageMetrics, TranscriptSession,
+        AsrBackend, DictationMode, DictationPhase, DictationResult, EngineActionAck,
+        NativeDictationEvent, RecordingStarted, ShortcutGesture, ShortcutSignal, ShortcutSource,
+        StageMetrics, StreamingMetrics, TranscriptSession,
     },
     services::{
         app_state::AppState,
@@ -41,6 +45,7 @@ pub enum DispatchResult {
 enum EngineCmd {
     Action {
         action: EngineAction,
+        gesture: Option<ShortcutGesture>,
         reply: Option<SyncSender<DispatchResult>>,
     },
     StartBlocking {
@@ -71,6 +76,7 @@ impl EngineHandle {
         self.tx
             .send(EngineCmd::Action {
                 action,
+                gesture: None,
                 reply: None,
             })
             .is_ok()
@@ -81,12 +87,23 @@ impl EngineHandle {
         self.tx
             .send(EngineCmd::Action {
                 action,
+                gesture: None,
                 reply: Some(reply_tx),
             })
             .map_err(|_| "dictation engine is not running".to_string())?;
         reply_rx
             .recv_timeout(Duration::from_secs(5))
             .map_err(|_| "dictation engine did not acknowledge action".to_string())
+    }
+
+    pub fn dispatch_gesture(&self, action: EngineAction, gesture: ShortcutGesture) -> bool {
+        self.tx
+            .send(EngineCmd::Action {
+                action,
+                gesture: Some(gesture),
+                reply: None,
+            })
+            .is_ok()
     }
 
     pub fn start_blocking(&self) -> Result<RecordingStarted, String> {
@@ -141,6 +158,12 @@ impl EngineHandle {
     }
 }
 
+static NEXT_GESTURE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn now_ms() -> u64 {
+    Utc::now().timestamp_millis().max(0) as u64
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EngineState {
     Idle,
@@ -156,6 +179,9 @@ struct Worker {
     state: EngineState,
     active_recording: Option<RecordingStarted>,
     settle_deadline: Option<Instant>,
+    last_gesture_id: Option<u64>,
+    last_gesture_edge: Option<(u64, ShortcutSignal, u64)>,
+    last_registration_generation: u64,
 }
 
 /// What a dispatched action should do, decided purely from state + mode.
@@ -242,6 +268,9 @@ pub fn spawn(app: AppHandle) -> EngineHandle {
                 state: EngineState::Idle,
                 active_recording: None,
                 settle_deadline: None,
+                last_gesture_id: None,
+                last_gesture_edge: None,
+                last_registration_generation: 0,
             };
             worker.run(rx);
         })
@@ -271,8 +300,12 @@ impl Worker {
             };
             match cmd {
                 EngineCmd::Shutdown => break,
-                EngineCmd::Action { action, reply } => {
-                    let result = self.handle_action(action);
+                EngineCmd::Action {
+                    action,
+                    gesture,
+                    reply,
+                } => {
+                    let result = self.handle_action(action, gesture);
                     if let Some(reply) = reply {
                         let _ = reply.send(result);
                     }
@@ -330,22 +363,115 @@ impl Worker {
         )
     }
 
-    fn handle_action(&mut self, action: EngineAction) -> DispatchResult {
+    fn handle_action(
+        &mut self,
+        action: EngineAction,
+        gesture: Option<ShortcutGesture>,
+    ) -> DispatchResult {
+        let state_before = self.state;
+        if let Some(gesture) = gesture.as_ref()
+            && gesture.registration_generation > 0
+            && gesture.registration_generation < self.last_registration_generation
+        {
+            let result = DispatchResult::Ignored {
+                reason: "stale registration generation",
+            };
+            self.emit_action_ack(gesture, state_before, self.state, &result);
+            return result;
+        }
+        if let Some(gesture) = gesture.as_ref()
+            && (self.last_gesture_id == Some(gesture.gesture_id)
+                || self
+                    .last_gesture_edge
+                    .is_some_and(|(generation, signal, received_at)| {
+                        generation == gesture.registration_generation
+                            && signal == gesture.signal
+                            && gesture.received_at_ms >= received_at
+                            && gesture.received_at_ms.saturating_sub(received_at) <= 75
+                    }))
+        {
+            let result = DispatchResult::Ignored {
+                reason: "duplicate gesture",
+            };
+            self.emit_action_ack(gesture, state_before, self.state, &result);
+            return result;
+        }
+        if let Some(gesture) = gesture.as_ref() {
+            self.last_gesture_id = Some(gesture.gesture_id);
+            self.last_gesture_edge = Some((
+                gesture.registration_generation,
+                gesture.signal,
+                gesture.received_at_ms,
+            ));
+            self.last_registration_generation = self
+                .last_registration_generation
+                .max(gesture.registration_generation);
+        }
         if self.shortcut_test_active() {
-            return DispatchResult::Ignored {
+            let result = DispatchResult::Ignored {
                 reason: "shortcut test active",
             };
+            if let Some(gesture) = gesture.as_ref() {
+                self.emit_action_ack(gesture, state_before, self.state, &result);
+            }
+            return result;
         }
 
-        match plan_action(self.state, self.load_mode(), action) {
+        let plan = plan_action(self.state, self.load_mode(), action);
+        let result = match plan {
             ActionPlan::Start => self.enter_listening(),
-            ActionPlan::Stop => self.try_stop_fire_and_forget(),
+            ActionPlan::Stop => self.try_stop_fire_and_forget(gesture.as_ref(), state_before),
             ActionPlan::Cancel => self.try_cancel_action(),
             ActionPlan::Ignore(reason) => DispatchResult::Ignored { reason },
             ActionPlan::Reject(reason) => DispatchResult::Rejected {
                 reason: reason.to_string(),
             },
+        };
+        if !matches!(plan, ActionPlan::Stop)
+            && let Some(gesture) = gesture.as_ref()
+        {
+            self.emit_action_ack(gesture, state_before, self.state, &result);
         }
+        result
+    }
+
+    fn emit_action_ack(
+        &self,
+        gesture: &ShortcutGesture,
+        before: EngineState,
+        after: EngineState,
+        result: &DispatchResult,
+    ) {
+        let (accepted, reason) = match result {
+            DispatchResult::Accepted => (true, None),
+            DispatchResult::Ignored { reason } => (false, Some((*reason).to_string())),
+            DispatchResult::Rejected { reason } => (false, Some(reason.clone())),
+        };
+        let ack = EngineActionAck {
+            gesture_id: gesture.gesture_id,
+            accepted,
+            state_before: format!("{before:?}").to_ascii_lowercase(),
+            state_after: format!("{after:?}").to_ascii_lowercase(),
+            reason,
+            acknowledged_at_ms: now_ms(),
+        };
+        let _ = self.app.emit("atmospeak://shortcut-gesture", ack.clone());
+        metrics::emit_runtime(
+            &self.app,
+            "shortcut-ack",
+            format!(
+                "gesture={} source={:?} signal={:?} accepted={} state={}->{} latency={}ms generation={}",
+                gesture.gesture_id,
+                gesture.source,
+                gesture.signal,
+                ack.accepted,
+                ack.state_before,
+                ack.state_after,
+                ack.acknowledged_at_ms
+                    .saturating_sub(gesture.received_at_ms),
+                gesture.registration_generation,
+            ),
+        );
     }
 
     fn enter_listening(&mut self) -> DispatchResult {
@@ -373,7 +499,11 @@ impl Worker {
         }
     }
 
-    fn try_stop_fire_and_forget(&mut self) -> DispatchResult {
+    fn try_stop_fire_and_forget(
+        &mut self,
+        gesture: Option<&ShortcutGesture>,
+        state_before: EngineState,
+    ) -> DispatchResult {
         if self.state != EngineState::Listening {
             return DispatchResult::Ignored {
                 reason: "not listening",
@@ -381,13 +511,12 @@ impl Worker {
         }
         // Process on this worker thread (not hook). Heavy ASR is spawn_blocking-equivalent:
         // we run pipeline inline on the engine worker thread.
-        match self.run_pipeline_from_listening() {
+        match self.run_pipeline_from_listening(gesture.map(|gesture| (gesture, state_before))) {
             Ok(_) => DispatchResult::Accepted,
             Err(error) => {
-                self.state = EngineState::Error;
-                self.active_recording = None;
-                self.settle_from_terminal();
-                self.emit_phase(DictationPhase::Error, None, error, None, None);
+                if self.state != EngineState::Error {
+                    self.fail_pipeline(error.clone());
+                }
                 DispatchResult::Accepted
             }
         }
@@ -434,7 +563,22 @@ impl Worker {
         if self.state != EngineState::Listening {
             return Err("no active recording to stop".to_string());
         }
-        self.run_pipeline_from_listening()
+        match self.run_pipeline_from_listening(None) {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if self.state != EngineState::Error {
+                    self.fail_pipeline(error.clone());
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn fail_pipeline(&mut self, error: String) {
+        self.state = EngineState::Error;
+        self.active_recording = None;
+        self.settle_from_terminal();
+        self.emit_phase(DictationPhase::Error, None, error, None, None);
     }
 
     fn cancel_any(&mut self) -> Result<(), String> {
@@ -482,7 +626,7 @@ impl Worker {
             .map_err(|e| e.to_string())?;
         let _started = state
             .recorder
-            .start(settings.microphone_name)
+            .start(settings.microphone_name, None)
             .map_err(|e| e.to_string())?;
         sound_check::start_level_events(&self.app);
         self.state = EngineState::MicCheck;
@@ -503,14 +647,38 @@ impl Worker {
 
     fn begin_listening(&self) -> Result<RecordingStarted, String> {
         let state = self.app.state::<AppState>();
-        let settings = state
+        let snapshot = state
             .database
             .lock()
-            .load_settings()
+            .snapshot()
             .map_err(|e| e.to_string())?;
+        let settings = snapshot.settings;
+        let prompt = snapshot
+            .dictionary
+            .iter()
+            .filter(|entry| entry.enabled)
+            .flat_map(|entry| [entry.phrase.as_str(), entry.replacement.as_str()])
+            .chain(
+                snapshot
+                    .snippets
+                    .iter()
+                    .filter(|snippet| snippet.enabled)
+                    .map(|snippet| snippet.trigger.as_str()),
+            )
+            .collect::<Vec<_>>()
+            .join(", ");
+        let streaming = settings
+            .live_preview_enabled
+            .then(|| state.streaming_asr())
+            .flatten()
+            .map(|host| recorder::StreamingStart {
+                host,
+                prompt,
+                profile: settings.transcription_profile,
+            });
         let started = state
             .recorder
-            .start(settings.microphone_name)
+            .start(settings.microphone_name, streaming)
             .map_err(|e| e.to_string())?;
         sound_check::start_level_events(&self.app);
         Ok(started)
@@ -523,12 +691,15 @@ impl Worker {
         }
     }
 
-    fn run_pipeline_from_listening(&mut self) -> Result<DictationResult, String> {
+    fn run_pipeline_from_listening(
+        &mut self,
+        stop_ack: Option<(&ShortcutGesture, EngineState)>,
+    ) -> Result<DictationResult, String> {
         let recording = self.active_recording.clone();
         self.state = EngineState::Processing;
         self.emit_phase(
-            DictationPhase::Processing,
-            recording.clone(),
+            DictationPhase::Finalizing,
+            None,
             "Transcribing locally…",
             None,
             None,
@@ -537,9 +708,48 @@ impl Worker {
         let state = self.app.state::<AppState>();
         state.end_level_stream();
         let capture_started = Instant::now();
-        let mut captured = state.recorder.stop().map_err(|e| e.to_string())?;
+        let mut captured = match state.recorder.stop() {
+            Ok(captured) => {
+                if let Some((gesture, state_before)) = stop_ack {
+                    self.emit_action_ack(
+                        gesture,
+                        state_before,
+                        EngineState::Processing,
+                        &DispatchResult::Accepted,
+                    );
+                }
+                captured
+            }
+            Err(error) => {
+                if let Some((gesture, state_before)) = stop_ack {
+                    self.emit_action_ack(
+                        gesture,
+                        state_before,
+                        self.state,
+                        &DispatchResult::Rejected {
+                            reason: error.to_string(),
+                        },
+                    );
+                }
+                let error = error.to_string();
+                self.fail_pipeline(error.clone());
+                return Err(error);
+            }
+        };
         let capture_stop_ms = capture_started.elapsed().as_millis() as u64;
+        if let Err(error) = recorder::finalize_capture(&mut captured) {
+            if let Some(host) = captured.streaming_host.take() {
+                host.cancel_session(&captured.id);
+            }
+            let _ = std::fs::remove_file(&captured.path);
+            let error = error.to_string();
+            self.fail_pipeline(error.clone());
+            return Err(error);
+        }
         if let Err(error) = recorder::prepare_for_dictation(&mut captured) {
+            if let Some(host) = captured.streaming_host.take() {
+                host.cancel_session(&captured.id);
+            }
             metrics::emit_runtime(
                 &self.app,
                 "audio-quality-rejected",
@@ -548,7 +758,10 @@ impl Worker {
                     captured.id, captured.duration_ms
                 ),
             );
-            return Err(error.to_string());
+            let _ = std::fs::remove_file(&captured.path);
+            let error = error.to_string();
+            self.fail_pipeline(error.clone());
+            return Err(error);
         }
 
         let snapshot = state
@@ -560,78 +773,187 @@ impl Worker {
         let last_hwnd = state.last_target_window();
         let app = self.app.clone();
 
-        let pipeline = (|| -> Result<(DictationResult, StageMetrics), anyhow::Error> {
-            let mut timer = StageTimer::new();
-            timer.mark_capture_stop(capture_stop_ms);
+        let pipeline =
+            (|| -> Result<(DictationResult, StageMetrics, StreamingMetrics), anyhow::Error> {
+                let mut timer = StageTimer::new();
+                timer.mark_capture_stop(capture_stop_ms);
 
-            let write_started = Instant::now();
-            let finished = recorder::finish_recording(captured)?;
-            timer.mark_write(write_started.elapsed().as_millis() as u64);
+                let streaming_host = captured.streaming_host.take();
+                let streaming_requested = streaming_host.is_some();
+                let streaming_frames_dropped = captured.streaming_frames_dropped;
+                let write_started = Instant::now();
+                let finished = recorder::finish_recording(captured)?;
+                timer.mark_write(write_started.elapsed().as_millis() as u64);
 
-            let asr_started = Instant::now();
-            let transcription = transcriber::transcribe(&app, &snapshot.settings, &finished.path)?;
-            timer.mark_asr(asr_started.elapsed().as_millis() as u64);
-            timer.mark_backend(transcription.backend);
-            let raw_text = transcription.text;
+                let mut first_partial_ms = None;
+                let mut processed_during_recording_ms = 0;
+                let mut tail_audio_ms = finished.duration_ms;
+                let mut max_backlog_ms = 0;
+                let mut sidecar_frames_dropped = 0;
+                let mut fallback_reason = None;
+                let asr_started = Instant::now();
+                let transcription = if let Some(host) = streaming_host {
+                    first_partial_ms = host.first_partial_ms();
+                    if streaming_frames_dropped > 0 {
+                        fallback_reason = Some(format!(
+                            "{streaming_frames_dropped} streaming audio frames were dropped"
+                        ));
+                        host.cancel_session(&finished.id);
+                        transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
+                    } else {
+                        match host.stop_session(&finished.id, Duration::from_secs(120)) {
+                            Ok(finalized) if !finalized.text.trim().is_empty() => {
+                                transcriber::Transcription {
+                                    text: {
+                                        processed_during_recording_ms =
+                                            finalized.processed_during_recording_ms;
+                                        tail_audio_ms = finalized.tail_audio_ms;
+                                        max_backlog_ms = finalized.max_backlog_ms;
+                                        sidecar_frames_dropped = finalized.audio_frames_dropped;
+                                        finalized.text
+                                    },
+                                    backend: match host.backend() {
+                                        AsrBackend::Vulkan => metrics::ASR_BACKEND_VULKAN,
+                                        _ => metrics::ASR_BACKEND_STREAMING_CPU,
+                                    },
+                                }
+                            }
+                            Ok(_) => {
+                                fallback_reason = Some("streaming result was empty".to_string());
+                                metrics::emit_runtime(
+                                    &app,
+                                    "streaming-asr-fallback",
+                                    format!(
+                                        "session={} streaming result was empty; using batch fallback",
+                                        finished.id
+                                    ),
+                                );
+                                transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
+                            }
+                            Err(error) => {
+                                fallback_reason = Some(error.to_string());
+                                metrics::emit_runtime(
+                                    &app,
+                                    "streaming-asr-fallback",
+                                    format!(
+                                        "session={} streaming finalization failed; using batch fallback: {error}",
+                                        finished.id
+                                    ),
+                                );
+                                transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
+                            }
+                        }
+                    }
+                } else {
+                    transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
+                };
+                let asr_ms = asr_started.elapsed().as_millis() as u64;
+                timer.mark_asr(asr_ms);
+                timer.mark_backend(transcription.backend);
+                if streaming_frames_dropped > 0 {
+                    metrics::emit_runtime(
+                        &app,
+                        "streaming-audio-overrun",
+                        format!(
+                            "session={} audio_frames_dropped={streaming_frames_dropped}",
+                            finished.id
+                        ),
+                    );
+                }
+                let raw_text = transcription.text;
 
-            let cleanup_started = Instant::now();
-            let cleaned_text = if snapshot.settings.cleanup_enabled {
-                cleanup::clean_text(&raw_text, &snapshot.dictionary, &snapshot.snippets)
-            } else {
-                raw_text.trim().to_string()
-            };
-            timer.mark_cleanup(cleanup_started.elapsed().as_millis() as u64);
+                let cleanup_started = Instant::now();
+                let cleaned_text = if snapshot.settings.cleanup_enabled {
+                    cleanup::clean_text(&raw_text, &snapshot.dictionary, &snapshot.snippets)
+                } else {
+                    raw_text.trim().to_string()
+                };
+                timer.mark_cleanup(cleanup_started.elapsed().as_millis() as u64);
 
-            let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
-                hwnd,
-                process_name: injection::process_name_for(hwnd),
-            });
+                let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
+                    hwnd,
+                    process_name: injection::process_name_for(hwnd),
+                });
 
-            let inject_started = Instant::now();
-            let injection_result = if snapshot.settings.auto_inject {
-                Some(injection::inject_text(
-                    &cleaned_text,
-                    snapshot.settings.restore_clipboard,
-                    preferred,
-                )?)
-            } else {
-                None
-            };
-            timer.mark_inject(inject_started.elapsed().as_millis() as u64);
+                let inject_started = Instant::now();
+                let injection_result = if snapshot.settings.auto_inject {
+                    Some(injection::inject_text(
+                        &cleaned_text,
+                        snapshot.settings.restore_clipboard,
+                        preferred,
+                    )?)
+                } else {
+                    if let Err(error) = injection::copy_text_to_clipboard(&cleaned_text) {
+                        metrics::emit_runtime(
+                            &app,
+                            "clipboard-copy-error",
+                            format!("session={} {error}", finished.id),
+                        );
+                    }
+                    None
+                };
+                let paste_ms = inject_started.elapsed().as_millis() as u64;
+                timer.mark_inject(paste_ms);
 
-            let session = TranscriptSession {
-                id: finished.id.clone(),
-                raw_text,
-                word_count: cleaned_text.split_whitespace().count(),
-                cleaned_text,
-                audio_path: finished.path.to_string_lossy().to_string(),
-                duration_ms: finished.duration_ms,
-                injected: injection_result
-                    .as_ref()
-                    .map(|result| result.injected)
-                    .unwrap_or(false),
-                source_application: injection_result
-                    .as_ref()
-                    .and_then(|result| result.target_process_name.clone()),
-                created_at: Utc::now(),
-            };
+                let session = TranscriptSession {
+                    id: finished.id.clone(),
+                    raw_text,
+                    word_count: cleaned_text.split_whitespace().count(),
+                    cleaned_text,
+                    audio_path: finished.path.to_string_lossy().to_string(),
+                    duration_ms: finished.duration_ms,
+                    injected: injection_result
+                        .as_ref()
+                        .map(|result| result.injected)
+                        .unwrap_or(false),
+                    source_application: injection_result
+                        .as_ref()
+                        .and_then(|result| result.target_process_name.clone()),
+                    created_at: Utc::now(),
+                };
 
-            let metrics = timer.finish(finished.id, finished.duration_ms);
-            Ok((
-                DictationResult {
-                    session,
-                    injection: injection_result,
-                },
-                metrics,
-            ))
-        })();
+                let backend = match transcription.backend {
+                    metrics::ASR_BACKEND_VULKAN => AsrBackend::Vulkan,
+                    metrics::ASR_BACKEND_STREAMING_CPU => AsrBackend::Cpu,
+                    metrics::ASR_BACKEND_HOST => AsrBackend::Host,
+                    _ => AsrBackend::Cli,
+                };
+                let streaming_metrics = StreamingMetrics {
+                    session_id: finished.id.clone(),
+                    backend,
+                    model_id: snapshot.settings.active_model_id.clone(),
+                    first_partial_ms,
+                    stop_ack_ms: capture_stop_ms,
+                    finalize_ms: asr_ms,
+                    paste_ms,
+                    processed_during_recording_ms,
+                    tail_audio_ms,
+                    max_backlog_ms,
+                    audio_frames_dropped: streaming_frames_dropped + sidecar_frames_dropped,
+                    fallback_reason: if streaming_requested {
+                        fallback_reason
+                    } else {
+                        Some("streaming sidecar unavailable or disabled".to_string())
+                    },
+                };
+                let metrics = timer.finish(finished.id, finished.duration_ms);
+                Ok((
+                    DictationResult {
+                        session,
+                        injection: injection_result,
+                    },
+                    metrics,
+                    streaming_metrics,
+                ))
+            })();
 
         match pipeline {
-            Ok((result, metrics)) => {
+            Ok((result, metrics, streaming_metrics)) => {
                 if let Err(error) = state.database.lock().insert_session(&result.session) {
                     metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
                 }
                 metrics::emit_stage_metrics(&self.app, &metrics);
+                metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
 
                 let injected = result
                     .injection
@@ -664,9 +986,9 @@ impl Worker {
                         Some(metrics),
                     );
                 } else {
-                    self.state = EngineState::Idle;
+                    self.state = EngineState::Pasted;
                     self.emit_phase(
-                        DictationPhase::Idle,
+                        DictationPhase::Saved,
                         recording,
                         message,
                         Some(result.clone()),
@@ -732,6 +1054,15 @@ impl Worker {
 
 /// Route shortcut string payloads into the engine (single dispatch path).
 pub fn route_shortcut_payload(app: &AppHandle, payload: &str) {
+    route_shortcut_payload_from(app, payload, ShortcutSource::LowLevelHook, 0);
+}
+
+pub fn route_shortcut_payload_from(
+    app: &AppHandle,
+    payload: &str,
+    source: ShortcutSource,
+    registration_generation: u64,
+) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
@@ -742,14 +1073,21 @@ pub fn route_shortcut_payload(app: &AppHandle, payload: &str) {
     let Some(engine) = state.engine() else {
         return;
     };
-    let action = match payload {
-        "pressed" => EngineAction::Pressed,
-        "released" => EngineAction::Released,
-        "toggle" => EngineAction::Toggle,
-        "cancel" => EngineAction::Cancel,
+    let (action, signal) = match payload {
+        "pressed" => (EngineAction::Pressed, ShortcutSignal::Pressed),
+        "released" => (EngineAction::Released, ShortcutSignal::Released),
+        "toggle" => (EngineAction::Toggle, ShortcutSignal::Toggle),
+        "cancel" => (EngineAction::Cancel, ShortcutSignal::Cancel),
         _ => return,
     };
-    let _ = engine.dispatch_fire_and_forget(action);
+    let gesture = ShortcutGesture {
+        gesture_id: NEXT_GESTURE_ID.fetch_add(1, Ordering::Relaxed),
+        registration_generation,
+        signal,
+        source,
+        received_at_ms: now_ms(),
+    };
+    let _ = engine.dispatch_gesture(action, gesture);
 }
 
 #[cfg(test)]

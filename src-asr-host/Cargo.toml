@@ -1,0 +1,17 @@
+[package]
+name = "atmospeak-asr-host"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[features]
+default = []
+vulkan = ["whisper-rs/vulkan"]
+
+[dependencies]
+anyhow = "1"
+atmospeak-asr-protocol = { path = "../src-asr-protocol" }
+rmp-serde = "1.3"
+serde = { version = "1", features = ["derive"] }
+whisper-rs = "0.16"
+

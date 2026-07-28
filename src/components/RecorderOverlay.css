@@ -73,10 +73,12 @@
 }
 .dock[data-state="listening"]::after,
 .dock[data-state="processing"]::after,
-.dock[data-state="delivered"]::after { content: none; }
+.dock[data-state="delivered"]::after,
+.dock[data-state="error"]::after { content: none; }
 .dock[data-state="listening"]::before,
 .dock[data-state="processing"]::before,
-.dock[data-state="delivered"]::before {
+.dock[data-state="delivered"]::before,
+.dock[data-state="error"]::before {
   background: radial-gradient(150% 90% at 50% -45%, rgba(255,255,255,0.22), rgba(255,255,255,0) 50%);
 }
 .dock__mark, .dock__core, .dock__right, .dock__restlabel { position: relative; z-index: 3; }
@@ -208,7 +210,8 @@
 /* — LISTENING / PROCESSING / DELIVERED: capsule — */
 .dock[data-state="listening"],
 .dock[data-state="processing"],
-.dock[data-state="delivered"] {
+.dock[data-state="delivered"],
+.dock[data-state="error"] {
   width: 468px; height: 88px; padding: 0 12px 0 16px;
   border-radius: 26px;
   gap: 14px;
@@ -274,7 +277,8 @@
 }
 .dock[data-state="listening"] .dock__core,
 .dock[data-state="processing"] .dock__core,
-.dock[data-state="delivered"] .dock__core { opacity: 1; }
+  .dock[data-state="delivered"] .dock__core { opacity: 1; }
+  .dock[data-state="error"] .dock__core { opacity: 1; }
 
 .dock__transcript {
   font-family: var(--font-body); font-size: 13.5px; line-height: 1.35;

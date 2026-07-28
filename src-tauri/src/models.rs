@@ -1,3 +1,4 @@
+pub use atmospeak_asr_protocol::{AsrBackend, StreamingMetrics, TranscriptionProfile};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +30,25 @@ pub struct AppSettings {
     pub wave_style: WaveStyle,
     pub dock_theme: DockTheme,
     pub motion: Motion,
+    pub model_selection_mode: ModelSelectionMode,
+    pub transcription_profile: TranscriptionProfile,
+    pub acceleration_preference: AccelerationPreference,
+    pub live_preview_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelSelectionMode {
+    Automatic,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AccelerationPreference {
+    Auto,
+    Vulkan,
+    Cpu,
 }
 
 /// Companion pigment. Drives `--accent*` and the neon listening glow.
@@ -95,6 +115,10 @@ impl Default for AppSettings {
             wave_style: WaveStyle::Ribbon,
             dock_theme: DockTheme::Dark,
             motion: Motion::Lively,
+            model_selection_mode: ModelSelectionMode::Automatic,
+            transcription_profile: TranscriptionProfile::Balanced,
+            acceleration_preference: AccelerationPreference::Auto,
+            live_preview_enabled: true,
         }
     }
 }
@@ -106,6 +130,48 @@ pub struct ShortcutStatus {
     pub hotkey: String,
     pub paused: bool,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ShortcutSource {
+    RegisteredHotkey,
+    RawInput,
+    LowLevelHook,
+    Tray,
+    Overlay,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ShortcutSignal {
+    Pressed,
+    Released,
+    Toggle,
+    Cancel,
+    Start,
+    Stop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutGesture {
+    pub gesture_id: u64,
+    pub registration_generation: u64,
+    pub signal: ShortcutSignal,
+    pub source: ShortcutSource,
+    pub received_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineActionAck {
+    pub gesture_id: u64,
+    pub accepted: bool,
+    pub state_before: String,
+    pub state_after: String,
+    pub reason: Option<String>,
+    pub acknowledged_at_ms: u64,
 }
 
 impl Default for ShortcutStatus {
@@ -131,9 +197,21 @@ pub enum DictationMode {
 pub enum DictationPhase {
     Idle,
     Listening,
-    Processing,
+    Finalizing,
     Pasted,
+    Saved,
     Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveTranscriptEvent {
+    pub session_id: String,
+    pub revision: u64,
+    pub stable_text: String,
+    pub partial_text: String,
+    pub covered_through_ms: u64,
+    pub first_partial_latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -320,6 +320,16 @@ fn send_paste_shortcut() -> Result<()> {
     Ok(())
 }
 
+pub fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    if text.trim().is_empty() {
+        return Err(anyhow!("cannot copy an empty transcript"));
+    }
+    Clipboard::new()
+        .context("failed to open system clipboard")?
+        .set_text(text.to_string())
+        .context("failed to write transcript to clipboard")
+}
+
 #[cfg(not(target_os = "windows"))]
 fn send_paste_shortcut() -> Result<()> {
     Err(anyhow!(

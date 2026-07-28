@@ -461,8 +461,8 @@ export function Onboarding(props: OnboardingProps) {
                 <div>
                   <div className="ob-kick" style={{ marginBottom: 12 }}>Gesture</div>
                   <div className="ob-modes">
-                    <button className={`ob-mode${settings.mode === "pushToTalk" ? " sel" : ""}`} onClick={() => setSettings({ ...settings, mode: "pushToTalk" })}>Hold to talk</button>
-                    <button className={`ob-mode${settings.mode === "toggle" ? " sel" : ""}`} onClick={() => setSettings({ ...settings, mode: "toggle" })}>Tap to toggle</button>
+                    <button className={`ob-mode${settings.mode === "pushToTalk" ? " sel" : ""}`} onClick={() => setSettings({ ...settings, mode: "pushToTalk" })}>Hold</button>
+                    <button className={`ob-mode${settings.mode === "toggle" ? " sel" : ""}`} onClick={() => setSettings({ ...settings, mode: "toggle" })}>Tap</button>
                   </div>
                 </div>
               </div>
@@ -520,7 +520,7 @@ export function Onboarding(props: OnboardingProps) {
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{soundCheck.result?.deviceName ?? "not checked"}</b></div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Resident ASR <b>{soundCheck.result?.asrBackend ?? "not checked"}</b> · SNR {soundCheck.result?.snrDb.toFixed(1) ?? "—"} dB</div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> <b>{activeModel?.label ?? "Balanced"}</b> model · runs offline</div>
-                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{selectedHotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "hold to talk" : "tap to toggle"}</div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{selectedHotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "Hold" : "Tap"}</div>
                 </div>
                 <div className="ob-ready-actions">
                   <button className="ob-preset" onClick={() => void onPasteTest()} disabled={pasteTest.running}>

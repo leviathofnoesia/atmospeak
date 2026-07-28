@@ -100,6 +100,21 @@ if ((Test-Path $CargoBin) -and ($env:PATH -notlike "*$CargoBin*")) {
 if (-not $SkipTauriBuild) {
   Push-Location $Root
   try {
+    $previousCargoTargetDir = $env:CARGO_TARGET_DIR
+    $sidecarExitCode = 0
+    try {
+      & (Join-Path $PSScriptRoot "build-asr-sidecars.ps1")
+      $sidecarExitCode = $LASTEXITCODE
+    } finally {
+      if ($null -eq $previousCargoTargetDir) {
+        Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+      } else {
+        $env:CARGO_TARGET_DIR = $previousCargoTargetDir
+      }
+    }
+    if ($sidecarExitCode -ne 0) {
+      throw "ASR sidecar build failed with exit code $sidecarExitCode"
+    }
     $buildArgs = @()
     if (-not $HasUpdaterSigningKey) {
       Write-Warning "No Tauri updater signing key found. Building unsigned local installers without updater artifacts or latest.json."

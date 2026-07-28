@@ -70,13 +70,20 @@ describe("RecorderOverlay", () => {
         busy={false}
         phase="listening"
         modelStatus={readyModel}
-        liveTranscript={{ sessionId: "rec-1", phase: "stable", text: "hello there", latencyMs: null }}
+        liveTranscript={{
+          sessionId: "rec-1",
+          phase: "partial",
+          stableText: "hello",
+          partialText: "there",
+          latencyMs: 800,
+        }}
         onToggle={onToggle}
         onCancel={onCancel}
       />,
     );
 
-    expect(screen.getByText("hello there")).toBeVisible();
+    expect(screen.getByText("hello")).toBeVisible();
+    expect(screen.getByText("there")).toBeVisible();
     // The active capsule geometry is driven by data-state; data-shape stays the
     // user's chosen *resting* silhouette and must not be rewritten while listening.
     expect(screen.getByRole("button", { name: /Atmospeak companion/i })).toHaveAttribute(
@@ -101,7 +108,7 @@ describe("RecorderOverlay", () => {
         recording={null}
         elapsedSeconds={0}
         busy
-        phase="processing"
+        phase="finalizing"
         modelStatus={readyModel}
         onToggle={vi.fn()}
         onCancel={vi.fn()}

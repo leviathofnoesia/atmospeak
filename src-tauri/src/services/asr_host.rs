@@ -270,7 +270,7 @@ fn free_port() -> Result<u16, std::io::Error> {
 /// Ties the server's lifetime to ours. Without a job object, a crashed or
 /// force-killed Atmospeak would leave whisper-server resident holding the model.
 #[cfg(target_os = "windows")]
-mod job {
+pub(super) mod job {
     use anyhow::{Context, Result};
     use std::{os::windows::io::AsRawHandle, process::Child};
     use windows::Win32::{

@@ -14,7 +14,10 @@ use tauri::{AppHandle, Manager};
 use crate::{
     db::Database,
     models::{RuntimeEvent, ShortcutStatus, StageMetrics},
-    services::{asr_host::AsrHost, dictation_engine::EngineHandle, recorder::RecorderService},
+    services::{
+        asr_host::AsrHost, dictation_engine::EngineHandle, recorder::RecorderService,
+        streaming_asr::StreamingAsr,
+    },
 };
 
 /// The application's data plane: every long-lived piece of state lives here.
@@ -36,6 +39,8 @@ pub struct AppState {
     engine: Mutex<Option<EngineHandle>>,
     last_metrics: Mutex<Option<StageMetrics>>,
     asr_host: Mutex<Option<Arc<AsrHost>>>,
+    streaming_asr: Mutex<Option<Arc<StreamingAsr>>>,
+    streaming_asr_generation: AtomicU64,
 }
 
 impl AppState {
@@ -48,6 +53,7 @@ impl AppState {
         std::fs::create_dir_all(&recordings_dir)
             .context("failed to create recordings directory")?;
         let database = Database::open(app_dir.clone())?;
+        let runtime_events = database.list_runtime_events(200).unwrap_or_default();
         let retention_days = database
             .load_settings()
             .map(|settings| settings.transcript_retention_days)
@@ -69,7 +75,7 @@ impl AppState {
             shortcut_test_deadline_ms: AtomicU64::new(0),
             shortcut_capture_active: Arc::new(Mutex::new(false)),
             last_external_target_window: Arc::new(Mutex::new(None)),
-            runtime_events: Arc::new(Mutex::new(Vec::new())),
+            runtime_events: Arc::new(Mutex::new(runtime_events)),
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
             model_download_cancel: Arc::new(AtomicBool::new(false)),
             level_stream_generation: AtomicU64::new(0),
@@ -77,6 +83,8 @@ impl AppState {
             engine: Mutex::new(None),
             last_metrics: Mutex::new(None),
             asr_host: Mutex::new(None),
+            streaming_asr: Mutex::new(None),
+            streaming_asr_generation: AtomicU64::new(0),
         })
     }
 
@@ -138,6 +146,52 @@ impl AppState {
         true
     }
 
+    pub fn set_streaming_asr(&self, host: Arc<StreamingAsr>) {
+        if let Some(previous) = self.streaming_asr.lock().replace(host) {
+            previous.shutdown();
+        }
+    }
+
+    /// Invalidates every in-flight warmup and returns the generation owned by
+    /// the caller about to create a new host.
+    pub fn begin_streaming_asr_warmup(&self) -> u64 {
+        self.streaming_asr_generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn set_streaming_asr_if_current(&self, generation: u64, host: Arc<StreamingAsr>) -> bool {
+        // Coordinate the generation test and publication with shutdown's slot
+        // lock. A shutdown that wins either invalidates us before this point or
+        // removes this just-published host immediately afterwards.
+        let mut candidate = Some(host);
+        let previous = {
+            let mut slot = self.streaming_asr.lock();
+            if self.streaming_asr_generation.load(Ordering::Acquire) != generation {
+                None
+            } else {
+                Some(slot.replace(candidate.take().expect("candidate host is available")))
+            }
+        };
+        let Some(previous) = previous else {
+            candidate.expect("stale warmup retains its host").shutdown();
+            return false;
+        };
+        if let Some(previous) = previous {
+            previous.shutdown();
+        }
+        true
+    }
+
+    pub fn streaming_asr(&self) -> Option<Arc<StreamingAsr>> {
+        self.streaming_asr.lock().clone()
+    }
+
+    pub fn shutdown_streaming_asr(&self) {
+        self.streaming_asr_generation.fetch_add(1, Ordering::AcqRel);
+        if let Some(host) = self.streaming_asr.lock().take() {
+            host.shutdown();
+        }
+    }
+
     pub fn set_shortcut_test_active(&self, active: bool) {
         *self.shortcut_test_active.lock() = active;
         self.shortcut_test_deadline_ms.store(
@@ -169,6 +223,9 @@ impl AppState {
     }
 
     pub fn record_event(&self, event: RuntimeEvent) {
+        if let Err(error) = self.database.lock().insert_runtime_event(&event) {
+            eprintln!("failed to persist runtime event: {error}");
+        }
         let mut log = self.runtime_events.lock();
         log.insert(0, event);
         if log.len() > 200 {
@@ -348,8 +405,9 @@ mod tests {
     fn named_accessors_round_trip_state() {
         let key = "WIND_SPEAK_APP_DATA_DIR";
         let previous = std::env::var(key).ok();
+        let temp = tempfile::tempdir().expect("app state tempdir");
         unsafe {
-            std::env::set_var(key, r"C:\temp\wind-speak-appstate-test");
+            std::env::set_var(key, temp.path());
         }
 
         let state = AppState::new().expect("app state");

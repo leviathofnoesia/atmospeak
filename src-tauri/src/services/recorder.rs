@@ -1,6 +1,11 @@
 use std::{
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, SyncSender, TrySendError},
+    },
+    thread,
     time::{Duration, Instant},
 };
 
@@ -14,7 +19,10 @@ use hound::{SampleFormat as WavSampleFormat, WavReader, WavSpec, WavWriter};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::models::{MicLevel, MicrophoneInfo, RecordingStarted};
+use crate::{
+    models::{MicLevel, MicrophoneInfo, RecordingStarted, TranscriptionProfile},
+    services::streaming_asr::StreamingAsr,
+};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -30,6 +38,34 @@ struct ActiveRecording {
     samples: Arc<Mutex<Vec<f32>>>,
     duration_override_ms: Option<u64>,
     _stream: Option<Stream>,
+    streaming: Option<ActiveStreaming>,
+}
+
+pub struct StreamingStart {
+    pub host: Arc<StreamingAsr>,
+    pub prompt: String,
+    pub profile: TranscriptionProfile,
+}
+
+struct ActiveStreaming {
+    host: Arc<StreamingAsr>,
+    sender: Option<StreamingFrameSender>,
+    worker: Option<thread::JoinHandle<()>>,
+    fallback_samples: Arc<Mutex<Vec<f32>>>,
+    dropped: Arc<AtomicU64>,
+    write_failed: Arc<AtomicBool>,
+}
+
+struct InputFrame {
+    sample_rate: u32,
+    samples: Vec<f32>,
+}
+
+#[derive(Clone)]
+struct StreamingFrameSender {
+    tx: SyncSender<InputFrame>,
+    fallback_samples: Arc<Mutex<Vec<f32>>>,
+    dropped: Arc<AtomicU64>,
 }
 
 pub struct FinishedRecording {
@@ -44,6 +80,13 @@ pub struct CapturedRecording {
     pub duration_ms: u64,
     pub sample_rate: u32,
     pub samples: Vec<f32>,
+    pub streaming_host: Option<Arc<StreamingAsr>>,
+    pub streaming_frames_dropped: u64,
+    pending_samples: Option<Arc<Mutex<Vec<f32>>>>,
+    streaming_worker: Option<thread::JoinHandle<()>>,
+    streaming_dropped: Option<Arc<AtomicU64>>,
+    streaming_write_failed: Option<Arc<AtomicBool>>,
+    audio_prepared: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +141,11 @@ impl RecorderService {
         Ok(microphones)
     }
 
-    pub fn start(&self, preferred_microphone: Option<String>) -> Result<RecordingStarted> {
+    pub fn start(
+        &self,
+        preferred_microphone: Option<String>,
+        streaming_start: Option<StreamingStart>,
+    ) -> Result<RecordingStarted> {
         let mut active = self.active.lock();
         if active.is_some() {
             return Err(anyhow!("recording is already active"));
@@ -118,6 +165,7 @@ impl RecorderService {
                 samples: Arc::new(Mutex::new(samples)),
                 duration_override_ms: Some(duration_ms),
                 _stream: None,
+                streaming: None,
             });
             return Ok(RecordingStarted {
                 id,
@@ -147,35 +195,111 @@ impl RecorderService {
         let sample_rate = supported_config.sample_rate().0;
         let channels = supported_config.channels() as usize;
         let stream_config = supported_config.clone().into();
+        let id = Uuid::new_v4().to_string();
+        let recording_path = self.recordings_dir.join(format!("{id}.wav"));
         let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let mut streaming = streaming_start.and_then(|start| {
+            match start
+                .host
+                .start_session(id.clone(), start.prompt, start.profile)
+            {
+                Ok(()) => match start_streaming_worker(
+                    start.host.clone(),
+                    id.clone(),
+                    samples.clone(),
+                    recording_path.clone(),
+                ) {
+                    Ok(streaming) => Some(streaming),
+                    Err(error) => {
+                        start.host.cancel_session(&id);
+                        eprintln!(
+                            "streaming worker unavailable, retaining batch fallback: {error}"
+                        );
+                        None
+                    }
+                },
+                Err(error) => {
+                    eprintln!(
+                        "streaming ASR session unavailable, retaining batch fallback: {error}"
+                    );
+                    None
+                }
+            }
+        });
+        let stream_sender = streaming
+            .as_mut()
+            .and_then(|streaming| streaming.sender.take());
         let capture_samples = Arc::clone(&samples);
         let error_callback = |error| eprintln!("Atmospeak audio stream error: {error}");
+        let stream_sender_f32 = stream_sender.clone();
+        let stream_sender_i16 = stream_sender.clone();
+        let stream_sender_u16 = stream_sender;
 
-        let stream = match supported_config.sample_format() {
-            SampleFormat::F32 => device.build_input_stream(
-                &stream_config,
-                move |data: &[f32], _| capture_input(data, channels, &capture_samples),
-                error_callback,
-                None,
-            )?,
-            SampleFormat::I16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _| capture_input(data, channels, &capture_samples),
-                error_callback,
-                None,
-            )?,
-            SampleFormat::U16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _| capture_input(data, channels, &capture_samples),
-                error_callback,
-                None,
-            )?,
-            format => return Err(anyhow!("unsupported microphone sample format: {format:?}")),
+        let stream_result = match supported_config.sample_format() {
+            SampleFormat::F32 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _| {
+                        capture_input_streaming(
+                            data,
+                            channels,
+                            sample_rate,
+                            &capture_samples,
+                            stream_sender_f32.as_ref(),
+                        )
+                    },
+                    error_callback,
+                    None,
+                )
+                .map_err(anyhow::Error::from),
+            SampleFormat::I16 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _| {
+                        capture_input_streaming(
+                            data,
+                            channels,
+                            sample_rate,
+                            &capture_samples,
+                            stream_sender_i16.as_ref(),
+                        )
+                    },
+                    error_callback,
+                    None,
+                )
+                .map_err(anyhow::Error::from),
+            SampleFormat::U16 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[u16], _| {
+                        capture_input_streaming(
+                            data,
+                            channels,
+                            sample_rate,
+                            &capture_samples,
+                            stream_sender_u16.as_ref(),
+                        )
+                    },
+                    error_callback,
+                    None,
+                )
+                .map_err(anyhow::Error::from),
+            format => Err(anyhow!("unsupported microphone sample format: {format:?}")),
+        };
+        let stream = match stream_result {
+            Ok(stream) => stream,
+            Err(error) => {
+                abort_streaming_start(&mut streaming, &id, &recording_path);
+                return Err(error.into());
+            }
         };
 
-        stream.play().context("failed to start microphone stream")?;
+        if let Err(error) = stream.play().context("failed to start microphone stream") {
+            drop(stream);
+            abort_streaming_start(&mut streaming, &id, &recording_path);
+            return Err(error);
+        }
 
-        let id = Uuid::new_v4().to_string();
         let started_at = Utc::now();
         *active = Some(ActiveRecording {
             id: id.clone(),
@@ -184,6 +308,7 @@ impl RecorderService {
             samples,
             duration_override_ms: None,
             _stream: Some(stream),
+            streaming,
         });
 
         Ok(RecordingStarted {
@@ -203,6 +328,7 @@ impl RecorderService {
             .duration_override_ms
             .unwrap_or_else(|| active.started_instant.elapsed().as_millis() as u64);
         if Duration::from_millis(duration_ms) < Duration::from_millis(250) {
+            cleanup_abandoned_recording(active, &self.recordings_dir);
             return Err(anyhow!("recording was too short to transcribe"));
         }
 
@@ -212,15 +338,34 @@ impl RecorderService {
             samples,
             duration_override_ms: _,
             _stream,
+            mut streaming,
             ..
         } = active;
         drop(_stream);
-
-        let samples = match Arc::try_unwrap(samples) {
-            Ok(samples) => samples.into_inner(),
-            Err(samples) => samples.lock().clone(),
+        let (
+            streaming_host,
+            streaming_worker,
+            streaming_dropped,
+            streaming_write_failed,
+            pending_samples,
+            samples,
+        ) = if let Some(mut streaming) = streaming.take() {
+            (
+                Some(streaming.host),
+                streaming.worker.take(),
+                Some(streaming.dropped),
+                Some(streaming.write_failed),
+                Some(streaming.fallback_samples),
+                Vec::new(),
+            )
+        } else {
+            let samples = match Arc::try_unwrap(samples) {
+                Ok(samples) => samples.into_inner(),
+                Err(samples) => samples.lock().clone(),
+            };
+            (None, None, None, None, None, samples)
         };
-        if samples.is_empty() {
+        if samples.is_empty() && pending_samples.is_none() {
             return Err(anyhow!("microphone did not capture any samples"));
         }
 
@@ -230,12 +375,28 @@ impl RecorderService {
             duration_ms,
             sample_rate,
             samples,
+            streaming_host,
+            streaming_frames_dropped: 0,
+            pending_samples,
+            streaming_worker,
+            streaming_dropped,
+            streaming_write_failed,
+            audio_prepared: false,
         })
     }
 
     pub fn cancel(&self) -> Result<()> {
         let mut active = self.active.lock();
-        if active.take().is_some() {
+        if let Some(mut active) = active.take() {
+            drop(active._stream.take());
+            if let Some(mut streaming) = active.streaming.take() {
+                if let Some(worker) = streaming.worker.take() {
+                    let _ = worker.join();
+                }
+                streaming.host.cancel_session(&active.id);
+                let _ =
+                    std::fs::remove_file(self.recordings_dir.join(format!("{}.wav", active.id)));
+            }
             Ok(())
         } else {
             Err(anyhow!("no active recording to cancel"))
@@ -293,6 +454,63 @@ impl RecorderService {
             clipping_ratio: analysis.clipping_ratio,
             timestamp_ms: Utc::now().timestamp_millis(),
         }
+    }
+}
+
+fn abort_streaming_start(
+    streaming: &mut Option<ActiveStreaming>,
+    session_id: &str,
+    recording_path: &std::path::Path,
+) {
+    if let Some(mut streaming) = streaming.take() {
+        // Drop the callback sender before joining so the worker can observe the
+        // closed queue even when CPAL stream construction failed.
+        drop(streaming.sender.take());
+        streaming.host.cancel_session(session_id);
+        if let Some(worker) = streaming.worker.take() {
+            let _ = worker.join();
+        }
+    }
+    let _ = std::fs::remove_file(recording_path);
+}
+
+fn cleanup_abandoned_recording(mut active: ActiveRecording, recordings_dir: &std::path::Path) {
+    drop(active._stream.take());
+    if let Some(mut streaming) = active.streaming.take() {
+        drop(streaming.sender.take());
+        streaming.host.cancel_session(&active.id);
+        if let Some(worker) = streaming.worker.take() {
+            let _ = worker.join();
+        }
+    }
+    let _ = std::fs::remove_file(recordings_dir.join(format!("{}.wav", active.id)));
+}
+
+/// Complete recorder-worker draining after the capture edge has already been
+/// acknowledged. This keeps shortcut latency independent of sidecar backlog.
+pub fn finalize_capture(captured: &mut CapturedRecording) -> Result<()> {
+    if let Some(worker) = captured.streaming_worker.take() {
+        let _ = worker.join();
+    }
+    if let Some(dropped) = captured.streaming_dropped.take() {
+        captured.streaming_frames_dropped = dropped.load(Ordering::Relaxed);
+    }
+    if let Some(samples) = captured.pending_samples.take() {
+        captured.samples = match Arc::try_unwrap(samples) {
+            Ok(samples) => samples.into_inner(),
+            Err(samples) => samples.lock().clone(),
+        };
+    }
+    if let Some(write_failed) = captured.streaming_write_failed.take() {
+        // A failed streaming WAV must not discard the capture that was already
+        // buffered in memory. Mark it unprepared so the batch path can rebuild
+        // a file from those samples instead of aborting the dictation here.
+        captured.audio_prepared = !write_failed.load(Ordering::Relaxed);
+    }
+    if captured.samples.is_empty() {
+        Err(anyhow!("microphone did not capture any samples"))
+    } else {
+        Ok(())
     }
 }
 
@@ -504,8 +722,11 @@ fn median(sorted: &[f32]) -> f32 {
 }
 
 pub fn finish_recording(captured: CapturedRecording) -> Result<FinishedRecording> {
-    let resampled = resample_linear(&captured.samples, captured.sample_rate, TARGET_SAMPLE_RATE);
-    write_wav(&captured.path, &resampled).context("failed to write recording wav")?;
+    if !captured.audio_prepared {
+        let resampled =
+            resample_linear(&captured.samples, captured.sample_rate, TARGET_SAMPLE_RATE);
+        write_wav(&captured.path, &resampled).context("failed to write recording wav")?;
+    }
 
     Ok(FinishedRecording {
         id: captured.id,
@@ -533,6 +754,194 @@ impl IntoF32 for i16 {
 impl IntoF32 for u16 {
     fn into_f32(self) -> f32 {
         (self as f32 - 32_768.0) / 32_768.0
+    }
+}
+
+fn start_streaming_worker(
+    host: Arc<StreamingAsr>,
+    session_id: String,
+    captured_samples: Arc<Mutex<Vec<f32>>>,
+    recording_path: PathBuf,
+) -> Result<ActiveStreaming> {
+    let (tx, rx) = mpsc::sync_channel::<InputFrame>(200);
+    let fallback_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let dropped = Arc::new(AtomicU64::new(0));
+    let worker_host = host.clone();
+    let worker_dropped = dropped.clone();
+    let write_failed = Arc::new(AtomicBool::new(false));
+    let worker_write_failed = write_failed.clone();
+    let worker = thread::Builder::new()
+        .name("atmospeak-audio-stream".to_string())
+        .spawn(move || {
+            let (asr_tx, asr_rx) = mpsc::sync_channel::<(u64, Vec<u8>)>(100);
+            let writer_host = worker_host.clone();
+            let writer_session_id = session_id.clone();
+            let writer = thread::Builder::new()
+                .name("atmospeak-asr-writer".to_string())
+                .spawn(move || {
+                    while let Ok((timestamp_ms, pcm)) = asr_rx.recv() {
+                        if writer_host
+                            .send_audio(&writer_session_id, timestamp_ms, pcm)
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .ok();
+            let mut resampler = StreamingResampler::default();
+            let wav_spec = WavSpec {
+                channels: 1,
+                sample_rate: TARGET_SAMPLE_RATE,
+                bits_per_sample: 16,
+                sample_format: WavSampleFormat::Int,
+            };
+            let mut wav_writer = WavWriter::create(&recording_path, wav_spec)
+                .map_err(|_| worker_write_failed.store(true, Ordering::Relaxed))
+                .ok();
+            let mut pending = Vec::<f32>::new();
+            let mut timestamp_ms = 0_u64;
+            while let Ok(frame) = rx.recv() {
+                append_recent_samples(&captured_samples, &frame.samples, frame.sample_rate);
+                let resampled = resampler.push(&frame.samples, frame.sample_rate);
+                if let Some(writer) = wav_writer.as_mut() {
+                    for sample in &resampled {
+                        if writer
+                            .write_sample((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+                            .is_err()
+                        {
+                            worker_write_failed.store(true, Ordering::Relaxed);
+                            wav_writer = None;
+                            break;
+                        }
+                    }
+                }
+                pending.extend(resampled);
+                while pending.len() >= 320 {
+                    let pcm = pending
+                        .drain(..320)
+                        .flat_map(|sample| {
+                            let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+                            value.to_le_bytes()
+                        })
+                        .collect::<Vec<_>>();
+                    if asr_tx.try_send((timestamp_ms, pcm)).is_err() {
+                        worker_dropped.fetch_add(1, Ordering::Relaxed);
+                    }
+                    timestamp_ms += 20;
+                }
+            }
+            if !pending.is_empty() {
+                pending.resize(320, 0.0);
+                let pcm = pending
+                    .into_iter()
+                    .flat_map(|sample| {
+                        ((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes()
+                    })
+                    .collect::<Vec<_>>();
+                if asr_tx.try_send((timestamp_ms, pcm)).is_err() {
+                    worker_dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            drop(asr_tx);
+            if let Some(writer) = wav_writer
+                && writer.finalize().is_err()
+            {
+                worker_write_failed.store(true, Ordering::Relaxed);
+            }
+            if let Some(writer) = writer {
+                let _ = writer.join();
+            }
+        })
+        .context("failed to start streaming audio worker")?;
+    Ok(ActiveStreaming {
+        host,
+        sender: Some(StreamingFrameSender {
+            tx,
+            fallback_samples: fallback_samples.clone(),
+            dropped: dropped.clone(),
+        }),
+        worker: Some(worker),
+        fallback_samples,
+        dropped,
+        write_failed,
+    })
+}
+
+fn append_recent_samples(samples: &Arc<Mutex<Vec<f32>>>, frame: &[f32], sample_rate: u32) {
+    let mut recent = samples.lock();
+    recent.extend_from_slice(frame);
+    let maximum = sample_rate as usize * 10;
+    if recent.len() > maximum {
+        let excess = recent.len() - maximum;
+        recent.drain(..excess);
+    }
+}
+
+#[derive(Default)]
+struct StreamingResampler {
+    buffer: Vec<f32>,
+    position: f64,
+}
+
+impl StreamingResampler {
+    fn push(&mut self, samples: &[f32], source_rate: u32) -> Vec<f32> {
+        if source_rate == TARGET_SAMPLE_RATE {
+            return samples.to_vec();
+        }
+        if source_rate == 0 || samples.is_empty() {
+            return Vec::new();
+        }
+        self.buffer.extend_from_slice(samples);
+        let ratio = source_rate as f64 / TARGET_SAMPLE_RATE as f64;
+        let mut output = Vec::new();
+        while self.position + 1.0 < self.buffer.len() as f64 {
+            let left = self.position.floor() as usize;
+            let fraction = (self.position - left as f64) as f32;
+            output.push(self.buffer[left] * (1.0 - fraction) + self.buffer[left + 1] * fraction);
+            self.position += ratio;
+        }
+        // Preserve the final source sample so interpolation across CPAL callback
+        // boundaries is identical to interpolation over one contiguous buffer.
+        let consumed = (self.position.floor() as usize).min(self.buffer.len().saturating_sub(1));
+        if consumed > 0 {
+            self.buffer.drain(..consumed);
+            self.position -= consumed as f64;
+        }
+        output
+    }
+}
+
+fn capture_input_streaming<T: Copy + IntoF32>(
+    data: &[T],
+    channels: usize,
+    sample_rate: u32,
+    samples: &Arc<Mutex<Vec<f32>>>,
+    streaming: Option<&StreamingFrameSender>,
+) {
+    let mono = data
+        .chunks(channels.max(1))
+        .map(|frame| {
+            frame.iter().map(|sample| (*sample).into_f32()).sum::<f32>() / frame.len() as f32
+        })
+        .collect::<Vec<_>>();
+    if let Some(streaming) = streaming {
+        // This buffer is independent of the capped metering window. Appending
+        // before queue delivery preserves source order and keeps batch fallback
+        // lossless even if the streaming worker falls behind or disconnects.
+        streaming.fallback_samples.lock().extend_from_slice(&mono);
+        match streaming.tx.try_send(InputFrame {
+            sample_rate,
+            samples: mono,
+        }) {
+            Ok(()) => {}
+            Err(TrySendError::Full(frame)) | Err(TrySendError::Disconnected(frame)) => {
+                streaming.dropped.fetch_add(1, Ordering::Relaxed);
+                append_recent_samples(samples, &frame.samples, frame.sample_rate);
+            }
+        }
+    } else {
+        samples.lock().extend_from_slice(&mono);
     }
 }
 
@@ -586,8 +995,15 @@ fn write_wav(path: &PathBuf, samples: &[f32]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioAnalysis, CapturedRecording, TARGET_SAMPLE_RATE, analyze_samples, finish_recording,
-        load_fixture_samples, normal_dictation_failure, prepare_for_dictation,
+        AudioAnalysis, CapturedRecording, StreamingFrameSender, StreamingResampler,
+        TARGET_SAMPLE_RATE, analyze_samples, capture_input_streaming, finish_recording,
+        load_fixture_samples, normal_dictation_failure, prepare_for_dictation, resample_linear,
+    };
+    use parking_lot::Mutex;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
     };
     use tempfile::tempdir;
 
@@ -605,6 +1021,13 @@ mod tests {
             duration_ms: 1_000,
             sample_rate: 48_000,
             samples,
+            streaming_host: None,
+            streaming_frames_dropped: 0,
+            pending_samples: None,
+            streaming_worker: None,
+            streaming_dropped: None,
+            streaming_write_failed: None,
+            audio_prepared: false,
         })
         .expect("finish recording");
 
@@ -616,6 +1039,40 @@ mod tests {
         assert_eq!(spec.channels, 1);
         assert_eq!(spec.sample_rate, TARGET_SAMPLE_RATE);
         assert_eq!(spec.bits_per_sample, 16);
+    }
+
+    #[test]
+    fn incremental_resampler_matches_offline_resampler_within_tolerance() {
+        let samples = (0..48_000)
+            .map(|index| (index as f32 / 19.0).sin() * 0.3)
+            .collect::<Vec<_>>();
+        let expected = resample_linear(&samples, 48_000, TARGET_SAMPLE_RATE);
+        let mut resampler = StreamingResampler::default();
+        let actual = samples
+            .chunks(997)
+            .flat_map(|chunk| resampler.push(chunk, 48_000))
+            .collect::<Vec<_>>();
+        assert!(expected.len().abs_diff(actual.len()) <= 1);
+        for (expected, actual) in expected.iter().zip(&actual) {
+            assert!((expected - actual).abs() < 0.0001);
+        }
+    }
+
+    #[test]
+    fn full_streaming_queue_never_blocks_the_audio_callback() {
+        let (tx, _rx) = mpsc::sync_channel(0);
+        let dropped = Arc::new(AtomicU64::new(0));
+        let fallback_samples = Arc::new(Mutex::new(Vec::new()));
+        let sender = StreamingFrameSender {
+            tx,
+            fallback_samples: fallback_samples.clone(),
+            dropped: dropped.clone(),
+        };
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        capture_input_streaming(&[0.1_f32; 320], 1, 16_000, &captured, Some(&sender));
+        assert_eq!(captured.lock().len(), 320);
+        assert_eq!(fallback_samples.lock().len(), 320);
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -695,6 +1152,13 @@ mod tests {
             duration_ms: 2_000,
             sample_rate: 48_000,
             samples,
+            streaming_host: None,
+            streaming_frames_dropped: 0,
+            pending_samples: None,
+            streaming_worker: None,
+            streaming_dropped: None,
+            streaming_write_failed: None,
+            audio_prepared: false,
         };
         let analysis = prepare_for_dictation(&mut captured).expect("valid speech");
         let mean = captured.samples.iter().copied().sum::<f32>() / captured.samples.len() as f32;
