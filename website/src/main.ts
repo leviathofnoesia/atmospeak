@@ -51,15 +51,15 @@ function hero() {
 
   const title = document.createElement("h1");
   title.id = "hero-title";
-  title.append("Speak anywhere. ");
+  title.append("Speak naturally. ");
   const accent = document.createElement("em");
-  accent.textContent = "Paste instantly.";
+  accent.textContent = "Paste once.";
   title.append(accent);
   content.append(title);
 
   const copy = document.createElement("p");
   copy.textContent =
-    "Atmospeak bundles an offline transcription engine, launches from your tray, and turns a global hotkey into clean pasted text.";
+    "Atmospeak streams transcription locally while you speak, previews it in the dock, and inserts one reconciled result when you stop.";
   content.append(copy);
 
   const actions = document.createElement("div");
@@ -75,7 +75,7 @@ function hero() {
   content.append(actions);
 
   section.append(content);
-  section.append(specStrip(`v${APP_VERSION}`, "Windows x64", "Offline base.en model bundled"));
+  section.append(specStrip(`v${APP_VERSION}`, "Windows x64", "Vulkan + CPU · fully local"));
   return section;
 }
 
@@ -85,9 +85,9 @@ function featureBand() {
   section.setAttribute("aria-label", "Product features");
 
   for (const item of [
-    ["Install once", "The first English model and whisper runtime are already inside the installer. Optional models download in the app."],
-    ["Offline by default", "Audio, transcripts, settings, and speech models stay on your Windows PC. No account or cloud transcription is required."],
-    ["Speak anywhere", "Global push-to-talk works across Notepad, editors, browsers, chat fields, and terminals."],
+    ["Stream locally", "Bounded Whisper segments are decoded while you record, leaving only the final tail to reconcile when you stop."],
+    ["Offline by default", "Audio, previews, transcripts, settings, and speech models stay on your Windows PC. No account or cloud transcription is required."],
+    ["Hold or Tap", "Release any required key in Hold mode, or press the chord a second time in Tap mode. Both finish with exactly one paste."],
   ] as const) {
     const card = document.createElement("article");
     card.className = "feature-card";
@@ -117,7 +117,7 @@ function modelSection() {
   heading.textContent = "Local Whisper models";
   const copy = document.createElement("p");
   copy.textContent =
-    "Atmospeak runs the Windows x64 whisper.cpp runtime locally. It prefers a resident whisper-server that keeps the selected GGML model warm, then falls back to the bundled one-shot whisper-cli if that host is unavailable.";
+    "Atmospeak keeps the selected GGML model warm in a crash-isolated streaming sidecar. Automatic mode tries Vulkan first, falls back to CPU, then retains the resident whisper-server and one-shot whisper-cli as local recovery paths.";
   header.append(heading, copy);
   section.append(header);
 
@@ -245,7 +245,7 @@ function modelSection() {
   notes.append(
     modelNote(
       "Selection safety",
-      "If a selected optional model is missing, Atmospeak automatically uses the bundled base.en model instead.",
+      "Automatic Balanced chooses only among models you installed and uses measured backlog and finalization time. It never downloads or deletes a model on its own.",
     ),
     modelNote(
       "Download integrity",
@@ -253,7 +253,7 @@ function modelSection() {
     ),
     modelNote(
       "Advanced overrides",
-      "Settings can point to a custom whisper.cpp CLI and model path; this bypasses the managed list above.",
+      "You can pin a model, choose Vulkan or CPU, disable live preview, or turn off streaming with the documented environment switch.",
     ),
   );
   section.append(notes);
@@ -284,7 +284,7 @@ function downloadSection() {
   heading.textContent = `Atmospeak v${APP_VERSION}`;
   const copy = document.createElement("p");
   copy.textContent =
-    "Install the corrective Windows release, use the portable build, or verify every file against the published checksums.";
+    "Install the streaming local transcription release, use the portable build, or verify every file against the published checksums.";
   header.append(heading, copy);
   section.append(header);
 
@@ -384,9 +384,9 @@ function docsSection() {
       "You can verify the downloaded file against SHA256SUMS.txt before running it.",
     ], true),
     docCard("03 / Hotkey", [
-      "The default shortcut is Ctrl+Win in push-to-talk mode.",
-      "Hold the chord, speak, then release to transcribe and paste at your cursor.",
-      "Change the shortcut or switch to tap-to-toggle in Settings.",
+      "The default shortcut is Ctrl+Win in Hold mode.",
+      "Hold the chord and release any required key to stop, or choose Tap and press the chord a second time.",
+      "The dock previews locally while you speak; your target app receives one final paste.",
     ]),
     docCard("04 / Microphone", [
       "Choose an input during onboarding and complete the level check.",
@@ -398,8 +398,8 @@ function docsSection() {
       "Transcription runs on-device. Removing that folder resets the local profile after the app is closed.",
     ]),
     docCard("06 / Latency", [
-      "Latency depends on speech length, model size, CPU, and whether the resident model has finished warming.",
-      "Short phrases can land quickly after warm-up; long dictation and larger models take longer. No fixed latency is promised.",
+      "Atmospeak processes bounded speech segments during recording and freezes the timer immediately when you stop.",
+      "Finalization time depends on the remaining tail, model size, Vulkan or CPU performance, and current backlog. Local diagnostics show the measured result.",
     ]),
   );
   section.append(grid);
@@ -427,7 +427,7 @@ function footer() {
   node.append(kicker("+ TRUST MODEL"));
   const copy = document.createElement("p");
   copy.textContent =
-    "Windows builds are unsigned, so SmartScreen can warn. Verify release checksums; in-app updates additionally require Tauri updater signatures when published.";
+    "Atmospeak remains fully local: preview text never enters the target app, and no recording or transcript is sent to a cloud service. Windows builds are unsigned, so verify release checksums if SmartScreen warns.";
   node.append(copy);
   return node;
 }
