@@ -3,6 +3,9 @@ dist/
 dist-site/
 release/
 src-tauri/target/
+src-asr-host/target/
+src-asr-protocol/target/
+src-tauri/resources/asr/*.exe
 .tmp/
 .vscode/
 test-results/

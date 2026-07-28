@@ -21,7 +21,7 @@ pub fn start(app: &AppHandle, device_name: String) -> Result<()> {
     let state = app.state::<AppState>();
     state
         .recorder
-        .start(Some(device_name.to_string()))
+        .start(Some(device_name.to_string()), None)
         .map_err(classify_capture_error)?;
     let persist_result = (|| -> Result<()> {
         let mut settings = state.database.lock().load_settings()?;
@@ -59,7 +59,8 @@ pub fn finish(app: &AppHandle, expected_phrase: String) -> Result<SoundCheckResu
     state.end_level_stream();
 
     let capture_started = Instant::now();
-    let captured = state.recorder.stop().map_err(classify_capture_error)?;
+    let mut captured = state.recorder.stop().map_err(classify_capture_error)?;
+    recorder::finalize_capture(&mut captured).map_err(classify_capture_error)?;
     let capture_ms = capture_started.elapsed().as_millis() as u64;
     let device_name = state
         .database

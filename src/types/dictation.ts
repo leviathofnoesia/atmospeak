@@ -22,6 +22,10 @@ export interface AppSettings {
   waveStyle: WaveStyle;
   dockTheme: DockTheme;
   motion: Motion;
+  modelSelectionMode: ModelSelectionMode;
+  transcriptionProfile: TranscriptionProfile;
+  accelerationPreference: AccelerationPreference;
+  livePreviewEnabled: boolean;
 }
 
 export type Accent = "dusk" | "teal" | "lilac";
@@ -64,7 +68,17 @@ export interface RuntimeEvent {
   createdAt: string;
 }
 
-export type DictationPhase = "idle" | "listening" | "processing" | "pasted" | "error";
+export type DictationPhase =
+  | "idle"
+  | "listening"
+  | "finalizing"
+  | "pasted"
+  | "saved"
+  | "error";
+
+export type ModelSelectionMode = "automatic" | "manual";
+export type TranscriptionProfile = "balanced" | "quality" | "speed";
+export type AccelerationPreference = "auto" | "vulkan" | "cpu";
 
 export interface StageMetrics {
   sessionId: string;
@@ -76,6 +90,30 @@ export interface StageMetrics {
   totalMs: number;
   asrBackend: string;
   audioDurationMs: number;
+}
+
+export interface LiveTranscriptEvent {
+  sessionId: string;
+  revision: number;
+  stableText: string;
+  partialText: string;
+  coveredThroughMs: number;
+  firstPartialLatencyMs: number | null;
+}
+
+export interface StreamingMetrics {
+  sessionId: string;
+  backend: "vulkan" | "cpu" | "host" | "cli";
+  modelId: string;
+  firstPartialMs: number | null;
+  stopAckMs: number;
+  finalizeMs: number;
+  pasteMs: number;
+  processedDuringRecordingMs: number;
+  tailAudioMs: number;
+  maxBacklogMs: number;
+  audioFramesDropped: number;
+  fallbackReason: string | null;
 }
 
 export interface NativeDictationEvent {
@@ -291,5 +329,9 @@ export function defaultSettings(): AppSettings {
     waveStyle: "ribbon",
     dockTheme: "dark",
     motion: "lively",
+    modelSelectionMode: "automatic",
+    transcriptionProfile: "balanced",
+    accelerationPreference: "auto",
+    livePreviewEnabled: true,
   };
 }

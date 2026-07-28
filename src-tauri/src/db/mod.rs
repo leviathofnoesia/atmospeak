@@ -5,7 +5,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::models::{
-    AppSettings, AppSnapshot, DictationStats, DictionaryEntry, Snippet, TranscriptSession,
+    AppSettings, AppSnapshot, DictationStats, DictionaryEntry, RuntimeEvent, Snippet,
+    StreamingMetrics, TranscriptSession,
 };
 
 pub struct Database {
@@ -55,6 +56,29 @@ impl Database {
                 word_count integer not null,
                 injected integer not null,
                 source_application text,
+                created_at text not null
+            );
+
+            create table if not exists runtime_events (
+                id integer primary key autoincrement,
+                kind text not null,
+                message text not null,
+                created_at text not null
+            );
+
+            create table if not exists dictation_metrics (
+                session_id text primary key not null,
+                backend text not null,
+                model_id text not null,
+                first_partial_ms integer,
+                stop_ack_ms integer not null,
+                finalize_ms integer not null,
+                paste_ms integer not null,
+                processed_during_recording_ms integer not null,
+                tail_audio_ms integer not null,
+                max_backlog_ms integer not null,
+                audio_frames_dropped integer not null,
+                fallback_reason text,
                 created_at text not null
             );
             "#,
@@ -115,6 +139,112 @@ impl Database {
             params![value],
         )?;
         Ok(())
+    }
+
+    pub fn insert_runtime_event(&self, event: &RuntimeEvent) -> Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "insert into runtime_events (kind, message, created_at) values (?1, ?2, ?3)",
+            params![event.kind, event.message, event.created_at.to_rfc3339()],
+        )?;
+        transaction.execute(
+            "delete from runtime_events where id not in (
+                select id from runtime_events order by id desc limit 500
+            )",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn list_runtime_events(&self, limit: usize) -> Result<Vec<RuntimeEvent>> {
+        let mut statement = self.connection.prepare(
+            "select kind, message, created_at
+             from runtime_events
+             order by id desc
+             limit ?1",
+        )?;
+        let rows = statement.query_map(params![limit.min(500) as i64], |row| {
+            Ok(RuntimeEvent {
+                kind: row.get(0)?,
+                message: row.get(1)?,
+                created_at: parse_datetime(row.get::<_, String>(2)?),
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to load runtime events")
+    }
+
+    pub fn insert_dictation_metrics(&self, metrics: &StreamingMetrics) -> Result<()> {
+        self.connection.execute(
+            "insert into dictation_metrics (
+                session_id, backend, model_id, first_partial_ms, stop_ack_ms,
+                finalize_ms, paste_ms, processed_during_recording_ms, tail_audio_ms,
+                max_backlog_ms, audio_frames_dropped, fallback_reason, created_at
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             on conflict(session_id) do update set
+                backend = excluded.backend,
+                model_id = excluded.model_id,
+                first_partial_ms = excluded.first_partial_ms,
+                stop_ack_ms = excluded.stop_ack_ms,
+                finalize_ms = excluded.finalize_ms,
+                paste_ms = excluded.paste_ms,
+                processed_during_recording_ms = excluded.processed_during_recording_ms,
+                tail_audio_ms = excluded.tail_audio_ms,
+                max_backlog_ms = excluded.max_backlog_ms,
+                audio_frames_dropped = excluded.audio_frames_dropped,
+                fallback_reason = excluded.fallback_reason,
+                created_at = excluded.created_at",
+            params![
+                metrics.session_id,
+                format!("{:?}", metrics.backend).to_ascii_lowercase(),
+                metrics.model_id,
+                metrics.first_partial_ms.map(|value| value as i64),
+                metrics.stop_ack_ms as i64,
+                metrics.finalize_ms as i64,
+                metrics.paste_ms as i64,
+                metrics.processed_during_recording_ms as i64,
+                metrics.tail_audio_ms as i64,
+                metrics.max_backlog_ms as i64,
+                metrics.audio_frames_dropped as i64,
+                metrics.fallback_reason,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn automatic_model_candidate(&self, preferred_model_id: &str) -> Result<Option<String>> {
+        let preferred_is_healthy: bool = self.connection.query_row(
+            "select count(*) >= 3
+                    and avg(finalize_ms) <= 1500
+                    and max(max_backlog_ms) < 2000
+                    and max(audio_frames_dropped) = 0
+             from dictation_metrics
+             where model_id = ?1 and backend in ('vulkan', 'cpu')",
+            params![preferred_model_id],
+            |row| row.get(0),
+        )?;
+        if preferred_is_healthy {
+            return Ok(Some(preferred_model_id.to_string()));
+        }
+        self.connection
+            .query_row(
+                "select model_id
+                 from dictation_metrics
+                 where backend in ('vulkan', 'cpu')
+                 group by model_id
+                 having count(*) >= 3
+                    and avg(finalize_ms) <= 1500
+                    and max(max_backlog_ms) < 2000
+                    and max(audio_frames_dropped) = 0
+                 order by avg(finalize_ms) asc
+                 limit 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("failed to select automatic transcription model")
     }
 
     pub fn list_dictionary(&self) -> Result<Vec<DictionaryEntry>> {
@@ -263,6 +393,10 @@ impl Database {
             .optional()?;
         self.connection
             .execute("delete from transcript_sessions where id = ?1", params![id])?;
+        self.connection.execute(
+            "delete from dictation_metrics where session_id = ?1",
+            params![id],
+        )?;
         Ok(audio_path)
     }
 
@@ -280,6 +414,11 @@ impl Database {
         self.connection.execute(
             "delete from transcript_sessions where created_at < ?1",
             params![cutoff.to_rfc3339()],
+        )?;
+        self.connection.execute(
+            "delete from dictation_metrics
+             where session_id not in (select id from transcript_sessions)",
+            [],
         )?;
         Ok(audio_paths)
     }
@@ -354,7 +493,10 @@ mod tests {
     /// keys. Adding the appearance block must not strand an existing profile.
     #[test]
     fn loads_settings_blobs_written_before_the_appearance_fields() {
-        use crate::models::{Accent, DockShape, DockTheme, Motion, WaveStyle};
+        use crate::models::{
+            AccelerationPreference, Accent, DockShape, DockTheme, ModelSelectionMode, Motion,
+            TranscriptionProfile, WaveStyle,
+        };
 
         let temp = tempdir().expect("tempdir");
         let database = Database::open(temp.path().to_path_buf()).expect("database");
@@ -392,6 +534,10 @@ mod tests {
         assert_eq!(loaded.wave_style, WaveStyle::Ribbon);
         assert_eq!(loaded.dock_theme, DockTheme::Dark);
         assert_eq!(loaded.motion, Motion::Lively);
+        assert_eq!(loaded.model_selection_mode, ModelSelectionMode::Automatic);
+        assert_eq!(loaded.transcription_profile, TranscriptionProfile::Balanced);
+        assert_eq!(loaded.acceleration_preference, AccelerationPreference::Auto);
+        assert!(loaded.live_preview_enabled);
     }
 
     #[test]
@@ -411,6 +557,58 @@ mod tests {
         assert_eq!(loaded.accent, Accent::Lilac);
         assert_eq!(loaded.dock_shape, DockShape::Tape);
         assert_eq!(loaded.motion, Motion::Calm);
+    }
+
+    #[test]
+    fn runtime_diagnostics_are_persisted_and_bounded() {
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        for index in 0..505 {
+            database
+                .insert_runtime_event(&RuntimeEvent {
+                    kind: "shortcut-ack".to_string(),
+                    message: format!("gesture={index}"),
+                    created_at: Utc::now(),
+                })
+                .expect("insert runtime event");
+        }
+        let events = database.list_runtime_events(500).expect("runtime events");
+        assert_eq!(events.len(), 500);
+        assert_eq!(events[0].message, "gesture=504");
+        assert_eq!(events[499].message, "gesture=5");
+    }
+
+    #[test]
+    fn automatic_model_policy_keeps_a_measured_healthy_preference() {
+        use crate::models::{AsrBackend, StreamingMetrics};
+
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        for index in 0..3 {
+            database
+                .insert_dictation_metrics(&StreamingMetrics {
+                    session_id: format!("session-{index}"),
+                    backend: AsrBackend::Vulkan,
+                    model_id: "distil-large-v3.5".to_string(),
+                    first_partial_ms: Some(900),
+                    stop_ack_ms: 20,
+                    finalize_ms: 600,
+                    paste_ms: 80,
+                    processed_during_recording_ms: 9_500,
+                    tail_audio_ms: 500,
+                    max_backlog_ms: 500,
+                    audio_frames_dropped: 0,
+                    fallback_reason: None,
+                })
+                .expect("dictation metrics");
+        }
+        assert_eq!(
+            database
+                .automatic_model_candidate("distil-large-v3.5")
+                .expect("automatic candidate")
+                .as_deref(),
+            Some("distil-large-v3.5")
+        );
     }
 
     #[test]

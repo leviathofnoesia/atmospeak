@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 #[cfg(not(target_os = "windows"))]
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
-use crate::models::ShortcutStatus;
+use crate::models::{DictationMode, ShortcutStatus};
 
 #[derive(Clone)]
 struct ShortcutCandidate {
@@ -49,6 +49,7 @@ pub fn register_shortcut(
     shortcut_status: Arc<Mutex<ShortcutStatus>>,
     shortcuts_paused: Arc<Mutex<bool>>,
     requested_hotkey: &str,
+    mode: DictationMode,
     paused: bool,
 ) -> ShortcutStatus {
     // Registration and the hook must agree about whether input is live. Setup
@@ -64,13 +65,14 @@ pub fn register_shortcut(
             shortcut_status,
             shortcuts_paused,
             requested_hotkey,
+            mode,
             paused,
         )
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = shortcuts_paused;
+        let _ = (shortcuts_paused, mode);
         let _ = app.global_shortcut().unregister_all();
         let candidates = shortcut_candidates(requested_hotkey);
         let mut failures = Vec::new();
@@ -471,17 +473,17 @@ mod windows_keyboard_hook {
         ParsedShortcut, ShortcutCaptureEvent, ShortcutKeyEvent, normalize_label, parse_shortcut,
         shortcut_candidates,
     };
-    use crate::models::ShortcutStatus;
+    use crate::models::{DictationMode, ShortcutSource, ShortcutStatus};
     use parking_lot::Mutex as ParkingMutex;
     use std::{
         collections::{HashMap, HashSet},
         sync::{Arc, LazyLock, Mutex as StdMutex, mpsc},
         thread,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
     use tauri::{AppHandle, Emitter, Manager};
     use windows::Win32::{
-        Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
+        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
         System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
         UI::{
             Input::KeyboardAndMouse::{
@@ -490,15 +492,23 @@ mod windows_keyboard_hook {
                 VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
                 VK_SHIFT,
             },
+            Input::{
+                GetRawInputData, RAWINPUT, RAWINPUTDEVICE, RID_INPUT, RIDEV_INPUTSINK,
+                RIM_TYPEKEYBOARD, RegisterRawInputDevices,
+            },
             WindowsAndMessaging::{
-                CallNextHookEx, GetMessageW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
-                SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
-                WM_HOTKEY, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+                CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, GetMessageW,
+                HWND_MESSAGE, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, RI_KEY_BREAK,
+                RegisterClassW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+                WINDOW_EX_STYLE, WINDOW_STYLE, WM_HOTKEY, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
+                WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW,
             },
         },
     };
+    use windows::core::w;
 
     const RUNTIME_HOTKEY_ID: i32 = 0x4154;
+    const HOTKEY_DEDUP_WINDOW: Duration = Duration::from_millis(75);
 
     static HOOK_CONTEXT: LazyLock<StdMutex<HookContext>> =
         LazyLock::new(|| StdMutex::new(HookContext::default()));
@@ -510,10 +520,13 @@ mod windows_keyboard_hook {
         app: Option<AppHandle>,
         shortcuts_paused: Option<Arc<ParkingMutex<bool>>>,
         hotkey: ParsedShortcut,
+        mode: DictationMode,
         runtime: ShortcutRuntimeState,
         capture: ShortcutCaptureRuntime,
         ui_tx: Option<mpsc::Sender<HookUiEvent>>,
         system_hotkey_registered: bool,
+        registration_generation: u64,
+        last_registered_hotkey_at: Option<Instant>,
     }
 
     impl Default for HookContext {
@@ -528,10 +541,13 @@ mod windows_keyboard_hook {
                     shift: false,
                     key: None,
                 },
+                mode: DictationMode::PushToTalk,
                 runtime: ShortcutRuntimeState::default(),
                 capture: ShortcutCaptureRuntime::default(),
                 ui_tx: None,
                 system_hotkey_registered: false,
+                registration_generation: 0,
+                last_registered_hotkey_at: None,
             }
         }
     }
@@ -578,6 +594,7 @@ mod windows_keyboard_hook {
         shortcut_status: Arc<ParkingMutex<ShortcutStatus>>,
         shortcuts_paused: Arc<ParkingMutex<bool>>,
         requested_hotkey: &str,
+        mode: DictationMode,
         paused: bool,
     ) -> ShortcutStatus {
         stop_existing_hook();
@@ -609,7 +626,7 @@ mod windows_keyboard_hook {
             }
         };
 
-        match start_hook(app.clone(), shortcuts_paused, parsed) {
+        match start_hook(app.clone(), shortcuts_paused, parsed, mode) {
             Ok(()) => {
                 let status = ShortcutStatus {
                     registered: true,
@@ -641,6 +658,7 @@ mod windows_keyboard_hook {
         app: AppHandle,
         shortcuts_paused: Arc<ParkingMutex<bool>>,
         hotkey: ParsedShortcut,
+        mode: DictationMode,
     ) -> Result<(), String> {
         let (ui_tx, ui_rx) = mpsc::channel();
         let ui_app = app.clone();
@@ -670,10 +688,13 @@ mod windows_keyboard_hook {
                 app: Some(app),
                 shortcuts_paused: Some(shortcuts_paused),
                 hotkey,
+                mode,
                 runtime: ShortcutRuntimeState::default(),
                 capture: ShortcutCaptureRuntime::default(),
                 ui_tx: Some(ui_tx),
                 system_hotkey_registered: false,
+                registration_generation: context.registration_generation.wrapping_add(1),
+                last_registered_hotkey_at: None,
             };
         }
 
@@ -723,32 +744,47 @@ mod windows_keyboard_hook {
                     return;
                 }
             };
-            let system_hotkey_registered = if let Some(key) = current_hotkey().and_then(|hotkey| hotkey.key) {
-                let hotkey = current_hotkey().expect("hotkey exists while registering");
-                let mut modifiers = MOD_NOREPEAT;
-                if hotkey.ctrl {
-                    modifiers |= MOD_CONTROL;
-                }
-                if hotkey.alt {
-                    modifiers |= MOD_ALT;
-                }
-                if hotkey.shift {
-                    modifiers |= MOD_SHIFT;
-                }
-                if hotkey.win {
-                    modifiers |= MOD_WIN;
-                }
-                if let Err(error) = RegisterHotKey(None, RUNTIME_HOTKEY_ID, modifiers, key) {
-                    let _ = UnhookWindowsHookEx(hook);
-                    let _ = ready_tx.send(Err(format!(
-                        "Windows could not reserve this global shortcut: {error}"
-                    )));
-                    return;
-                }
-                true
-            } else {
-                false
-            };
+            let mut raw_input_window = None;
+            let system_hotkey_registered =
+                if let Some(key) = current_hotkey().and_then(|hotkey| hotkey.key) {
+                    let hotkey = current_hotkey().expect("hotkey exists while registering");
+                    let mut modifiers = MOD_NOREPEAT;
+                    if hotkey.ctrl {
+                        modifiers |= MOD_CONTROL;
+                    }
+                    if hotkey.alt {
+                        modifiers |= MOD_ALT;
+                    }
+                    if hotkey.shift {
+                        modifiers |= MOD_SHIFT;
+                    }
+                    if hotkey.win {
+                        modifiers |= MOD_WIN;
+                    }
+                    if let Err(error) = RegisterHotKey(None, RUNTIME_HOTKEY_ID, modifiers, key) {
+                        let _ = UnhookWindowsHookEx(hook);
+                        let _ = ready_tx.send(Err(format!(
+                            "Windows could not reserve this global shortcut: {error}"
+                        )));
+                        return;
+                    }
+                    if matches!(current_mode(), DictationMode::PushToTalk) {
+                        match create_raw_input_window(module) {
+                            Ok(window) => raw_input_window = Some(window),
+                            Err(error) => {
+                                let _ = UnregisterHotKey(None, RUNTIME_HOTKEY_ID);
+                                let _ = UnhookWindowsHookEx(hook);
+                                let _ = ready_tx.send(Err(format!(
+                                    "Hold mode could not monitor key release reliably: {error}"
+                                )));
+                                return;
+                            }
+                        }
+                    }
+                    true
+                } else {
+                    false
+                };
             if let Ok(mut context) = HOOK_CONTEXT.lock() {
                 context.system_hotkey_registered = system_hotkey_registered;
             }
@@ -764,8 +800,95 @@ mod windows_keyboard_hook {
             if system_hotkey_registered {
                 let _ = UnregisterHotKey(None, RUNTIME_HOTKEY_ID);
             }
+            if let Some(window) = raw_input_window {
+                let _ = DestroyWindow(window);
+            }
             let _ = UnhookWindowsHookEx(hook);
         }
+    }
+
+    fn current_mode() -> DictationMode {
+        HOOK_CONTEXT
+            .lock()
+            .ok()
+            .map(|context| context.mode)
+            .unwrap_or(DictationMode::PushToTalk)
+    }
+
+    unsafe fn create_raw_input_window(module: HINSTANCE) -> Result<HWND, String> {
+        let class = w!("AtmospeakRawInputWindow");
+        let window_class = WNDCLASSW {
+            hInstance: module,
+            lpszClassName: class,
+            lpfnWndProc: Some(raw_input_window_proc),
+            ..Default::default()
+        };
+        unsafe {
+            let _ = RegisterClassW(&window_class);
+        }
+        let window = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class,
+                w!(""),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(module),
+                None,
+            )
+        }
+        .map_err(|error| error.to_string())?;
+        let device = RAWINPUTDEVICE {
+            usUsagePage: 0x01,
+            usUsage: 0x06,
+            dwFlags: RIDEV_INPUTSINK,
+            hwndTarget: window,
+        };
+        unsafe { RegisterRawInputDevices(&[device], std::mem::size_of::<RAWINPUTDEVICE>() as u32) }
+            .map_err(|error| error.to_string())?;
+        Ok(window)
+    }
+
+    unsafe extern "system" fn raw_input_window_proc(
+        hwnd: HWND,
+        message: u32,
+        w_param: WPARAM,
+        l_param: LPARAM,
+    ) -> LRESULT {
+        if message == WM_INPUT {
+            unsafe {
+                handle_raw_input(l_param);
+            }
+            return LRESULT(0);
+        }
+        unsafe { DefWindowProcW(hwnd, message, w_param, l_param) }
+    }
+
+    unsafe fn handle_raw_input(l_param: LPARAM) {
+        let mut size = std::mem::size_of::<RAWINPUT>() as u32;
+        let mut input = RAWINPUT::default();
+        let read = unsafe {
+            GetRawInputData(
+                windows::Win32::UI::Input::HRAWINPUT(l_param.0 as *mut _),
+                RID_INPUT,
+                Some((&mut input as *mut RAWINPUT).cast()),
+                &mut size,
+                std::mem::size_of::<windows::Win32::UI::Input::RAWINPUTHEADER>() as u32,
+            )
+        };
+        if read == u32::MAX || input.header.dwType != RIM_TYPEKEYBOARD.0 {
+            return;
+        }
+        let keyboard = unsafe { input.data.keyboard };
+        if keyboard.Flags as u32 & RI_KEY_BREAK == 0 {
+            return;
+        }
+        handle_registered_hotkey_released(keyboard.VKey as u32, ShortcutSource::RawInput);
     }
 
     fn current_hotkey() -> Option<ParsedShortcut> {
@@ -773,29 +896,49 @@ mod windows_keyboard_hook {
     }
 
     fn handle_registered_hotkey_pressed() {
-        let (app, hotkey, tx, testing_only) = {
+        let (app, hotkey, tx, testing_only, mode, generation) = {
             let mut context = match HOOK_CONTEXT.lock() {
                 Ok(context) => context,
                 Err(_) => return,
             };
-            if context.runtime.active
-                || context
-                    .shortcuts_paused
-                    .as_ref()
-                    .map(|paused| *paused.lock())
-                    .unwrap_or(false)
+            if context
+                .shortcuts_paused
+                .as_ref()
+                .map(|paused| *paused.lock())
+                .unwrap_or(false)
             {
                 return;
             }
+            let now = Instant::now();
+            if context
+                .last_registered_hotkey_at
+                .is_some_and(|previous| now.duration_since(previous) < HOTKEY_DEDUP_WINDOW)
+            {
+                return;
+            }
+            context.last_registered_hotkey_at = Some(now);
             let Some(app) = context.app.clone() else {
                 return;
             };
-            context.runtime.active = true;
-            context.runtime.capturing = true;
+            let mode = context.mode;
+            if mode == DictationMode::PushToTalk {
+                if context.runtime.active {
+                    return;
+                }
+                context.runtime.active = true;
+                context.runtime.capturing = true;
+            }
             let testing_only = app
                 .try_state::<crate::services::app_state::AppState>()
                 .is_some_and(|state| state.shortcut_test_active());
-            (app, context.hotkey, context.ui_tx.clone(), testing_only)
+            (
+                app,
+                context.hotkey,
+                context.ui_tx.clone(),
+                testing_only,
+                mode,
+                context.registration_generation,
+            )
         };
 
         emit_hotkey_keys(&tx, hotkey, true);
@@ -803,41 +946,77 @@ mod windows_keyboard_hook {
             let _ = tx.send(HookUiEvent::Signal("pressed"));
         }
         if !testing_only {
-            crate::services::dictation_engine::route_shortcut_payload(&app, "pressed");
+            let payload = if mode == DictationMode::Toggle {
+                "toggle"
+            } else {
+                "pressed"
+            };
+            crate::services::metrics::emit_runtime(
+                &app,
+                "shortcut-gesture",
+                format!("source=registered-hotkey signal={payload} generation={generation}"),
+            );
+            crate::services::dictation_engine::route_shortcut_payload_from(
+                &app,
+                payload,
+                ShortcutSource::RegisteredHotkey,
+                generation,
+            );
         }
-
-        let _ = thread::Builder::new()
-            .name("atmospeak-hotkey-release".to_string())
-            .spawn(move || {
-                while hotkey.is_down(0, false, &key_is_down) {
-                    thread::sleep(Duration::from_millis(8));
-                }
-
-                let should_release = HOOK_CONTEXT
-                    .lock()
-                    .ok()
-                    .is_some_and(|mut context| {
-                        if !context.runtime.active {
-                            return false;
-                        }
-                        context.runtime = ShortcutRuntimeState::default();
-                        true
-                    });
-                if !should_release {
-                    return;
-                }
-
-                emit_hotkey_keys(&tx, hotkey, false);
-                if let Some(tx) = tx.as_ref() {
-                    let _ = tx.send(HookUiEvent::Signal("released"));
-                }
-                if !testing_only {
-                    crate::services::dictation_engine::route_shortcut_payload(&app, "released");
-                }
-            });
     }
 
-    fn emit_hotkey_keys(tx: &Option<mpsc::Sender<HookUiEvent>>, hotkey: ParsedShortcut, pressed: bool) {
+    fn handle_registered_hotkey_released(event_vk: u32, source: ShortcutSource) {
+        let (app, hotkey, tx, testing_only, generation) = {
+            let mut context = match HOOK_CONTEXT.lock() {
+                Ok(context) => context,
+                Err(_) => return,
+            };
+            if current_mode_from_context(&context) != DictationMode::PushToTalk
+                || !context.runtime.active
+                || !context.hotkey.is_relevant(event_vk)
+            {
+                return;
+            }
+            let Some(app) = context.app.clone() else {
+                return;
+            };
+            context.runtime = ShortcutRuntimeState::default();
+            let testing_only = app
+                .try_state::<crate::services::app_state::AppState>()
+                .is_some_and(|state| state.shortcut_test_active());
+            (
+                app,
+                context.hotkey,
+                context.ui_tx.clone(),
+                testing_only,
+                context.registration_generation,
+            )
+        };
+        emit_hotkey_keys(&tx, hotkey, false);
+        if let Some(tx) = tx.as_ref() {
+            let _ = tx.send(HookUiEvent::Signal("released"));
+        }
+        if !testing_only {
+            crate::services::metrics::emit_runtime(
+                &app,
+                "shortcut-gesture",
+                format!("source={source:?} signal=released generation={generation}"),
+            );
+            crate::services::dictation_engine::route_shortcut_payload_from(
+                &app, "released", source, generation,
+            );
+        }
+    }
+
+    fn current_mode_from_context(context: &HookContext) -> DictationMode {
+        context.mode
+    }
+
+    fn emit_hotkey_keys(
+        tx: &Option<mpsc::Sender<HookUiEvent>>,
+        hotkey: ParsedShortcut,
+        pressed: bool,
+    ) {
         let Some(tx) = tx.as_ref() else {
             return;
         };
@@ -854,7 +1033,11 @@ mod windows_keyboard_hook {
         if hotkey.shift {
             keys.push((vk_value(VK_SHIFT), "Shift".to_string()));
         }
-        if let Some(key) = hotkey.key.and_then(label_for_vk).map(|label| (hotkey.key.unwrap(), label)) {
+        if let Some(key) = hotkey
+            .key
+            .and_then(label_for_vk)
+            .map(|label| (hotkey.key.unwrap(), label))
+        {
             keys.push(key);
         }
         for (code, key) in keys {
@@ -940,6 +1123,7 @@ mod windows_keyboard_hook {
             }));
         }
         if context.system_hotkey_registered {
+            drop(context);
             return false;
         }
         let outcome = context

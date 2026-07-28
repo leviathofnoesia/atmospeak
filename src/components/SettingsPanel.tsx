@@ -179,7 +179,7 @@ export function SettingsPanel({
           className={settings.mode === "pushToTalk" ? "is-selected" : ""}
           onClick={() => setSettings({ ...settings, mode: "pushToTalk" })}
         >
-          <strong>Hold to talk</strong>
+          <strong>Hold</strong>
           <span>Press and hold to record. Releasing transcribes and pastes automatically.</span>
         </button>
         <button
@@ -187,7 +187,7 @@ export function SettingsPanel({
           className={settings.mode === "toggle" ? "is-selected" : ""}
           onClick={() => setSettings({ ...settings, mode: "toggle" })}
         >
-          <strong>Tap to toggle</strong>
+          <strong>Tap</strong>
           <span>Press once to start and again to transcribe and paste.</span>
         </button>
       </fieldset>
@@ -232,6 +232,68 @@ export function SettingsPanel({
       </label>
 
       {modelManagement}
+
+      <PanelTitle icon={<Radio size={22} />} title="Local transcription" />
+      <p className="muted">
+        Atmospeak can decode bounded segments while you speak. Live text stays in the
+        companion and the final result is pasted only once.
+      </p>
+      <label>
+        <span>Model selection</span>
+        <select
+          value={settings.modelSelectionMode}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              modelSelectionMode: event.currentTarget
+                .value as AppSettings["modelSelectionMode"],
+            })
+          }
+        >
+          <option value="automatic">Automatic</option>
+          <option value="manual">Manual</option>
+        </select>
+      </label>
+      <label>
+        <span>Transcription profile</span>
+        <select
+          value={settings.transcriptionProfile}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              transcriptionProfile: event.currentTarget
+                .value as AppSettings["transcriptionProfile"],
+            })
+          }
+        >
+          <option value="balanced">Balanced</option>
+          <option value="quality">Quality</option>
+          <option value="speed">Speed</option>
+        </select>
+      </label>
+      <label>
+        <span>Acceleration</span>
+        <select
+          value={settings.accelerationPreference}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              accelerationPreference: event.currentTarget
+                .value as AppSettings["accelerationPreference"],
+            })
+          }
+        >
+          <option value="auto">Auto (Vulkan, then CPU)</option>
+          <option value="vulkan">Vulkan</option>
+          <option value="cpu">CPU</option>
+        </select>
+      </label>
+      <ToggleRow
+        icon={<Radio size={18} />}
+        label="Live preview in the companion"
+        checked={settings.livePreviewEnabled}
+        onChange={(livePreviewEnabled) => setSettings({ ...settings, livePreviewEnabled })}
+      />
 
       <PanelTitle icon={<Palette size={22} />} title="Companion" />
       <p className="muted">How the floating dock looks and moves. Changes apply on save.</p>

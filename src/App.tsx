@@ -75,6 +75,7 @@ import type {
   ModelInventory,
   ModelDownloadProgress,
   ModelStatus,
+  LiveTranscriptEvent,
   NativeDictationEvent,
   RecordingStarted,
   RuntimeEvent,
@@ -545,7 +546,7 @@ function AppShell() {
     (payload: NativeDictationEvent) => {
       setRecording(payload.recording);
       setRecorderPhase(payload.phase);
-      setBusyState(payload.phase === "processing" || payload.phase === "listening");
+      setBusyState(payload.phase === "finalizing" || payload.phase === "listening");
       setNotice({
         tone:
           payload.phase === "error"
@@ -1475,7 +1476,13 @@ function AppShell() {
                 download={modelDownload}
                 onSelect={(modelId) =>
                   setSettingsDraft((current) =>
-                    current ? { ...current, activeModelId: modelId } : current,
+                    current
+                      ? {
+                          ...current,
+                          activeModelId: modelId,
+                          modelSelectionMode: "manual",
+                        }
+                      : current,
                   )
                 }
                 onDownload={onDownloadModel}
@@ -1504,6 +1511,19 @@ function OverlayShell() {
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [hostApp, setHostApp] = useState("your cursor");
   const [shortcutArmed, setShortcutArmed] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState<{
+    sessionId: string | null;
+    phase: "idle" | "partial" | "stable" | "final" | "error";
+    stableText: string;
+    partialText: string;
+    latencyMs: number | null;
+  }>({
+    sessionId: null,
+    phase: "idle",
+    stableText: "",
+    partialText: "",
+    latencyMs: null,
+  });
   const shortcutKeysDownRef = useRef(new Set<number>());
 
   // The rest tip names the real chord and gesture, so it has to follow settings.
@@ -1533,6 +1553,17 @@ function OverlayShell() {
           setPhase(event.payload.phase);
           setMessage(event.payload.message);
           setRecording(event.payload.recording);
+          if (event.payload.phase === "listening" && event.payload.recording) {
+            setLiveTranscript({
+              sessionId: event.payload.recording.id,
+              phase: "idle",
+              stableText: "",
+              partialText: "",
+              latencyMs: null,
+            });
+          } else if (event.payload.phase === "idle") {
+            setLiveTranscript((current) => ({ ...current, phase: "idle" }));
+          }
           // "Set down in Notepad" — named from where the text actually landed.
           const target = event.payload.result?.injection?.targetProcessName;
           if (target) setHostApp(target);
@@ -1540,6 +1571,30 @@ function OverlayShell() {
       );
       if (cancelled) unlisten();
       else unlisteners.push(unlisten);
+
+      const unlistenTranscript = await listen<LiveTranscriptEvent>(
+        "atmospeak://live-transcript",
+        (event) => {
+          const update = event.payload;
+          setLiveTranscript((current) => {
+            const sameSession = current.sessionId === update.sessionId;
+            const stableText = update.stableText
+              ? update.stableText
+              : sameSession
+                ? current.stableText
+                : "";
+            return {
+              sessionId: update.sessionId,
+              phase: update.stableText ? "stable" : "partial",
+              stableText,
+              partialText: update.partialText,
+              latencyMs: update.firstPartialLatencyMs,
+            };
+          });
+        },
+      );
+      if (cancelled) unlistenTranscript();
+      else unlisteners.push(unlistenTranscript);
 
       // Appearance and hotkey changes are made in the hub's window, not this one.
       const unlistenSettings = await listen<AppSettings>(
@@ -1640,7 +1695,7 @@ function OverlayShell() {
 
   useEffect(() => {
     if (!recording) {
-      setElapsedSeconds(0);
+      if (phase === "idle") setElapsedSeconds(0);
       return undefined;
     }
     const startedAt = new Date(recording.startedAt).getTime();
@@ -1648,16 +1703,17 @@ function OverlayShell() {
       setElapsedSeconds(Math.max(0, (Date.now() - startedAt) / 1000));
     }, 500);
     return () => window.clearInterval(interval);
-  }, [recording]);
+  }, [phase, recording]);
 
   return (
     <RecorderOverlay
       recording={recording}
       elapsedSeconds={elapsedSeconds}
-      busy={phase === "processing"}
+      busy={phase === "finalizing"}
       phase={phase}
       modelStatus={modelStatus}
       notice={dragDiagnostic || message}
+      liveTranscript={liveTranscript}
       inputLevel={level}
       inputBands={[]}
       bubbleSize="medium"

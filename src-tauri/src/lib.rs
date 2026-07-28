@@ -20,8 +20,147 @@ use commands::{
     start_sound_check, stop_recording, upsert_dictionary_entry, upsert_snippet,
 };
 use services::{
-    app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, window_manager,
+    app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, streaming_asr,
+    window_manager,
 };
+
+fn streaming_disabled() -> bool {
+    matches!(
+        std::env::var("ATMOSPEAK_STREAMING_ASR").ok().as_deref(),
+        Some("0") | Some("false")
+    )
+}
+
+pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
+    if streaming_disabled() {
+        metrics::emit_runtime(
+            app,
+            "streaming-asr-disabled",
+            "ATMOSPEAK_STREAMING_ASR=0 — using the resident batch host.",
+        );
+        start_asr_host(app);
+        return;
+    }
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("atmospeak-streaming-asr-warmup".into())
+        .spawn(move || {
+            let Ok(mut settings) = app.state::<AppState>().database.lock().load_settings() else {
+                start_asr_host(&app);
+                return;
+            };
+            if settings.model_selection_mode == models::ModelSelectionMode::Automatic {
+                let preferred = settings.active_model_id.clone();
+                let candidate = app
+                    .state::<AppState>()
+                    .database
+                    .lock()
+                    .automatic_model_candidate(&preferred)
+                    .ok()
+                    .flatten();
+                if let Some(candidate) = candidate {
+                    let installed = runtime::model_inventory(&app, &settings)
+                        .models
+                        .into_iter()
+                        .any(|model| model.id == candidate && model.installed);
+                    if installed {
+                        settings.active_model_id = candidate;
+                    }
+                }
+            }
+            let requested_backend = match std::env::var("ATMOSPEAK_ASR_BACKEND").ok().as_deref() {
+                Some("cpu") => models::AsrBackend::Cpu,
+                _ if settings.acceleration_preference == models::AccelerationPreference::Cpu => {
+                    models::AsrBackend::Cpu
+                }
+                _ => models::AsrBackend::Vulkan,
+            };
+            let resolved_sidecar = streaming_asr::resolve_executable(&app, requested_backend)
+                .map(|executable| (requested_backend, executable))
+                .or_else(|| {
+                    (requested_backend == models::AsrBackend::Vulkan)
+                        .then(|| {
+                            streaming_asr::resolve_executable(&app, models::AsrBackend::Cpu)
+                                .map(|executable| (models::AsrBackend::Cpu, executable))
+                        })
+                        .flatten()
+                });
+            let Some((backend, executable)) = resolved_sidecar else {
+                metrics::emit_runtime(
+                    &app,
+                    "streaming-asr-unavailable",
+                    "Streaming sidecar is not bundled; using the resident batch host.",
+                );
+                start_asr_host(&app);
+                return;
+            };
+            let Ok(resolved) = runtime::resolve_runtime(&app, &settings) else {
+                start_asr_host(&app);
+                return;
+            };
+            let threads = std::thread::available_parallelism()
+                .map(|threads| threads.get().min(8) as u16)
+                .unwrap_or(4);
+            match streaming_asr::StreamingAsr::spawn(
+                app.clone(),
+                executable,
+                resolved.model_path,
+                backend,
+                threads,
+            ) {
+                Ok(host) => {
+                    app.state::<AppState>().set_streaming_asr(host);
+                    metrics::emit_runtime(
+                        &app,
+                        "streaming-asr-ready",
+                        format!("Streaming local ASR is ready with {backend:?}."),
+                    );
+                }
+                Err(error) if backend == models::AsrBackend::Vulkan => {
+                    metrics::emit_runtime(
+                        &app,
+                        "streaming-asr-vulkan-fallback",
+                        format!("Vulkan unavailable: {error}"),
+                    );
+                    let Some(cpu_executable) =
+                        streaming_asr::resolve_executable(&app, models::AsrBackend::Cpu)
+                    else {
+                        start_asr_host(&app);
+                        return;
+                    };
+                    let Ok(resolved) = runtime::resolve_runtime(&app, &settings) else {
+                        start_asr_host(&app);
+                        return;
+                    };
+                    match streaming_asr::StreamingAsr::spawn(
+                        app.clone(),
+                        cpu_executable,
+                        resolved.model_path,
+                        models::AsrBackend::Cpu,
+                        threads,
+                    ) {
+                        Ok(host) => {
+                            app.state::<AppState>().set_streaming_asr(host);
+                            metrics::emit_runtime(
+                                &app,
+                                "streaming-asr-ready",
+                                "Streaming local ASR is ready with CPU fallback.",
+                            );
+                        }
+                        Err(error) => {
+                            metrics::emit_runtime(&app, "streaming-asr-error", error.to_string());
+                            start_asr_host(&app);
+                        }
+                    }
+                }
+                Err(error) => {
+                    metrics::emit_runtime(&app, "streaming-asr-error", error.to_string());
+                    start_asr_host(&app);
+                }
+            }
+        })
+        .expect("failed to spawn streaming ASR warmup thread");
+}
 
 /// Bring up the resident ASR host in the background: loading the model takes
 /// seconds and must not delay the window. Dictation works off the CLI backend
@@ -40,9 +179,28 @@ pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
     std::thread::Builder::new()
         .name("atmospeak-asr-host-warmup".into())
         .spawn(move || {
-            let Ok(settings) = app.state::<AppState>().database.lock().load_settings() else {
+            let Ok(mut settings) = app.state::<AppState>().database.lock().load_settings() else {
                 return;
             };
+            if settings.model_selection_mode == models::ModelSelectionMode::Automatic {
+                let preferred = settings.active_model_id.clone();
+                let candidate = app
+                    .state::<AppState>()
+                    .database
+                    .lock()
+                    .automatic_model_candidate(&preferred)
+                    .ok()
+                    .flatten();
+                if let Some(candidate) = candidate {
+                    let installed = runtime::model_inventory(&app, &settings)
+                        .models
+                        .into_iter()
+                        .any(|model| model.id == candidate && model.installed);
+                    if installed {
+                        settings.active_model_id = candidate;
+                    }
+                }
+            }
             let Some(server_exe) = runtime::resolve_server(&app, &settings) else {
                 metrics::emit_runtime(
                     &app,
@@ -93,6 +251,7 @@ fn install_global_shortcut(
     shortcut_status: std::sync::Arc<parking_lot::Mutex<models::ShortcutStatus>>,
     shortcuts_paused: std::sync::Arc<parking_lot::Mutex<bool>>,
     initial_hotkey: &str,
+    initial_mode: models::DictationMode,
 ) -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -101,6 +260,7 @@ fn install_global_shortcut(
             shortcut_status,
             shortcuts_paused,
             initial_hotkey,
+            initial_mode,
             false,
         );
     }
@@ -128,6 +288,7 @@ fn install_global_shortcut(
             shortcut_status,
             shortcuts_paused_for_registration,
             initial_hotkey,
+            initial_mode,
             false,
         );
     }
@@ -149,21 +310,24 @@ pub fn run() {
         .setup(move |app| {
             let engine = dictation_engine::spawn(app.handle().clone());
             app.state::<AppState>().set_engine(engine);
-            start_asr_host(app.handle());
+            start_preferred_asr(app.handle());
             tray::install(app)?;
             if window_manager::setup_is_complete(app.handle(), ONBOARDING_VERSION) {
-                let hotkey = app
+                let (hotkey, mode) = app
                     .state::<AppState>()
                     .database
                     .lock()
                     .load_settings()
-                    .map(|settings| settings.hotkey)
-                    .unwrap_or_else(|_| "Ctrl+Win".to_string());
+                    .map(|settings| (settings.hotkey, settings.mode))
+                    .unwrap_or_else(|_| {
+                        ("Ctrl+Win".to_string(), models::DictationMode::PushToTalk)
+                    });
                 install_global_shortcut(
                     app,
                     shortcut_status.clone(),
                     shortcuts_paused.clone(),
                     &hotkey,
+                    mode,
                 )?;
                 window_manager::ensure_overlay(app.handle())?;
                 let _ = services::overlay_window::show(app.handle());
@@ -242,6 +406,7 @@ pub fn run() {
                 // Stop the resident model before we go. The job object is the
                 // backstop for crashes; this is the clean path.
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.shutdown_streaming_asr();
                     state.shutdown_asr_host();
                 }
             }

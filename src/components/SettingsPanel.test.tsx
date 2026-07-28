@@ -79,7 +79,7 @@ describe("SettingsPanel shortcut controls", () => {
     });
     render(<SettingsPanel {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Hold to talk/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Hold/ }));
     expect(props.setSettings).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "pushToTalk" }),
     );

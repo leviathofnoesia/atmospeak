@@ -12,5 +12,6 @@ pub mod runtime;
 pub mod shortcuts;
 pub mod sound_check;
 pub mod startup;
+pub mod streaming_asr;
 pub mod transcriber;
 pub mod window_manager;

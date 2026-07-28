@@ -5,6 +5,8 @@ GGML model. Optional models can be downloaded from the Hugging Face repositories
 listed below and remain local to the installed application.
 
 - `whisper.cpp` and GGML runtime: https://github.com/ggml-org/whisper.cpp
+- `whisper-rs` Rust bindings: https://github.com/tazz4843/whisper-rs
+- Silero VAD GGML model: https://huggingface.co/ggml-org/whisper-vad
 - Whisper GGML model weights: https://huggingface.co/ggerganov/whisper.cpp
 - Distil-Whisper GGML model weights: https://huggingface.co/distil-whisper/distil-large-v3-ggml
 - Distil-Whisper v3.5 GGML model weights: https://huggingface.co/distil-whisper/distil-large-v3.5-ggml

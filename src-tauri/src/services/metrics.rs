@@ -4,7 +4,7 @@ use chrono::Utc;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
-    models::{RuntimeEvent, StageMetrics},
+    models::{RuntimeEvent, StageMetrics, StreamingMetrics},
     services::app_state::AppState,
 };
 
@@ -12,6 +12,10 @@ use crate::{
 pub const ASR_BACKEND_CLI: &str = "cli";
 /// Resident `whisper-server.exe` with the model kept warm (Phase B).
 pub const ASR_BACKEND_HOST: &str = "host";
+/// Incremental whisper.cpp sidecar using the Vulkan backend.
+pub const ASR_BACKEND_VULKAN: &str = "vulkan";
+/// Incremental whisper.cpp sidecar using the CPU backend.
+pub const ASR_BACKEND_STREAMING_CPU: &str = "cpu";
 
 pub struct StageTimer {
     started: Instant,
@@ -100,6 +104,15 @@ pub fn emit_stage_metrics(app: &AppHandle, metrics: &StageMetrics) {
         metrics.total_ms,
         metrics.audio_duration_ms
     );
+}
+
+pub fn emit_streaming_metrics(app: &AppHandle, metrics: &StreamingMetrics) {
+    let _ = app.emit("atmospeak://streaming-metrics", metrics.clone());
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(error) = state.database.lock().insert_dictation_metrics(metrics) {
+            emit_runtime(app, "dictation-metrics-save-error", error.to_string());
+        }
+    }
 }
 
 pub fn emit_runtime(app: &AppHandle, kind: &str, message: impl Into<String>) {

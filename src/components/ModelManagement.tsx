@@ -35,12 +35,25 @@ export function ModelManagement({
   onCancelDownload,
   onDelete,
 }: ModelManagementProps) {
+  const selectedLabel =
+    inventory?.models.find((model) => model.id === settings.activeModelId)?.label ??
+    settings.activeModelId;
+  const accelerationLabel =
+    settings.accelerationPreference === "auto"
+      ? "Vulkan with CPU fallback"
+      : settings.accelerationPreference === "vulkan"
+        ? "Vulkan"
+        : "CPU";
   return (
     <>
       <PanelTitle icon={<Cpu size={22} />} title="Voice models" />
       <p className="muted">
         Balanced is bundled. Large v3 Turbo q5 and Distil Large v3.5 are the newest optional
         choices; every download stays on this device and is SHA-256 verified.
+      </p>
+      <p className="muted">
+        {settings.modelSelectionMode === "automatic" ? "Automatic" : "Manual"} ·{" "}
+        {selectedLabel} · {accelerationLabel}
       </p>
       <div className="model-grid">
         {inventory?.models.map((model) => {

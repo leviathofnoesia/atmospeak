@@ -5,7 +5,13 @@ import type { DictationMode, ModelStatus, RecordingStarted } from "../types/dict
 import { Aura } from "./Aura";
 import "./RecorderOverlay.css";
 
-export type RecorderPhase = "idle" | "listening" | "processing" | "pasted" | "error";
+export type RecorderPhase =
+  | "idle"
+  | "listening"
+  | "finalizing"
+  | "pasted"
+  | "saved"
+  | "error";
 export type RecorderAccent = "dusk" | "teal" | "lilac";
 export type RecorderTheme = "dark" | "light";
 export type RecorderWaveStyle = "ribbon" | "bars" | "pulse";
@@ -17,7 +23,9 @@ export type BubbleSize = "small" | "medium" | "large";
 interface LiveTranscript {
   sessionId: string | null;
   phase: "idle" | "partial" | "stable" | "final" | "error";
-  text: string;
+  text?: string;
+  stableText?: string;
+  partialText?: string;
   latencyMs: number | null;
 }
 
@@ -224,14 +232,19 @@ function WaveCanvas({
   return <canvas ref={ref} className="dock__wave" />;
 }
 
-function dockStateFromPhase(phase: RecorderPhase): "rest" | "listening" | "processing" | "delivered" {
+function dockStateFromPhase(
+  phase: RecorderPhase,
+): "rest" | "listening" | "processing" | "delivered" | "error" {
   switch (phase) {
     case "listening":
       return "listening";
-    case "processing":
+    case "finalizing":
       return "processing";
     case "pasted":
+    case "saved":
       return "delivered";
+    case "error":
+      return "error";
     default:
       return "rest";
   }
@@ -266,7 +279,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   } = props;
 
   const isRecording = recording !== null;
-  const resolvedPhase: RecorderPhase = phase ?? (isRecording ? "listening" : busy ? "processing" : "idle");
+  const resolvedPhase: RecorderPhase = phase ?? (isRecording ? "listening" : busy ? "finalizing" : "idle");
   const state = dockStateFromPhase(resolvedPhase);
   const listening = state === "listening";
 
@@ -281,7 +294,9 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   levelRef.current = Math.max(0.04, Math.min(1, Math.max(inputLevel, peakBand)));
 
   // keep the latest words in view; only fade the left once text overflows
-  const transcript = liveTranscript?.text ?? "";
+  const stableTranscript = liveTranscript?.stableText ?? liveTranscript?.text ?? "";
+  const partialTranscript = liveTranscript?.partialText ?? "";
+  const transcript = `${stableTranscript} ${partialTranscript}`.trim();
   useEffect(() => {
     const el = txRef.current;
     if (!el) return;
@@ -392,14 +407,24 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
               <div className="dock__transcript proc">
                 <span className="shim">transcribing on device</span>
               </div>
+            ) : state === "error" ? (
+              <div className="dock__transcript">
+                <span className="partial">{notice || "Could not finish this dictation"}</span>
+              </div>
             ) : state === "delivered" ? (
               <div className="dock__transcript">
-                <span className="stable">Set down in {hostApp}</span>
+                <span className="stable">
+                  {resolvedPhase === "saved" ? "Saved to history" : `Set down in ${hostApp}`}
+                </span>
               </div>
             ) : (
               <div className="dock__transcript" ref={txRef}>
                 {transcript ? (
-                  <span className="stable">{transcript}</span>
+                  <>
+                    {stableTranscript && <span className="stable">{stableTranscript}</span>}
+                    {stableTranscript && partialTranscript && " "}
+                    {partialTranscript && <span className="partial">{partialTranscript}</span>}
+                  </>
                 ) : (
                   <span className="placeholder">listening — speak naturally…</span>
                 )}

@@ -100,6 +100,10 @@ if ((Test-Path $CargoBin) -and ($env:PATH -notlike "*$CargoBin*")) {
 if (-not $SkipTauriBuild) {
   Push-Location $Root
   try {
+    & (Join-Path $PSScriptRoot "build-asr-sidecars.ps1")
+    if ($LASTEXITCODE -ne 0) {
+      throw "ASR sidecar build failed with exit code $LASTEXITCODE"
+    }
     $buildArgs = @()
     if (-not $HasUpdaterSigningKey) {
       Write-Warning "No Tauri updater signing key found. Building unsigned local installers without updater artifacts or latest.json."
