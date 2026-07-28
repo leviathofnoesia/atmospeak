@@ -6,7 +6,11 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Manifest = Join-Path $Root "src-asr-host\Cargo.toml"
-$TargetDir = Join-Path $Root "src-asr-host\target"
+$TargetDir = if ($env:ATMOSPEAK_ASR_TARGET_DIR) {
+  $env:ATMOSPEAK_ASR_TARGET_DIR
+} else {
+  Join-Path $Root "src-asr-host\target"
+}
 $OutputDir = Join-Path $Root "src-tauri\resources\asr"
 $VadPath = Join-Path $OutputDir "ggml-silero-v6.2.0.bin"
 $VadUrl = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
