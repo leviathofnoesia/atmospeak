@@ -1,5 +1,41 @@
 # Changelog
 
+# 0.5.0 — Streaming local transcription (2026-07-28)
+
+### Added
+
+- Crash-isolated CPU and Vulkan ASR sidecars built on `whisper-rs` and
+  `whisper.cpp`, with the selected model kept warm between dictations.
+- Local Silero VAD, bounded speech segments, rolling dock previews, stable
+  segments, and tail-only final reconciliation.
+- Automatic Balanced model selection using locally recorded backend, backlog,
+  dropped-frame, and finalization metrics.
+- `Listening`, `Finalizing`, `Pasted`, `Saved`, and `Error` recorder phases,
+  plus local streaming and shortcut diagnostic events.
+- Persistent, sanitized shortcut events and per-dictation streaming metrics.
+
+### Changed
+
+- Long recordings are processed while capture is active instead of being
+  decoded from the beginning only after stop.
+- Live partial text appears only inside Atmospeak. The external target receives
+  exactly one final paste after cleanup, dictionary replacement, and snippet
+  expansion.
+- Hold and Tap shortcuts now use mode-specific native gesture delivery. Hold
+  stops on the first required key release; Tap stops on the next complete press.
+- Streaming fallback order is Vulkan, CPU, resident `whisper-server`, then
+  one-shot `whisper-cli`, with complete local audio retained for recovery.
+
+### Fixed
+
+- Eliminated release polling and `GetAsyncKeyState` as the keyed Hold-mode
+  release source of truth.
+- Prevented duplicate gestures, duplicate paste, stale ASR warmups, overlapping
+  ASR sessions, unbounded sidecar audio growth, and committed-text duplication
+  in rolling previews.
+- Preserved full fallback recordings across queue pressure and streaming WAV
+  write failures.
+
 # 0.3.1 — Recovery candidate (unpublished)
 
 - Withdraws the defective 0.3.0 release and keeps public downloads paused.

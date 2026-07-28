@@ -5,19 +5,19 @@
 <h1 align="center">Atmospeak</h1>
 
 <p align="center">
-  Local-first voice dictation for Windows. Hold a shortcut, speak, release, and keep typing.
+  Streaming, local-first voice dictation for Windows. Speak naturally, preview locally, and paste once.
 </p>
 
 <p align="center">
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-setup.exe"><strong>Download v0.4.0</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-setup.exe"><strong>Download v0.5.0</strong></a>
   ·
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><strong>Release notes</strong></a>
 </p>
@@ -26,27 +26,30 @@ Atmospeak is a Windows desktop dictation app built around a local
 [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) runtime. It requires
 no account and sends no microphone audio to a transcription service.
 
-## What ships in 0.4.0
+## What ships in 0.5.0
 
-- **Push-to-talk that finishes on release.** Hold the configured chord, speak,
-  and release it to transcribe and paste once at the original cursor.
-- **Any supported custom chord.** Record a shortcut in onboarding or Settings;
-  the saved chord is also shown on the dock.
-- **System-wide Windows activation.** Keyed shortcuts use native Windows hotkey
-  registration and continue to trigger while an elevated Windows Terminal has
-  focus.
-- **Offline first run.** The `base.en` model and Windows x64 Whisper runtime are
-  bundled in every installer.
-- **Real setup gate.** First run covers microphone selection, model choice,
-  shortcut validation, and a host-backed phrase transcription before setup can
-  finish.
-- **Resident local ASR.** `whisper-server.exe` keeps the selected model warm;
-  `whisper-cli.exe` is the local fallback if the resident host is unavailable.
-- **Useful local hub.** History, dictionary corrections, snippets, model
-  management, microphone and shortcut settings, retention controls, and
-  advanced diagnostics are backed by SQLite.
-- **Quiet background dock.** The overlay is draggable, remembers its position,
-  and stops active animation work while idle or hidden.
+- **Streaming local transcription.** Atmospeak decodes bounded speech segments
+  while the microphone is still active, then reconciles only the remaining tail
+  after you stop.
+- **Live dock preview, one final paste.** Partial and stable text stays inside
+  the Atmospeak dock. The target application receives exactly one final paste.
+- **Vulkan acceleration with CPU fallback.** A crash-isolated ASR sidecar tries
+  the local Vulkan backend first and falls back through CPU, the resident batch
+  host, and the one-shot CLI.
+- **Automatic Balanced model selection.** Atmospeak measures local backlog and
+  finalization time, then chooses among models you already installed. It never
+  downloads or deletes a model automatically.
+- **Reliable Hold and Tap gestures.** Hold stops as soon as any required chord
+  key is released. Tap stops on the second complete press without depending on
+  release polling.
+- **Local VAD and bounded decoding.** Silero VAD finalizes natural speech
+  segments, force-splits continuous speech, and keeps long dictations from
+  requiring a complete re-transcription at stop.
+- **Resilient fallback.** Full audio remains available locally if streaming
+  fails, and fallback transcription still produces only one final result.
+- **Inspectable local diagnostics.** Shortcut acknowledgements, ASR timing,
+  backlog, dropped-frame counts, and fallback reasons are stored locally
+  without dictated text or unrelated keystrokes.
 
 ## Install
 
@@ -54,9 +57,9 @@ Atmospeak currently supports **Windows 10/11 x64**.
 
 | Package | Use it when | Download |
 | --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_0.4.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_0.4.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_0.4.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.4.0_x64-portable.zip) |
+| Setup EXE | Recommended installation | [atmospeak_0.5.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_0.5.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_0.5.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-portable.zip) |
 | Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/SHA256SUMS.txt) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
@@ -68,12 +71,14 @@ published SHA-256 manifest before opening it.
 
 1. Complete the six-step first-run setup and its real microphone transcription.
 2. Leave Atmospeak in the tray.
-3. Hold the default `Ctrl+Win` shortcut—or the custom chord you recorded.
-4. Speak, then release the shortcut.
-5. Atmospeak transcribes locally and pastes at the cursor that was active when
-   recording began.
+3. Choose **Hold** or **Tap** in Settings.
+4. In Hold mode, hold the default `Ctrl+Win` shortcut, speak, then release any
+   chord key. In Tap mode, press the chord once to start and again to stop.
+5. Watch the local preview in the dock while speaking. Atmospeak finalizes the
+   remaining tail and pastes once at the cursor that was active when recording
+   began.
 
-Tap-to-toggle remains available in Settings. If Windows prevents a normal
+If Windows prevents a normal
 process from injecting into a higher-integrity application, Atmospeak leaves
 the transcript on the clipboard instead of discarding it.
 
@@ -110,17 +115,19 @@ Whisper CLI and GGML model.
 ## How it works
 
 ```text
-Global hotkey / dock
+Hold / Tap shortcut or dock
         ↓
-Rust dictation engine
+Rust dictation engine → immediate stop acknowledgement
         ↓
-CPAL microphone capture → speech-quality gate → 16 kHz mono WAV
+CPAL capture → bounded queue → mono 16 kHz frames
         ↓
-Resident whisper-server (local) → whisper-cli fallback (local)
+Silero VAD → rolling preview + stable Whisper segments
         ↓
-Cleanup + dictionary + snippets
+Vulkan sidecar → CPU sidecar → resident host → CLI fallback
         ↓
-Restore original target → clipboard paste → local History
+Tail reconciliation → cleanup + dictionary + snippets exactly once
+        ↓
+Restore original target → one clipboard paste → local History
 ```
 
 Ordinary dictation is rejected before ASR when it is effectively silent, too
@@ -180,10 +187,12 @@ push-to-talk (`005`), recorded in
 
 - Windows x64 only.
 - Unsigned installers; SmartScreen warnings remain.
-- No cloud STT, live partial transcription, mobile client, or cross-device
-  synchronization.
-- Latency depends on speech length, selected model, CPU, and whether the
-  resident host has warmed. Atmospeak does not advertise a fixed latency.
+- No cloud STT, mobile client, cross-device synchronization, or live typing
+  into the target application.
+- Live preview is local and appears only in the Atmospeak dock.
+- Latency depends on speech length, selected model, GPU/CPU performance, and
+  current ASR backlog. Atmospeak exposes measured timings rather than promising
+  a fixed latency on every machine.
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
 
