@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::models::{
-    AppSettings, AppSnapshot, DictationStats, DictionaryEntry, RuntimeEvent, Snippet,
+    AppSettings, AppSnapshot, AsrBackend, DictationStats, DictionaryEntry, RuntimeEvent, Snippet,
     StreamingMetrics, TranscriptSession,
 };
 
@@ -214,15 +214,25 @@ impl Database {
         Ok(())
     }
 
-    pub fn automatic_model_candidate(&self, preferred_model_id: &str) -> Result<Option<String>> {
+    pub fn automatic_model_candidate(
+        &self,
+        preferred_model_id: &str,
+        backend: AsrBackend,
+    ) -> Result<Option<String>> {
+        let backend = match backend {
+            AsrBackend::Vulkan => "vulkan",
+            AsrBackend::Cpu => "cpu",
+            AsrBackend::Host => "host",
+            AsrBackend::Cli => "cli",
+        };
         let preferred_is_healthy: bool = self.connection.query_row(
             "select count(*) >= 3
                     and avg(finalize_ms) <= 1500
                     and max(max_backlog_ms) < 2000
                     and max(audio_frames_dropped) = 0
              from dictation_metrics
-             where model_id = ?1 and backend in ('vulkan', 'cpu')",
-            params![preferred_model_id],
+             where model_id = ?1 and backend = ?2",
+            params![preferred_model_id, backend],
             |row| row.get(0),
         )?;
         if preferred_is_healthy {
@@ -232,7 +242,7 @@ impl Database {
             .query_row(
                 "select model_id
                  from dictation_metrics
-                 where backend in ('vulkan', 'cpu')
+                 where backend = ?1
                  group by model_id
                  having count(*) >= 3
                     and avg(finalize_ms) <= 1500
@@ -240,7 +250,7 @@ impl Database {
                     and max(audio_frames_dropped) = 0
                  order by avg(finalize_ms) asc
                  limit 1",
-                [],
+                params![backend],
                 |row| row.get(0),
             )
             .optional()
@@ -606,10 +616,50 @@ mod tests {
         }
         assert_eq!(
             database
-                .automatic_model_candidate("distil-large-v3.5")
+                .automatic_model_candidate("distil-large-v3.5", AsrBackend::Vulkan)
                 .expect("automatic candidate")
                 .as_deref(),
             Some("distil-large-v3.5")
+        );
+    }
+
+    #[test]
+    fn automatic_model_policy_uses_only_the_requested_backend() {
+        use crate::models::{AsrBackend, StreamingMetrics};
+
+        let temp = tempdir().expect("tempdir");
+        let database = Database::open(temp.path().to_path_buf()).expect("database");
+        for index in 0..3 {
+            database
+                .insert_dictation_metrics(&StreamingMetrics {
+                    session_id: format!("cpu-session-{index}"),
+                    backend: AsrBackend::Cpu,
+                    model_id: "distil-large-v3.5".to_string(),
+                    first_partial_ms: Some(900),
+                    stop_ack_ms: 20,
+                    finalize_ms: 600,
+                    paste_ms: 80,
+                    processed_during_recording_ms: 9_500,
+                    tail_audio_ms: 500,
+                    max_backlog_ms: 500,
+                    audio_frames_dropped: 0,
+                    fallback_reason: None,
+                })
+                .expect("dictation metrics");
+        }
+
+        assert_eq!(
+            database
+                .automatic_model_candidate("distil-large-v3.5", AsrBackend::Cpu)
+                .expect("cpu candidate")
+                .as_deref(),
+            Some("distil-large-v3.5")
+        );
+        assert_eq!(
+            database
+                .automatic_model_candidate("distil-large-v3.5", AsrBackend::Vulkan)
+                .expect("vulkan candidate"),
+            None
         );
     }
 

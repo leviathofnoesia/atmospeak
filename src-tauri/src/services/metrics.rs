@@ -109,7 +109,8 @@ pub fn emit_stage_metrics(app: &AppHandle, metrics: &StageMetrics) {
 pub fn emit_streaming_metrics(app: &AppHandle, metrics: &StreamingMetrics) {
     let _ = app.emit("atmospeak://streaming-metrics", metrics.clone());
     if let Some(state) = app.try_state::<AppState>() {
-        if let Err(error) = state.database.lock().insert_dictation_metrics(metrics) {
+        let result = state.database.lock().insert_dictation_metrics(metrics);
+        if let Err(error) = result {
             emit_runtime(app, "dictation-metrics-save-error", error.to_string());
         }
     }

@@ -386,6 +386,7 @@ impl Worker {
                     .is_some_and(|(generation, signal, received_at)| {
                         generation == gesture.registration_generation
                             && signal == gesture.signal
+                            && gesture.received_at_ms >= received_at
                             && gesture.received_at_ms.saturating_sub(received_at) <= 75
                     }))
         {

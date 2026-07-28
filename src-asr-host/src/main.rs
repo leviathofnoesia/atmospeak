@@ -55,6 +55,11 @@ struct Session {
     audio_frames_dropped: u64,
 }
 
+struct DecodedText {
+    text: String,
+    confirmed_overlap_words: usize,
+}
+
 fn main() -> Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -251,11 +256,14 @@ fn main() -> Result<()> {
                 }
             }
             AsrCommand::StopSession { session_id } => {
-                let Some(mut active) = session.take().filter(|active| active.id == session_id)
-                else {
+                if !session
+                    .as_ref()
+                    .is_some_and(|active| active.id == session_id)
+                {
                     write_error(&mut output, Some(session_id), "session is not active", true)?;
                     continue;
-                };
+                }
+                let mut active = session.take().expect("session id checked above");
                 let finalize_started = Instant::now();
                 let tail_audio_ms =
                     samples_to_ms(active.audio.len().saturating_sub(active.chunk_start));
@@ -336,14 +344,14 @@ fn emit_preview<W: Write>(model: &Model, session: &mut Session, output: &mut W) 
         .len()
         .saturating_sub(PREVIEW_SAMPLES)
         .max(session.chunk_start);
-    let text = transcribe(
+    let decoded = transcribe(
         model,
         &session.audio[start..],
         &session.language,
         &prompt(session),
         session.profile,
+        0,
     )?;
-    let text = strip_overlap(&session.committed, &text);
     session.revision += 1;
     session.last_preview = Instant::now();
     let latency = session.started.elapsed().as_millis() as u64;
@@ -353,7 +361,7 @@ fn emit_preview<W: Write>(model: &Model, session: &mut Session, output: &mut W) 
         &AsrEvent::Partial {
             session_id: session.id.clone(),
             revision: session.revision,
-            text,
+            text: decoded.text,
             covered_through_ms: samples_to_ms(
                 session.audio_base_samples as usize + session.audio.len(),
             ),
@@ -363,14 +371,21 @@ fn emit_preview<W: Write>(model: &Model, session: &mut Session, output: &mut W) 
 
 fn finalize_chunk<W: Write>(model: &Model, session: &mut Session, output: &mut W) -> Result<()> {
     let end = session.audio.len();
-    let text = transcribe(
+    let overlap_samples = session.chunk_start.min(OVERLAP_SAMPLES);
+    let decode_start = session.chunk_start.saturating_sub(overlap_samples);
+    let decoded = transcribe(
         model,
-        &session.audio[session.chunk_start..end],
+        &session.audio[decode_start..end],
         &session.language,
         &prompt(session),
         session.profile,
+        overlap_samples,
     )?;
-    session.committed = merge_overlap(&session.committed, &text);
+    session.committed = merge_overlap(
+        &session.committed,
+        &decoded.text,
+        decoded.confirmed_overlap_words,
+    );
     let start_ms = samples_to_ms(session.audio_base_samples as usize + session.chunk_start);
     let end_ms = samples_to_ms(session.audio_base_samples as usize + end);
     write_event(
@@ -390,7 +405,7 @@ fn finalize_chunk<W: Write>(model: &Model, session: &mut Session, output: &mut W
     let retain_from = end.saturating_sub(OVERLAP_SAMPLES);
     session.audio.drain(..retain_from);
     session.audio_base_samples += retain_from as u64;
-    session.chunk_start = 0;
+    session.chunk_start = session.audio.len();
     // The retained overlap was already evaluated; wait for fresh audio before
     // scheduling another VAD pass.
     session.last_vad_check = session.audio.len();
@@ -434,9 +449,13 @@ fn transcribe(
     language: &str,
     prompt: &str,
     profile: TranscriptionProfile,
-) -> Result<String> {
+    leading_overlap_samples: usize,
+) -> Result<DecodedText> {
     if audio.len() < SAMPLE_RATE / 10 {
-        return Ok(String::new());
+        return Ok(DecodedText {
+            text: String::new(),
+            confirmed_overlap_words: 0,
+        });
     }
     let mut state: WhisperState = model
         .context
@@ -460,12 +479,27 @@ fn transcribe(
     state
         .full(params, audio)
         .map_err(|error| anyhow!("Whisper inference failed: {error}"))?;
-    Ok(state
-        .as_iter()
-        .map(|segment| segment.to_string())
-        .collect::<String>()
-        .trim()
-        .to_string())
+    let overlap_end_timestamp =
+        i64::try_from(samples_to_ms(leading_overlap_samples) / 10).unwrap_or(i64::MAX);
+    let mut text = String::new();
+    let mut confirmed_overlap = String::new();
+    for segment in state.as_iter() {
+        let segment_text = segment.to_string();
+        text.push_str(&segment_text);
+        // Only text from segments ending entirely inside the retained acoustic
+        // overlap is eligible for removal. A segment crossing into fresh audio
+        // is kept intact so intentional repeated words cannot be discarded.
+        if leading_overlap_samples > 0
+            && segment.end_timestamp() >= 0
+            && segment.end_timestamp() <= overlap_end_timestamp
+        {
+            confirmed_overlap.push_str(&segment_text);
+        }
+    }
+    Ok(DecodedText {
+        text: text.trim().to_string(),
+        confirmed_overlap_words: confirmed_overlap.split_whitespace().count(),
+    })
 }
 
 fn prompt(session: &Session) -> String {
@@ -475,35 +509,21 @@ fn prompt(session: &Session) -> String {
     words[start..].join(" ")
 }
 
-fn merge_overlap(committed: &str, next: &str) -> String {
-    let left = committed.split_whitespace().collect::<Vec<_>>();
+fn merge_overlap(committed: &str, next: &str, confirmed_overlap_words: usize) -> String {
+    let mut left = committed.split_whitespace().collect::<Vec<_>>();
     let right = next.split_whitespace().collect::<Vec<_>>();
-    let overlap = overlap_count(&left, &right);
-    left.into_iter()
-        .chain(right.into_iter().skip(overlap))
-        .collect::<Vec<_>>()
-        .join(" ")
+    let overlap = overlap_count(&left, &right, confirmed_overlap_words);
+    left.truncate(left.len().saturating_sub(overlap));
+    left.into_iter().chain(right).collect::<Vec<_>>().join(" ")
 }
 
-fn strip_overlap(committed: &str, next: &str) -> String {
-    let left = committed.split_whitespace().collect::<Vec<_>>();
-    let right = next.split_whitespace().collect::<Vec<_>>();
-    let overlap = overlap_count(&left, &right);
-    right
-        .into_iter()
-        .skip(overlap)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn overlap_count(left: &[&str], right: &[&str]) -> usize {
-    let maximum = left.len().min(right.len()).min(12);
-    // We know chunks overlap in samples, but Whisper's text-only segment API
-    // does not provide word timestamps. A single matching boundary word is
-    // ambiguous ("very very very good" is a real example), so never erase it
-    // merely because its spelling matches. Longer matches are the conservative
-    // textual fallback until word-level timing is available.
-    (2..=maximum)
+fn overlap_count(left: &[&str], right: &[&str], confirmed_overlap_words: usize) -> usize {
+    let maximum = left
+        .len()
+        .min(right.len())
+        .min(confirmed_overlap_words)
+        .min(12);
+    (1..=maximum)
         .rev()
         .find(|count| {
             left[left.len() - count..]
@@ -588,16 +608,20 @@ mod tests {
     #[test]
     fn overlap_merge_removes_only_matching_boundary_tokens() {
         assert_eq!(
-            merge_overlap("the porcelain moon", "porcelain moon hums"),
+            merge_overlap("the porcelain moon", "porcelain moon hums", 2),
             "the porcelain moon hums"
         );
         assert_eq!(
-            strip_overlap("the porcelain moon", "porcelain moon hums"),
-            "hums"
+            merge_overlap("very very", "very good", 0),
+            "very very very good"
         );
         assert_eq!(
-            merge_overlap("very very", "very good"),
+            merge_overlap("very very", "very very good", 1),
             "very very very good"
+        );
+        assert_eq!(
+            merge_overlap("wait, for me", "wait for me now", 3),
+            "wait for me now"
         );
     }
 

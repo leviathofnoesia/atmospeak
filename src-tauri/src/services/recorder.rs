@@ -51,6 +51,7 @@ struct ActiveStreaming {
     host: Arc<StreamingAsr>,
     sender: Option<StreamingFrameSender>,
     worker: Option<thread::JoinHandle<()>>,
+    fallback_samples: Arc<Mutex<Vec<f32>>>,
     dropped: Arc<AtomicU64>,
     write_failed: Arc<AtomicBool>,
 }
@@ -63,6 +64,7 @@ struct InputFrame {
 #[derive(Clone)]
 struct StreamingFrameSender {
     tx: SyncSender<InputFrame>,
+    fallback_samples: Arc<Mutex<Vec<f32>>>,
     dropped: Arc<AtomicU64>,
 }
 
@@ -353,7 +355,7 @@ impl RecorderService {
                 streaming.worker.take(),
                 Some(streaming.dropped),
                 Some(streaming.write_failed),
-                Some(samples),
+                Some(streaming.fallback_samples),
                 Vec::new(),
             )
         } else {
@@ -762,6 +764,7 @@ fn start_streaming_worker(
     recording_path: PathBuf,
 ) -> Result<ActiveStreaming> {
     let (tx, rx) = mpsc::sync_channel::<InputFrame>(200);
+    let fallback_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
     let dropped = Arc::new(AtomicU64::new(0));
     let worker_host = host.clone();
     let worker_dropped = dropped.clone();
@@ -799,15 +802,7 @@ fn start_streaming_worker(
             let mut pending = Vec::<f32>::new();
             let mut timestamp_ms = 0_u64;
             while let Ok(frame) = rx.recv() {
-                {
-                    let mut recent = captured_samples.lock();
-                    recent.extend_from_slice(&frame.samples);
-                    let maximum = frame.sample_rate as usize * 10;
-                    if recent.len() > maximum {
-                        let excess = recent.len() - maximum;
-                        recent.drain(..excess);
-                    }
-                }
+                append_recent_samples(&captured_samples, &frame.samples, frame.sample_rate);
                 let resampled = resampler.push(&frame.samples, frame.sample_rate);
                 if let Some(writer) = wav_writer.as_mut() {
                     for sample in &resampled {
@@ -863,12 +858,24 @@ fn start_streaming_worker(
         host,
         sender: Some(StreamingFrameSender {
             tx,
+            fallback_samples: fallback_samples.clone(),
             dropped: dropped.clone(),
         }),
         worker: Some(worker),
+        fallback_samples,
         dropped,
         write_failed,
     })
+}
+
+fn append_recent_samples(samples: &Arc<Mutex<Vec<f32>>>, frame: &[f32], sample_rate: u32) {
+    let mut recent = samples.lock();
+    recent.extend_from_slice(frame);
+    let maximum = sample_rate as usize * 10;
+    if recent.len() > maximum {
+        let excess = recent.len() - maximum;
+        recent.drain(..excess);
+    }
 }
 
 #[derive(Default)]
@@ -919,6 +926,10 @@ fn capture_input_streaming<T: Copy + IntoF32>(
         })
         .collect::<Vec<_>>();
     if let Some(streaming) = streaming {
+        // This buffer is independent of the capped metering window. Appending
+        // before queue delivery preserves source order and keeps batch fallback
+        // lossless even if the streaming worker falls behind or disconnects.
+        streaming.fallback_samples.lock().extend_from_slice(&mono);
         match streaming.tx.try_send(InputFrame {
             sample_rate,
             samples: mono,
@@ -926,10 +937,7 @@ fn capture_input_streaming<T: Copy + IntoF32>(
             Ok(()) => {}
             Err(TrySendError::Full(frame)) | Err(TrySendError::Disconnected(frame)) => {
                 streaming.dropped.fetch_add(1, Ordering::Relaxed);
-                // The streaming queue is deliberately bounded, but the local
-                // batch fallback must remain lossless when it applies pressure
-                // or the worker has gone away.
-                samples.lock().extend_from_slice(&frame.samples);
+                append_recent_samples(samples, &frame.samples, frame.sample_rate);
             }
         }
     } else {
@@ -1054,13 +1062,16 @@ mod tests {
     fn full_streaming_queue_never_blocks_the_audio_callback() {
         let (tx, _rx) = mpsc::sync_channel(0);
         let dropped = Arc::new(AtomicU64::new(0));
+        let fallback_samples = Arc::new(Mutex::new(Vec::new()));
         let sender = StreamingFrameSender {
             tx,
+            fallback_samples: fallback_samples.clone(),
             dropped: dropped.clone(),
         };
         let captured = Arc::new(Mutex::new(Vec::new()));
         capture_input_streaming(&[0.1_f32; 320], 1, 16_000, &captured, Some(&sender));
         assert_eq!(captured.lock().len(), 320);
+        assert_eq!(fallback_samples.lock().len(), 320);
         assert_eq!(dropped.load(Ordering::Relaxed), 1);
     }
 

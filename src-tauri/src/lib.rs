@@ -31,6 +31,33 @@ fn streaming_disabled() -> bool {
     )
 }
 
+fn resolve_automatic_model(
+    app: &tauri::AppHandle,
+    settings: &mut models::AppSettings,
+    backend: models::AsrBackend,
+) {
+    if settings.model_selection_mode != models::ModelSelectionMode::Automatic {
+        return;
+    }
+    let preferred = settings.active_model_id.clone();
+    let candidate = app
+        .state::<AppState>()
+        .database
+        .lock()
+        .automatic_model_candidate(&preferred, backend)
+        .ok()
+        .flatten();
+    if let Some(candidate) = candidate {
+        let installed = runtime::model_inventory(app, settings)
+            .models
+            .into_iter()
+            .any(|model| model.id == candidate && model.installed);
+        if installed {
+            settings.active_model_id = candidate;
+        }
+    }
+}
+
 pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
     if streaming_disabled() {
         metrics::emit_runtime(
@@ -50,25 +77,6 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                 start_asr_host(&app);
                 return;
             };
-            if settings.model_selection_mode == models::ModelSelectionMode::Automatic {
-                let preferred = settings.active_model_id.clone();
-                let candidate = app
-                    .state::<AppState>()
-                    .database
-                    .lock()
-                    .automatic_model_candidate(&preferred)
-                    .ok()
-                    .flatten();
-                if let Some(candidate) = candidate {
-                    let installed = runtime::model_inventory(&app, &settings)
-                        .models
-                        .into_iter()
-                        .any(|model| model.id == candidate && model.installed);
-                    if installed {
-                        settings.active_model_id = candidate;
-                    }
-                }
-            }
             let requested_backend = match std::env::var("ATMOSPEAK_ASR_BACKEND").ok().as_deref() {
                 Some("cpu") => models::AsrBackend::Cpu,
                 _ if settings.acceleration_preference == models::AccelerationPreference::Cpu => {
@@ -95,6 +103,7 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                 start_asr_host(&app);
                 return;
             };
+            resolve_automatic_model(&app, &mut settings, backend);
             let Ok(resolved) = runtime::resolve_runtime(&app, &settings) else {
                 start_asr_host(&app);
                 return;
@@ -134,6 +143,7 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                         start_asr_host(&app);
                         return;
                     };
+                    resolve_automatic_model(&app, &mut settings, models::AsrBackend::Cpu);
                     let Ok(resolved) = runtime::resolve_runtime(&app, &settings) else {
                         start_asr_host(&app);
                         return;
@@ -193,25 +203,7 @@ pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
             let Ok(mut settings) = app.state::<AppState>().database.lock().load_settings() else {
                 return;
             };
-            if settings.model_selection_mode == models::ModelSelectionMode::Automatic {
-                let preferred = settings.active_model_id.clone();
-                let candidate = app
-                    .state::<AppState>()
-                    .database
-                    .lock()
-                    .automatic_model_candidate(&preferred)
-                    .ok()
-                    .flatten();
-                if let Some(candidate) = candidate {
-                    let installed = runtime::model_inventory(&app, &settings)
-                        .models
-                        .into_iter()
-                        .any(|model| model.id == candidate && model.installed);
-                    if installed {
-                        settings.active_model_id = candidate;
-                    }
-                }
-            }
+            resolve_automatic_model(&app, &mut settings, models::AsrBackend::Host);
             let Some(server_exe) = runtime::resolve_server(&app, &settings) else {
                 metrics::emit_runtime(
                     &app,
