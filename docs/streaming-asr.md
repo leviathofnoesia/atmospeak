@@ -6,11 +6,12 @@ behind a decode. From 0.5.2, commits are more aggressive and short warm clips
 can finish on the resident host when streaming has not already committed
 mid-utterance. From 0.5.3, short clips briefly preferred the warm batch host
 even when a dock partial appeared. From **1.0.0**, short clips stay on
-**streaming finalize** (Vulkan first) so mid-hold commits count toward
-release→paste: measured warm `totalMs` **190–244 ms** under a **500 ms** SLO
-(porcelain-moon / `base.en`). The recorder sends bounded 20 ms, mono 16 kHz PCM
-frames to a crash-isolated `atmospeak-asr-host` process while retaining the
-recording for history and batch fallback.
+**streaming finalize** (Vulkan first). Release→paste now prefers the cleaned
+live hypothesis built during the hold, so paste no longer waits on Final when
+the orb already shows text; finalize remains the fallback when no preview is
+ready. The recorder sends bounded 20 ms, mono 16 kHz PCM frames to a
+crash-isolated `atmospeak-asr-host` process while retaining the recording for
+history and batch fallback.
 
 ## Runtime selection
 
@@ -43,23 +44,22 @@ MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
    stuck behind an in-flight force-split.
 4. Stable chunks are reconciled with their overlap. Lone silence markers
    (`[BLANK_AUDIO]`, `[silence]`, …) are dropped; real filler words are kept.
-   Dictionary and snippet context is prompt-only during streaming. Capture always
-   uses the streaming sidecar when it is available; the live-preview setting no
-   longer disables that hot path.
-5. Stop detaches capture before acknowledging the shortcut, flushes the writer,
-   and sends `StopSession` immediately so the host finalizes the uncommitted
-   tail while WAV teardown runs in parallel. The stdin reader sets the shared
-   abort flag so an in-flight `whisper_full` can exit without waiting for the
-   worker to dequeue Stop. Stop also cancels pending preview work and skips
-   near-silent tails (full-tail VAD). Atmospeak prefers streaming finalize for
-   all lengths when the sidecar accepted stop; batch host remains the fallback
-   when streaming fails or is unavailable. Cleanup/snippet expansion and the
-   single paste run once after the final; clipboard restore is off the inject
-   critical path.
-6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop leaves
-   the full local recording available to the legacy batch path, which prefers
-   the lazy resident `whisper-server` over a cold one-shot `whisper-cli`. An
-   incomplete streaming hypothesis is never pasted.
+   Dictionary and snippet context is prompt-only inside the sidecar. Atmospeak
+   also runs cleanup/snippet expansion on each live `Partial` / `StableSegment`
+   into a paste-ready buffer so the orb shows the same text release will paste.
+   Capture always uses the streaming sidecar when it is available; the
+   live-preview setting no longer disables that hot path.
+5. On release, if the paste-ready buffer is non-empty, Atmospeak pastes that
+   cleaned hypothesis immediately after mic stop (no wait on Final, quality
+   gate, or WAV). The orb advances to Pasted; host cancel, WAV teardown, and
+   session persistence run after paste. Clipboard restore stays off the inject
+   critical path. When no usable preview exists yet, stop falls back to the
+   prior path: finalize capture, quality gate, `StopSession` / `await_final`
+   (or batch), cleanup, then paste.
+6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop on
+   the slow path leaves the full local recording available to the legacy batch
+   path, which prefers the lazy resident `whisper-server` over a cold one-shot
+   `whisper-cli`.
 
 IPC is versioned, length-prefixed MessagePack over stdin/stdout. Protocol
 frames are capped at 1 MiB; stdout is protocol-only and logs go to stderr.

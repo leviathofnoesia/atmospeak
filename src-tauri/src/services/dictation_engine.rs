@@ -20,6 +20,7 @@ use crate::{
     services::{
         app_state::AppState,
         cleanup, injection,
+        live_paste::LivePasteContext,
         metrics::{self, StageTimer},
         polish, recorder, sound_check, transcriber,
     },
@@ -597,6 +598,7 @@ impl Worker {
                 let state = self.app.state::<AppState>();
                 state.end_level_stream();
                 let _ = state.recorder.cancel();
+                state.live_paste.clear();
                 self.state = EngineState::Idle;
                 self.active_recording = None;
                 self.settle_deadline = None;
@@ -686,6 +688,14 @@ impl Worker {
             .recorder
             .start(settings.microphone_name, streaming)
             .map_err(|e| e.to_string())?;
+        state.live_paste.begin_session(
+            started.id.clone(),
+            LivePasteContext {
+                cleanup_enabled: settings.cleanup_enabled,
+                dictionary: snapshot.dictionary,
+                snippets: snapshot.snippets,
+            },
+        );
         sound_check::start_level_events(&self.app);
         Ok(started)
     }
@@ -703,19 +713,26 @@ impl Worker {
     ) -> Result<DictationResult, String> {
         let recording = self.active_recording.clone();
         self.state = EngineState::Processing;
-        self.emit_phase(
-            DictationPhase::Finalizing,
-            None,
-            "Transcribing locally…",
-            None,
-            None,
-        );
 
-        let state = self.app.state::<AppState>();
-        state.end_level_stream();
-        let capture_started = Instant::now();
-        let mut captured = match state.recorder.stop() {
-            Ok(captured) => {
+        // Snapshot paste-ready text before teardown so release does not wait on Final.
+        let stop_outcome = {
+            let state = self.app.state::<AppState>();
+            let preview_paste = state.live_paste.take_paste_ready();
+            state.end_level_stream();
+            let capture_started = Instant::now();
+            match state.recorder.stop() {
+                Ok(captured) => {
+                    let capture_stop_ms = capture_started.elapsed().as_millis() as u64;
+                    Ok((preview_paste, captured, capture_stop_ms))
+                }
+                Err(error) => {
+                    state.live_paste.clear();
+                    Err(error.to_string())
+                }
+            }
+        };
+        let (preview_paste, mut captured, capture_stop_ms) = match stop_outcome {
+            Ok(values) => {
                 if let Some((gesture, state_before)) = stop_ack {
                     self.emit_action_ack(
                         gesture,
@@ -724,7 +741,7 @@ impl Worker {
                         &DispatchResult::Accepted,
                     );
                 }
-                captured
+                values
             }
             Err(error) => {
                 if let Some((gesture, state_before)) = stop_ack {
@@ -733,16 +750,42 @@ impl Worker {
                         state_before,
                         self.state,
                         &DispatchResult::Rejected {
-                            reason: error.to_string(),
+                            reason: error.clone(),
                         },
                     );
                 }
-                let error = error.to_string();
                 self.fail_pipeline(error.clone());
                 return Err(error);
             }
         };
-        let capture_stop_ms = capture_started.elapsed().as_millis() as u64;
+
+        if let Some(preview) = preview_paste.filter(|preview| preview.session_id == captured.id) {
+            match self.run_preview_paste_path(
+                recording.clone(),
+                captured,
+                preview,
+                capture_stop_ms,
+            ) {
+                Ok(result) => return Ok(result),
+                Err(error) => {
+                    // Preview paste failed after mic stop — surface the error.
+                    self.app.state::<AppState>().live_paste.clear();
+                    self.fail_pipeline(error.clone());
+                    return Err(error);
+                }
+            }
+        }
+
+        // Slow path: no usable live hypothesis yet — finalize then paste.
+        self.emit_phase(
+            DictationPhase::Finalizing,
+            None,
+            "Transcribing locally…",
+            None,
+            None,
+        );
+        self.app.state::<AppState>().live_paste.clear();
+
         if let Err(error) = recorder::finalize_capture(&mut captured) {
             if let Some(host) = captured.streaming_host.take() {
                 host.cancel_session(&captured.id);
@@ -788,6 +831,7 @@ impl Worker {
             return Err(error);
         }
 
+        let state = self.app.state::<AppState>();
         let snapshot = state
             .database
             .lock()
@@ -796,6 +840,7 @@ impl Worker {
 
         let last_hwnd = state.last_target_window();
         let app = self.app.clone();
+        drop(state);
 
         let pipeline =
             (|| -> Result<(DictationResult, StageMetrics, StreamingMetrics), anyhow::Error> {
@@ -1020,6 +1065,204 @@ impl Worker {
                 ))
             })();
 
+        self.finish_pipeline_result(recording, pipeline)
+    }
+
+    /// Paste the cleaned live hypothesis immediately; WAV / host teardown run after Pasted.
+    fn run_preview_paste_path(
+        &mut self,
+        recording: Option<RecordingStarted>,
+        mut captured: recorder::CapturedRecording,
+        preview: crate::services::live_paste::LivePasteSnapshot,
+        capture_stop_ms: u64,
+    ) -> Result<DictationResult, String> {
+        let (auto_inject, restore_clipboard, active_model_id, last_hwnd) = {
+            let state = self.app.state::<AppState>();
+            let snapshot = state
+                .database
+                .lock()
+                .snapshot()
+                .map_err(|e| e.to_string())?;
+            (
+                snapshot.settings.auto_inject,
+                snapshot.settings.restore_clipboard,
+                snapshot.settings.active_model_id.clone(),
+                state.last_target_window(),
+            )
+        };
+        let paste_text = preview.paste_text;
+        let raw_text = preview.raw_text;
+        let session_id = captured.id.clone();
+        let duration_ms = captured.duration_ms;
+        let streaming_frames_dropped = captured.streaming_frames_dropped;
+        let audio_path = captured.path.to_string_lossy().to_string();
+        let first_partial_ms = captured
+            .streaming_host
+            .as_ref()
+            .and_then(|host| host.first_partial_ms());
+        let backend = match captured.streaming_host.as_ref().map(|host| host.backend()) {
+            Some(AsrBackend::Vulkan) => metrics::ASR_BACKEND_VULKAN,
+            Some(_) => metrics::ASR_BACKEND_STREAMING_CPU,
+            None => metrics::ASR_BACKEND_STREAMING_CPU,
+        };
+
+        let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
+            hwnd,
+            process_name: injection::process_name_for(hwnd),
+        });
+
+        let mut timer = StageTimer::new();
+        timer.mark_capture_stop(capture_stop_ms);
+        timer.mark_write(0);
+        timer.mark_asr(0);
+        timer.mark_backend(backend);
+        timer.mark_cleanup(0);
+
+        let inject_started = Instant::now();
+        let injection_result = if auto_inject {
+            match injection::inject_text(&paste_text, restore_clipboard, preferred) {
+                Ok(result) => Some(result),
+                Err(error) => {
+                    if let Some(host) = captured.streaming_host.take() {
+                        host.cancel_session(&session_id);
+                    }
+                    let _ = recorder::finalize_capture(&mut captured);
+                    let _ = std::fs::remove_file(&captured.path);
+                    self.app.state::<AppState>().live_paste.clear();
+                    return Err(error.to_string());
+                }
+            }
+        } else {
+            if let Err(error) = injection::copy_text_to_clipboard(&paste_text) {
+                metrics::emit_runtime(
+                    &self.app,
+                    "clipboard-copy-error",
+                    format!("session={session_id} {error}"),
+                );
+            }
+            None
+        };
+        let paste_ms = inject_started.elapsed().as_millis() as u64;
+        timer.mark_inject(paste_ms);
+        // Stop the stage clock at paste — teardown must not inflate release→paste.
+        let stage_metrics = timer.finish(session_id.clone(), duration_ms);
+
+        let session = TranscriptSession {
+            id: session_id.clone(),
+            raw_text,
+            word_count: paste_text.split_whitespace().count(),
+            cleaned_text: paste_text,
+            polished_text: None,
+            prefer_polished: true,
+            audio_path,
+            duration_ms,
+            injected: injection_result
+                .as_ref()
+                .map(|result| result.injected)
+                .unwrap_or(false),
+            source_application: injection_result
+                .as_ref()
+                .and_then(|result| result.target_process_name.clone()),
+            created_at: Utc::now(),
+        };
+
+        let result = DictationResult {
+            session: session.clone(),
+            injection: injection_result,
+        };
+
+        // Surface Pasted before WAV join / host cancel so the orb matches paste latency.
+        let injected = result
+            .injection
+            .as_ref()
+            .map(|injection| injection.injected)
+            .unwrap_or(false);
+        let message = result
+            .injection
+            .as_ref()
+            .map(|injection| injection.message.clone())
+            .unwrap_or_else(|| "Transcript saved to history.".to_string());
+        if injected {
+            self.state = EngineState::Pasted;
+            self.emit_phase(
+                DictationPhase::Pasted,
+                recording,
+                message,
+                Some(result.clone()),
+                Some(stage_metrics.clone()),
+            );
+        } else if result.injection.is_some() {
+            self.state = EngineState::Error;
+            self.emit_phase(
+                DictationPhase::Error,
+                recording,
+                message,
+                Some(result.clone()),
+                Some(stage_metrics.clone()),
+            );
+        } else {
+            self.state = EngineState::Pasted;
+            self.emit_phase(
+                DictationPhase::Saved,
+                recording,
+                message,
+                Some(result.clone()),
+                Some(stage_metrics.clone()),
+            );
+        }
+        self.active_recording = None;
+        self.settle_from_terminal();
+
+        // Deferred teardown: cancel finalize, retain WAV for history, persist session.
+        if let Some(host) = captured.streaming_host.take() {
+            host.cancel_session(&session_id);
+        }
+        if let Err(error) = recorder::finalize_capture(&mut captured)
+            .and_then(|_| recorder::finish_recording(captured))
+        {
+            metrics::emit_runtime(
+                &self.app,
+                "preview-paste-teardown-error",
+                format!("session={session_id} {error}"),
+            );
+        }
+
+        let streaming_backend = match backend {
+            metrics::ASR_BACKEND_VULKAN => AsrBackend::Vulkan,
+            metrics::ASR_BACKEND_STREAMING_CPU => AsrBackend::Cpu,
+            metrics::ASR_BACKEND_HOST => AsrBackend::Host,
+            _ => AsrBackend::Cli,
+        };
+        let streaming_metrics = StreamingMetrics {
+            session_id: session_id.clone(),
+            backend: streaming_backend,
+            model_id: active_model_id,
+            first_partial_ms,
+            stop_ack_ms: capture_stop_ms,
+            finalize_ms: 0,
+            paste_ms,
+            processed_during_recording_ms: duration_ms,
+            tail_audio_ms: 0,
+            max_backlog_ms: 0,
+            audio_frames_dropped: streaming_frames_dropped,
+            fallback_reason: None,
+        };
+        let state = self.app.state::<AppState>();
+        if let Err(error) = state.database.lock().insert_session(&session) {
+            metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
+        }
+        metrics::emit_stage_metrics(&self.app, &stage_metrics);
+        metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
+        state.live_paste.clear();
+        Ok(result)
+    }
+
+    fn finish_pipeline_result(
+        &mut self,
+        recording: Option<RecordingStarted>,
+        pipeline: Result<(DictationResult, StageMetrics, StreamingMetrics), anyhow::Error>,
+    ) -> Result<DictationResult, String> {
+        let state = self.app.state::<AppState>();
         match pipeline {
             Ok((result, metrics, streaming_metrics)) => {
                 if let Err(error) = state.database.lock().insert_session(&result.session) {
