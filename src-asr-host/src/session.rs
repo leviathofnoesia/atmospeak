@@ -122,12 +122,12 @@ impl Session {
 pub fn run_worker(
     control_rx: Receiver<AsrCommand>,
     audio_rx: Receiver<AudioFrameMsg>,
+    abort: Arc<AtomicBool>,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut model: Option<Model> = None;
     let mut session: Option<Session> = None;
     let mut stop_requested = false;
-    let abort = Arc::new(AtomicBool::new(false));
 
     loop {
         // 1. Control before inference: StopSession must never queue behind a
@@ -527,11 +527,10 @@ fn finalize_stopped_session(
     // token on padded silence, and the commit already holds the utterance.
     if active.audio.len() > active.chunk_start + SAMPLE_RATE / 10 {
         let tail = &active.audio[active.chunk_start..];
-        let speechy = inference::vad_last_speech_end(
-            &mut model_slot_mut(model)?.vad,
-            &tail[..tail.len().min(SAMPLE_RATE * 3)],
-        )?
-        .is_some();
+        // Scan the full uncommitted tail. A prefix-only window misses speech that
+        // arrives after a long silent stretch when VAD never advanced chunk_start.
+        let speechy = inference::vad_last_speech_end(&mut model_slot_mut(model)?.vad, tail)?
+            .is_some();
         if speechy {
             finalize_chunk(model_slot_mut(model)?, &mut active, output)?;
         }
@@ -677,26 +676,19 @@ fn finalize_chunk(model: &mut Model, session: &mut Session, output: &mut impl Wr
     Ok(())
 }
 
-fn silence_hallucination(decoded: &str, committed: &str) -> bool {
+fn silence_hallucination(decoded: &str, _committed: &str) -> bool {
     let trimmed = decoded.trim();
     if trimmed.is_empty() {
         return true;
     }
     let lower = trimmed.to_ascii_lowercase();
-    let marker = lower.contains("blank_audio")
+    // Only drop unambiguous silence markers — never discard real filler words
+    // like "the"/"a" that can be legitimate VAD-boundary chunks.
+    lower.contains("blank_audio")
         || lower.contains("[silence]")
         || lower == "silence"
-        || lower == "silence.";
-    if marker {
-        return true;
-    }
-    // Lone filler after a real utterance — common on padded trailing silence.
-    committed.split_whitespace().count() >= 4
-        && trimmed.split_whitespace().count() <= 1
-        && matches!(
-            lower.as_str(),
-            "the" | "the." | "a" | "a." | "you" | "you." | "." | "um" | "uh"
-        )
+        || lower == "silence."
+        || lower == "."
 }
 
 fn prompt(session: &Session) -> String {
@@ -724,5 +716,13 @@ mod tests {
         assert!(vad_check_due(&session));
         session.last_vad_check = SAMPLE_RATE - VAD_CHECK_SAMPLES + 1;
         assert!(!vad_check_due(&session));
+    }
+
+    #[test]
+    fn silence_hallucination_keeps_real_filler_words() {
+        assert!(silence_hallucination("[BLANK_AUDIO]", "hello there friend again"));
+        assert!(silence_hallucination(".", "hello there friend again"));
+        assert!(!silence_hallucination("the", "hello there friend again"));
+        assert!(!silence_hallucination("you", "hello there friend again"));
     }
 }

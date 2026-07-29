@@ -94,10 +94,13 @@ pub fn transcribe(
     if abort.is_some_and(|flag| flag.load(Ordering::Acquire)) {
         bail!("whisper decode aborted");
     }
-    // Streaming sidecar always uses greedy best_of=1 — quality is recovered by
-    // overlap merge across commits; release→paste needs the cheap decode path.
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    let _ = (backend, profile);
+    let best_of = match profile {
+        TranscriptionProfile::Speed => 1,
+        TranscriptionProfile::Balanced if backend == AsrBackend::Vulkan => 2,
+        TranscriptionProfile::Balanced => 1,
+        TranscriptionProfile::Quality => 3,
+    };
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of });
     params.set_n_threads(threads);
     params.set_language(Some(if language.is_empty() { "en" } else { language }));
     params.set_initial_prompt(prompt);

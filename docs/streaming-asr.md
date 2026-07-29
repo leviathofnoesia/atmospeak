@@ -41,19 +41,21 @@ MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
    `StopSession` is not starved. Decode reuses one `WhisperState`, uses
    single-segment greedy params, and honors an abort flag so StopSession is not
    stuck behind an in-flight force-split.
-4. Stable chunks are reconciled with their overlap. Lone silence hallucinations
-   (`The.`, `[BLANK_AUDIO]`, …) after a real utterance are dropped. Dictionary
-   and snippet context is prompt-only during streaming. Capture always uses the
-   streaming sidecar when it is available; the live-preview setting no longer
-   disables that hot path.
+4. Stable chunks are reconciled with their overlap. Lone silence markers
+   (`[BLANK_AUDIO]`, `[silence]`, …) are dropped; real filler words are kept.
+   Dictionary and snippet context is prompt-only during streaming. Capture always
+   uses the streaming sidecar when it is available; the live-preview setting no
+   longer disables that hot path.
 5. Stop detaches capture before acknowledging the shortcut, flushes the writer,
    and sends `StopSession` immediately so the host finalizes the uncommitted
-   tail while WAV teardown runs in parallel. Stop cancels pending preview work,
-   aborts in-flight decode, and skips near-silent tails. Atmospeak prefers
-   streaming finalize for all lengths when the sidecar accepted stop; batch
-   host remains the fallback when streaming fails or is unavailable.
-   Cleanup/snippet expansion and the single paste run once after the final;
-   clipboard restore is off the inject critical path.
+   tail while WAV teardown runs in parallel. The stdin reader sets the shared
+   abort flag so an in-flight `whisper_full` can exit without waiting for the
+   worker to dequeue Stop. Stop also cancels pending preview work and skips
+   near-silent tails (full-tail VAD). Atmospeak prefers streaming finalize for
+   all lengths when the sidecar accepted stop; batch host remains the fallback
+   when streaming fails or is unavailable. Cleanup/snippet expansion and the
+   single paste run once after the final; clipboard restore is off the inject
+   critical path.
 6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop leaves
    the full local recording available to the legacy batch path, which prefers
    the lazy resident `whisper-server` over a cold one-shot `whisper-cli`. An

@@ -9,7 +9,10 @@ mod session;
 
 use std::{
     io::{self, Read},
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, mpsc,
+    },
     thread,
 };
 
@@ -29,6 +32,10 @@ fn main() -> Result<()> {
 
     let (control_tx, control_rx) = mpsc::channel::<AsrCommand>();
     let (audio_tx, audio_rx) = mpsc::sync_channel::<AudioFrameMsg>(AUDIO_QUEUE_CAPACITY);
+    // Shared with the worker so StopSession/CancelSession can abort an in-flight
+    // whisper_full from this reader thread (the worker is blocked inside decode).
+    let abort = Arc::new(AtomicBool::new(false));
+    let worker_abort = Arc::clone(&abort);
 
     let worker_output = io::stdout();
     let worker = thread::Builder::new()
@@ -36,7 +43,7 @@ fn main() -> Result<()> {
         .spawn(move || {
             let stdout = worker_output;
             let mut output = stdout.lock();
-            session::run_worker(control_rx, audio_rx, &mut output)
+            session::run_worker(control_rx, audio_rx, worker_abort, &mut output)
         })
         .context("failed to start inference worker")?;
 
@@ -61,6 +68,12 @@ fn main() -> Result<()> {
                 }
             }
             other => {
+                if matches!(
+                    &other,
+                    AsrCommand::StopSession { .. } | AsrCommand::CancelSession { .. }
+                ) {
+                    abort.store(true, Ordering::Release);
+                }
                 if control_tx.send(other).is_err() {
                     break;
                 }

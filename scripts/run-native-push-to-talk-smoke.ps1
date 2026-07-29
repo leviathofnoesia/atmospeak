@@ -98,6 +98,20 @@ try {
   $env:ATMOSPEAK_NATIVE_HARNESS = "1"
   # Latency gate prefers the warm Vulkan sidecar (release→paste ≤500ms on this
   # fixture). Override with ATMOSPEAK_ASR_BACKEND=cpu to exercise the CPU path.
+  # Rebuild sidecars before relying on this gate after host/session changes:
+  #   powershell -File scripts/build-asr-sidecars.ps1
+  # Set ATMOSPEAK_ASR_REBUILD=1 to rebuild Vulkan/CPU hosts before the smoke.
+  if ($env:ATMOSPEAK_ASR_REBUILD -eq "1") {
+    Write-Host "ATMOSPEAK_ASR_REBUILD=1 — rebuilding ASR sidecars…"
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build-asr-sidecars.ps1")
+    if ($LASTEXITCODE -ne 0) {
+      throw "ASR sidecar rebuild failed with code $LASTEXITCODE."
+    }
+  }
+  $VulkanSidecar = Join-Path $Root "src-tauri\resources\asr\atmospeak-asr-vulkan.exe"
+  if (-not (Test-Path -LiteralPath $VulkanSidecar)) {
+    throw "Vulkan ASR sidecar missing at $VulkanSidecar — run scripts/build-asr-sidecars.ps1"
+  }
   $env:ATMOSPEAK_ASR_BACKEND = if ($env:ATMOSPEAK_ASR_BACKEND) {
     $env:ATMOSPEAK_ASR_BACKEND
   } else {

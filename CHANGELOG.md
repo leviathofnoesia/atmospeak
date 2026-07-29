@@ -49,7 +49,8 @@ xychart-beta
 | Gate | ≤ 2000 ms | ≤ **500** ms |
 
 Automated gates green: frontend build, `tsc --noEmit`, 30 frontend tests, 77
-Rust library tests, paste-latency SLO, and warm `validation:native-ptt`.
+Rust library tests (`cargo test --manifest-path src-tauri/Cargo.toml --lib`),
+paste-latency SLO, and warm `validation:native-ptt`.
 
 ### Operator acceptance (manual)
 

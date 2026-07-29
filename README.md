@@ -34,8 +34,9 @@ unlimited and requires no account.
 
 - **Speak and paste.** Hold or tap your hotkey, watch the live preview in the
   dock, and get exactly one paste into whatever application had focus. Warm
-  short clips target under two seconds from key release to paste (native
-  validation SLO; actual latency depends on machine and utterance).
+  short clips target under 500&nbsp;ms from key release to paste on the native
+  Vulkan streaming validation path; actual latency depends on machine and
+  utterance.
 - **Local Whisper, your choice of model.** A bundled model works immediately;
   the downloader adds larger ones. Streaming ASR runs on Vulkan and falls back
   to CPU on its own.

@@ -439,8 +439,8 @@ try {
     console.warn(
       JSON.stringify({
         warning: "paste-target-restore-soft-fail",
-        injection: pasted.result.injection,
-        targetTextMatched: true,
+        injection: pasted.result?.injection ?? null,
+        targetTextMatched: targetSawTranscript,
       }),
     );
   }
