@@ -1,5 +1,40 @@
 # Changelog
 
+# 1.0.0 — The finished free product (2026-07-29)
+
+Atmospeak 1.0.0 is a stabilization and verification release. It ships no new
+features: it declares the 0.5.3 product surface complete, verified, and free.
+
+### Changed
+
+- Version bumped to 1.0.0 across the app, installer, and website.
+- README now presents Atmospeak as a complete free product rather than an
+  increment, and states the free commitment explicitly.
+
+### Free commitment
+
+Dictation, every local Whisper model, cleanup, Backtrack, injection, history,
+dictionary, snippets, and on-device AI edit are free, unlimited, and require no
+account. Everything shipped through 1.0.0 stays free. Any future paid capability
+will be capability that does not exist today — nothing already shipped will be
+moved behind a licence.
+
+### Verification
+
+Free-surface audit recorded in
+[`docs/releases/v1.0.0-free-surface-audit.md`](docs/releases/v1.0.0-free-surface-audit.md).
+No free-path regressions found; no gating exists anywhere in the codebase.
+
+Automated gates green: frontend build, `tsc --noEmit`, 30 frontend tests, 77
+Rust library tests, and the native paste-latency SLO. See the audit for the
+native push-to-talk harness caveat.
+
+### Operator acceptance (manual)
+
+Unchanged from 0.5.3 and still run by hand — not marked done by CI. Cases from
+production-100: **001**, **005**, **018–019**, **049–058**, **064**. These were
+**not** executed for this release; see the audit.
+
 # 0.5.3 — Backtrack + optional AI polish (2026-07-29)
 
 ### Added
