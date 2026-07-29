@@ -209,17 +209,17 @@ Measured on a warm `base.en` CPU path with the porcelain-moon fixture
 
 ```mermaid
 xychart-beta
-    title "Release → paste (ms, lower is better)"
-    x-axis ["v0.5.1 feel", "v0.5.2+ measured"]
-    y-axis "Milliseconds" 0 --> 11000
-    bar [10000, 1905]
+    title "Release → paste totalMs (warm porcelain-moon, lower is better)"
+    x-axis ["Before: host ≤5s route", "After: Vulkan stream (1.0.0)"]
+    y-axis "Milliseconds" 0 --> 2200
+    bar [1718, 213]
 ```
 
-| Metric | Gate |
-| --- | ---: |
-| Release → paste (`totalMs`) | ≤ 2000 ms |
-| Inject (`injectMs`) | ≤ 150 ms |
-| Paste-only wall (`pasteVisibleMs`) | ≤ 300 ms |
+| Metric | Before (≤5 s → warm host) | After (Vulkan streaming) | Gate |
+| --- | ---: | ---: | ---: |
+| Release → paste (`totalMs`) | ~1250–1840 ms | **190–244 ms** | ≤ **500** ms |
+| Inject (`injectMs`) | ~54–55 ms | ~54–55 ms | ≤ 150 ms |
+| Paste-only wall (`pasteVisibleMs`) | — | — | ≤ 300 ms |
 
 ## Build from source
 

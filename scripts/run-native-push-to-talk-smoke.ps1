@@ -96,9 +96,13 @@ try {
   $env:ATMOSPEAK_APP_DATA_DIR = $ProfileDir
   $env:ATMOSPEAK_WEBVIEW_DEBUG_PORT = "$Port"
   $env:ATMOSPEAK_NATIVE_HARNESS = "1"
-  # Latency gate requires the rebuilt streaming sidecar; prefer CPU so a stale
-  # Vulkan binary cannot silently miss finalize-path speed fixes.
-  $env:ATMOSPEAK_ASR_BACKEND = "cpu"
+  # Latency gate prefers the warm Vulkan sidecar (release→paste ≤500ms on this
+  # fixture). Override with ATMOSPEAK_ASR_BACKEND=cpu to exercise the CPU path.
+  $env:ATMOSPEAK_ASR_BACKEND = if ($env:ATMOSPEAK_ASR_BACKEND) {
+    $env:ATMOSPEAK_ASR_BACKEND
+  } else {
+    "vulkan"
+  }
   $env:ATMOSPEAK_TEST_AUDIO_FIXTURE = (Resolve-Path -LiteralPath $FixturePath).Path
   $Process = Start-Process -FilePath $AppExe -PassThru
   Start-Sleep -Seconds 1

@@ -3,13 +3,22 @@
 ## 1.0.0 — The finished free product (2026-07-29)
 
 Atmospeak 1.0.0 is a stabilization and verification release. It ships no new
-features: it declares the 0.5.3 product surface complete, verified, and free.
+user-facing features: it declares the 0.5.3 product surface complete, verified,
+and free — and tightens warm release→paste so the native PTT gate is honest at
+**≤ 500 ms** on Vulkan streaming.
 
 ### Changed
 
 - Version bumped to 1.0.0 across the app, installer, and website.
 - README now presents Atmospeak as a complete free product rather than an
   increment, and states the free commitment explicitly.
+- Short clips no longer cancel streaming for the warm batch host by default;
+  Vulkan streaming finalize is the warm release→paste path.
+- Streaming sidecar: reuse `WhisperState`, abort in-flight decode on stop,
+  drop silence hallucinations, skip near-silent tails; sidecar builds prefer
+  short-path Ninja on Windows.
+- Native PTT harness: release→paste budget **500 ms**, paste contains-match +
+  inject trust; smoke defaults to Vulkan.
 
 ### Free commitment
 
@@ -25,9 +34,22 @@ Free-surface audit recorded in
 [`docs/releases/v1.0.0-free-surface-audit.md`](docs/releases/v1.0.0-free-surface-audit.md).
 No free-path regressions found; no gating exists anywhere in the codebase.
 
+```mermaid
+xychart-beta
+    title "Warm release → paste totalMs (porcelain-moon / base.en)"
+    x-axis ["Before: host ≤5s", "After: Vulkan stream"]
+    y-axis "Milliseconds" 0 --> 2000
+    bar [1718, 213]
+```
+
+| | Before | After |
+| --- | ---: | ---: |
+| Path | ≤5 s → warm batch host | Streaming Vulkan finalize |
+| Measured `totalMs` | ~1250–1840 | **190–244** |
+| Gate | ≤ 2000 ms | ≤ **500** ms |
+
 Automated gates green: frontend build, `tsc --noEmit`, 30 frontend tests, 77
-Rust library tests, and the native paste-latency SLO. See the audit for the
-native push-to-talk harness caveat.
+Rust library tests, paste-latency SLO, and warm `validation:native-ptt`.
 
 ### Operator acceptance (manual)
 
