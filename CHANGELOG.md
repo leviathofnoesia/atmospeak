@@ -1,5 +1,34 @@
 # Changelog
 
+# 0.5.3 — Backtrack + optional AI polish (2026-07-29)
+
+### Added
+
+- **Deterministic Backtrack** in cleanup: stutter phrase collapse (`is not is not`),
+  triggered replaces (`actually` / `I mean` / `wait no`), expanded correction
+  commands (`go back`, `forget that`), and a conservative restate heuristic.
+- **Bundled local AI editor** (default): on-demand `llama-server` + curated
+  Qwen2.5 0.5B GGUF. Toggle AI auto-edit → download once → polish stays on-device.
+  No Ollama required. Advanced settings still allow Ollama / OpenAI-compatible.
+- History **AI polish**, **Undo AI edit**, and **Redo AI edit** per session.
+- Settings UI: simple model picker + setup button; advanced provider fields collapsed.
+- Polish API keys stored in the **OS keyring** (never SQLite); env fallbacks remain.
+
+### Changed
+
+- Short utterances (≤5 s) always prefer the warm resident batch host over
+  streaming finalize, even when a dock partial already appeared.
+- Streaming chunk `merge_overlap` soft-extends boundary matches when at least
+  one overlap word is acoustically confirmed.
+- Auto-polish paste path never downloads or blocks on setup: if the bundled
+  runtime is not ready, cleaned text pastes immediately (`polish-timeout` /
+  `polish-fallback` logs distinguish failures).
+
+### Operator acceptance (manual)
+
+Still run by hand — not marked done by CI. Cases from production-100:
+**018–019**, **049–058**, **064** (backtrack / polish / fallback paths).
+
 # 0.5.2 — Release-to-paste speed (2026-07-29)
 
 ### Changed

@@ -10,12 +10,14 @@ import type { ReactNode } from "react";
 import type {
   AppSettings,
   MicrophoneInfo,
+  ModelInventoryItem,
   ShortcutStatus,
   UpdateCheckResult,
   UpdateStatus,
 } from "../types/dictation";
 import { shortcutOptions } from "../panelOptions";
 import { PanelTitle } from "./PanelTitle";
+import { PolishSettings } from "./PolishSettings";
 import { ToggleRow } from "./ToggleRow";
 
 interface ShortcutTestState {
@@ -53,6 +55,10 @@ interface SettingsPanelProps {
   onInstallUpdate: () => Promise<void>;
   advanced: ReactNode;
   modelManagement: ReactNode;
+  polishInventory?: ModelInventoryItem[];
+  polishSetupBusy?: boolean;
+  polishSetupMessage?: string;
+  onEnsurePolishRuntime?: () => Promise<void>;
 }
 
 export function SettingsPanel({
@@ -77,6 +83,10 @@ export function SettingsPanel({
   onInstallUpdate,
   advanced,
   modelManagement,
+  polishInventory = [],
+  polishSetupBusy = false,
+  polishSetupMessage = "",
+  onEnsurePolishRuntime,
 }: SettingsPanelProps) {
   const shortcutKeys = (
     shortcutCapture.active && shortcutCapture.keys.length > 0
@@ -208,6 +218,14 @@ export function SettingsPanel({
         label="Cleanup fillers and spoken punctuation"
         checked={settings.cleanupEnabled}
         onChange={(cleanupEnabled) => setSettings({ ...settings, cleanupEnabled })}
+      />
+      <PolishSettings
+        settings={settings}
+        setSettings={setSettings}
+        polishInventory={polishInventory}
+        polishSetupBusy={polishSetupBusy}
+        polishSetupMessage={polishSetupMessage}
+        onEnsurePolishRuntime={onEnsurePolishRuntime}
       />
       <ToggleRow
         icon={<RotateCw size={18} />}

@@ -72,6 +72,10 @@ Sources:
 ### P2 — formatting and personalization
 
 - Add an optional local rewrite layer with explicit, reversible commands.
+  **Status (0.5.3):** deterministic Backtrack ships in cleanup (always with
+  `cleanupEnabled`); default polish path is a bundled `llama-server` + curated
+  GGUF (download on first enable). Ollama / OpenAI-compatible remain Advanced.
+  History Undo/Redo AI edit is available.
 - Learn corrections with per-app scope and a visible way to inspect or delete
   learned preferences.
 - Introduce app-aware formatting only after the privacy boundary and capture

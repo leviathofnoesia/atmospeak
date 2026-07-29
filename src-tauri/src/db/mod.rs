@@ -96,6 +96,26 @@ impl Database {
                 [],
             )?;
         }
+        let session_columns = self
+            .connection
+            .prepare("pragma table_info(transcript_sessions)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if !session_columns.iter().any(|column| column == "polished_text") {
+            self.connection.execute(
+                "alter table transcript_sessions add column polished_text text",
+                [],
+            )?;
+        }
+        if !session_columns
+            .iter()
+            .any(|column| column == "prefer_polished")
+        {
+            self.connection.execute(
+                "alter table transcript_sessions add column prefer_polished integer not null default 1",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -350,12 +370,14 @@ impl Database {
     pub fn insert_session(&self, session: &TranscriptSession) -> Result<()> {
         self.connection.execute(
             "insert into transcript_sessions
-             (id, raw_text, cleaned_text, audio_path, duration_ms, word_count, injected, source_application, created_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, raw_text, cleaned_text, polished_text, prefer_polished, audio_path, duration_ms, word_count, injected, source_application, created_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 session.id,
                 session.raw_text,
                 session.cleaned_text,
+                session.polished_text,
+                bool_to_i64(session.prefer_polished),
                 session.audio_path,
                 session.duration_ms as i64,
                 session.word_count as i64,
@@ -369,27 +391,63 @@ impl Database {
 
     pub fn list_sessions(&self) -> Result<Vec<TranscriptSession>> {
         let mut statement = self.connection.prepare(
-            "select id, raw_text, cleaned_text, audio_path, duration_ms, word_count, injected, source_application, created_at
+            "select id, raw_text, cleaned_text, polished_text, prefer_polished, audio_path, duration_ms, word_count, injected, source_application, created_at
              from transcript_sessions
              order by created_at desc
              limit 100",
         )?;
-        let rows = statement.query_map([], |row| {
-            Ok(TranscriptSession {
-                id: row.get(0)?,
-                raw_text: row.get(1)?,
-                cleaned_text: row.get(2)?,
-                audio_path: row.get(3)?,
-                duration_ms: row.get::<_, i64>(4)? as u64,
-                word_count: row.get::<_, i64>(5)? as usize,
-                injected: row.get::<_, i64>(6)? == 1,
-                source_application: row.get(7)?,
-                created_at: parse_datetime(row.get::<_, String>(8)?),
-            })
-        })?;
+        let rows = statement.query_map([], session_from_row)?;
 
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("failed to load transcript sessions")
+    }
+
+    pub fn update_session_polish_preference(
+        &self,
+        id: &str,
+        prefer_polished: bool,
+    ) -> Result<Option<TranscriptSession>> {
+        let updated = self.connection.execute(
+            "update transcript_sessions set prefer_polished = ?1 where id = ?2",
+            params![bool_to_i64(prefer_polished), id],
+        )?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        self.get_session(id)
+    }
+
+    pub fn update_session_polished_text(
+        &self,
+        id: &str,
+        polished_text: &str,
+    ) -> Result<Option<TranscriptSession>> {
+        let updated = self.connection.execute(
+            "update transcript_sessions
+             set polished_text = ?1, prefer_polished = 1, cleaned_text = cleaned_text,
+                 word_count = ?2
+             where id = ?3",
+            params![
+                polished_text,
+                polished_text.split_whitespace().count() as i64,
+                id
+            ],
+        )?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        self.get_session(id)
+    }
+
+    pub fn get_session(&self, id: &str) -> Result<Option<TranscriptSession>> {
+        let mut statement = self.connection.prepare(
+            "select id, raw_text, cleaned_text, polished_text, prefer_polished, audio_path, duration_ms, word_count, injected, source_application, created_at
+             from transcript_sessions where id = ?1",
+        )?;
+        let session = statement
+            .query_row(params![id], session_from_row)
+            .optional()?;
+        Ok(session)
     }
 
     pub fn delete_session(&self, id: &str) -> Result<Option<String>> {
@@ -434,6 +492,22 @@ impl Database {
         transaction.commit()?;
         Ok(audio_paths)
     }
+}
+
+fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TranscriptSession> {
+    Ok(TranscriptSession {
+        id: row.get(0)?,
+        raw_text: row.get(1)?,
+        cleaned_text: row.get(2)?,
+        polished_text: row.get(3)?,
+        prefer_polished: row.get::<_, i64>(4).unwrap_or(1) == 1,
+        audio_path: row.get(5)?,
+        duration_ms: row.get::<_, i64>(6)? as u64,
+        word_count: row.get::<_, i64>(7)? as usize,
+        injected: row.get::<_, i64>(8)? == 1,
+        source_application: row.get(9)?,
+        created_at: parse_datetime(row.get::<_, String>(10)?),
+    })
 }
 
 fn bool_to_i64(value: bool) -> i64 {
@@ -684,6 +758,8 @@ mod tests {
             id: "old-session".to_string(),
             raw_text: "hello".to_string(),
             cleaned_text: "Hello.".to_string(),
+            polished_text: None,
+            prefer_polished: true,
             audio_path: temp.path().join("old.wav").to_string_lossy().to_string(),
             duration_ms: 1_000,
             word_count: 1,

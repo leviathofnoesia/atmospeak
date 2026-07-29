@@ -12,6 +12,7 @@ import type {
   InjectionResult,
   MicrophoneInfo,
   ModelInventory,
+  ModelInventoryItem,
   ModelStatus,
   SoundCheckResult,
   RecordingStarted,
@@ -95,6 +96,8 @@ if (
         rawText: "Hi Mara — thanks so much for the studio visit yesterday.",
         cleanedText:
           "Hi Mara — thanks so much for the studio visit yesterday. I keep thinking about the halftone moon prints by the window.",
+        polishedText: null,
+        preferPolished: true,
         audioPath: "mock://fixture-1.wav",
         durationMs: 18_000,
         wordCount: 22,
@@ -106,6 +109,8 @@ if (
         id: "fixture-2",
         rawText: "Pushed the edition mockups to the shared drive.",
         cleanedText: "Pushed the edition mockups to the shared drive. Take a look when you get a second.",
+        polishedText: null,
+        preferPolished: true,
         audioPath: "mock://fixture-2.wav",
         durationMs: 8_000,
         wordCount: 17,
@@ -201,6 +206,8 @@ export function stopRecording(): Promise<DictationResult> {
       id: crypto.randomUUID(),
       rawText: cleanedText,
       cleanedText,
+      polishedText: null as string | null,
+      preferPolished: true,
       audioPath: "mock://recording.wav",
       durationMs: 4200,
       wordCount: cleanedText.split(/\s+/).length,
@@ -526,6 +533,72 @@ export function deleteSession(id: string): Promise<AppSnapshot> {
     });
     return mockSnapshot;
   });
+}
+
+export function polishSession(id: string): Promise<AppSnapshot> {
+  return command("polish_session", { id }, async () => {
+    mockSnapshot = {
+      ...mockSnapshot,
+      sessions: mockSnapshot.sessions.map((session) =>
+        session.id === id
+          ? {
+              ...session,
+              polishedText: `Polished: ${session.cleanedText}`,
+              preferPolished: true,
+            }
+          : session,
+      ),
+    };
+    return mockSnapshot;
+  });
+}
+
+export function setSessionPreferPolished(
+  id: string,
+  preferPolished: boolean,
+): Promise<AppSnapshot> {
+  return command("set_session_prefer_polished", { id, preferPolished }, () => {
+    mockSnapshot = {
+      ...mockSnapshot,
+      sessions: mockSnapshot.sessions.map((session) =>
+        session.id === id ? { ...session, preferPolished } : session,
+      ),
+    };
+    return mockSnapshot;
+  });
+}
+
+export function getPolishInventory(): Promise<ModelInventoryItem[]> {
+  return command("get_polish_inventory", undefined, () => [
+    {
+      id: "qwen2.5-0.5b",
+      label: "Fast (Qwen2.5 0.5B)",
+      installed: false,
+      bundled: false,
+      path: null,
+      sizeMb: 468,
+    },
+  ]);
+}
+
+export function downloadPolishModel(modelId: string): Promise<void> {
+  return command("download_polish_model", { modelId }, async () => undefined);
+}
+
+export function ensurePolishRuntime(modelId: string): Promise<void> {
+  return command("ensure_polish_runtime", { modelId }, async () => undefined);
+}
+
+export function setPolishApiKey(apiKey: string): Promise<void> {
+  return command("set_polish_api_key", { apiKey }, async () => undefined);
+}
+
+export function clearPolishApiKey(): Promise<void> {
+  return command("clear_polish_api_key", undefined, async () => undefined);
+}
+
+export function hasPolishApiKey(): Promise<boolean> {
+  return command("has_polish_api_key", undefined, () => false);
 }
 
 export function registerSetupShortcut(hotkey: string): Promise<ShortcutStatus> {

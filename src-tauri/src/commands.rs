@@ -10,7 +10,7 @@ use crate::{
     services::{
         app_state::AppState,
         dictation_engine::{self, EngineAction},
-        injection, model_downloader, overlay_window, proc, runtime, shortcuts, sound_check,
+        injection, model_downloader, overlay_window, polish, proc, runtime, shortcuts, sound_check,
         startup, window_manager,
     },
 };
@@ -595,6 +595,99 @@ pub fn delete_session(state: State<'_, AppState>, id: String) -> CommandResult<A
     drop(database);
     remove_managed_recordings(&state.app_dir, audio_path.into_iter().collect());
     Ok(snapshot)
+}
+
+#[tauri::command]
+pub async fn polish_session(app: AppHandle, id: String) -> CommandResult<AppSnapshot> {
+    tauri::async_runtime::spawn_blocking(move || polish_session_blocking(app, id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn polish_session_blocking(app: AppHandle, id: String) -> CommandResult<AppSnapshot> {
+    use crate::services::polish;
+
+    let state = app.state::<AppState>();
+    let (settings, session) = {
+        let database = state.database.lock();
+        let settings = database.load_settings().map_err(|e| e.to_string())?;
+        let session = database
+            .get_session(&id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "session not found".to_string())?;
+        (settings, session)
+    };
+
+    let polished = polish::polish_text(
+        &app,
+        &settings,
+        &session.cleaned_text,
+        std::time::Duration::from_secs(30),
+    )
+    .map_err(|error| polish::sanitize_message(&error.to_string()))?;
+
+    let database = state.database.lock();
+    database
+        .update_session_polished_text(&id, &polished)
+        .map_err(|e| e.to_string())?;
+    database.snapshot().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_session_prefer_polished(
+    state: State<'_, AppState>,
+    id: String,
+    prefer_polished: bool,
+) -> CommandResult<AppSnapshot> {
+    let database = state.database.lock();
+    let session = database
+        .update_session_polish_preference(&id, prefer_polished)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "session not found".to_string())?;
+    if prefer_polished && session.polished_text.is_none() {
+        return Err("session has no AI edit to restore".to_string());
+    }
+    database.snapshot().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_polish_inventory(state: State<'_, AppState>) -> CommandResult<Vec<crate::models::ModelInventoryItem>> {
+    Ok(crate::services::polish_models::inventory(&state.app_dir))
+}
+
+#[tauri::command]
+pub async fn download_polish_model(app: AppHandle, model_id: String) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::services::polish_models::download(&app, &model_id)
+            .map_err(|e| polish::sanitize_message(&e.to_string()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn ensure_polish_runtime(app: AppHandle, model_id: String) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::services::polish_models::ensure_runtime(&app, &model_id)
+            .map_err(|e| polish::sanitize_message(&e.to_string()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub fn set_polish_api_key(api_key: String) -> CommandResult<()> {
+    polish::set_keyring_api_key(&api_key).map_err(|e| polish::sanitize_message(&e.to_string()))
+}
+
+#[tauri::command]
+pub fn clear_polish_api_key() -> CommandResult<()> {
+    polish::clear_keyring_api_key().map_err(|e| polish::sanitize_message(&e.to_string()))
+}
+
+#[tauri::command]
+pub fn has_polish_api_key() -> CommandResult<bool> {
+    Ok(polish::has_keyring_api_key())
 }
 
 fn remove_managed_recordings(app_dir: &std::path::Path, paths: Vec<String>) {

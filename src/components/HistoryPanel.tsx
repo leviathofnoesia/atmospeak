@@ -1,6 +1,7 @@
-import { Clipboard, Copy, Trash2 } from "lucide-react";
+import { Clipboard, Copy, RotateCcw, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { TranscriptSession } from "../types/dictation";
+import { sessionDisplayText } from "../types/dictation";
 import { EmptyState } from "./EmptyState";
 
 interface HistoryPanelProps {
@@ -8,6 +9,9 @@ interface HistoryPanelProps {
   onCopy: (session: TranscriptSession) => Promise<void>;
   onInject: (session: TranscriptSession) => Promise<void>;
   onDelete: (session: TranscriptSession) => Promise<void>;
+  onPolish: (session: TranscriptSession) => Promise<void>;
+  onUndoAiEdit: (session: TranscriptSession) => Promise<void>;
+  onRedoAiEdit: (session: TranscriptSession) => Promise<void>;
 }
 
 function formatDuration(durationMs: number) {
@@ -24,14 +28,25 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
-export function HistoryPanel({ sessions, onCopy, onInject, onDelete }: HistoryPanelProps) {
+export function HistoryPanel({
+  sessions,
+  onCopy,
+  onInject,
+  onDelete,
+  onPolish,
+  onUndoAiEdit,
+  onRedoAiEdit,
+}: HistoryPanelProps) {
   const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
-    return sessions.filter((session) => session.cleanedText.toLowerCase().includes(q));
+    return sessions.filter((session) => {
+      const haystack = `${session.cleanedText} ${session.polishedText ?? ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
   }, [query, sessions]);
 
   return (
@@ -59,20 +74,26 @@ export function HistoryPanel({ sessions, onCopy, onInject, onDelete }: HistoryPa
           <div className="tx-list">
             {filtered.map((session, index) => {
               const expanded = expandedId === session.id;
+              const display = sessionDisplayText(session);
+              const hasPolish = Boolean(session.polishedText?.trim());
+              const showingPolish = hasPolish && session.preferPolished;
               return (
                 <div className="tx" key={session.id}>
                   <div className="tx__idx">
                     {String(filtered.length - index).padStart(2, "0")}
                   </div>
                   <div className="tx__txt">
-                    <span className="app">{session.sourceApplication ?? "Local dictation"}</span>
+                    <span className="app">
+                      {session.sourceApplication ?? "Local dictation"}
+                      {showingPolish ? " · AI edit" : ""}
+                    </span>
                     <button
                       type="button"
                       className="tx__open"
                       onClick={() => setExpandedId(expanded ? null : session.id)}
                       aria-expanded={expanded}
                     >
-                      {expanded ? session.cleanedText : session.cleanedText.slice(0, 140)}
+                      {expanded ? display : display.slice(0, 140)}
                     </button>
                     {expanded ? (
                       <div className="tx__detail">
@@ -98,6 +119,34 @@ export function HistoryPanel({ sessions, onCopy, onInject, onDelete }: HistoryPa
                             <Clipboard size={14} />
                             Paste again
                           </button>
+                          <button
+                            type="button"
+                            className="pill-btn ghost"
+                            onClick={() => void onPolish(session)}
+                          >
+                            <Sparkles size={14} />
+                            AI polish
+                          </button>
+                          {hasPolish && session.preferPolished ? (
+                            <button
+                              type="button"
+                              className="pill-btn ghost"
+                              onClick={() => void onUndoAiEdit(session)}
+                            >
+                              <RotateCcw size={14} />
+                              Undo AI edit
+                            </button>
+                          ) : null}
+                          {hasPolish && !session.preferPolished ? (
+                            <button
+                              type="button"
+                              className="pill-btn ghost"
+                              onClick={() => void onRedoAiEdit(session)}
+                            >
+                              <RotateCw size={14} />
+                              Redo AI edit
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="pill-btn ghost"

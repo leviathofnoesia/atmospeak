@@ -1,5 +1,6 @@
 import { Copy } from "lucide-react";
 import type { AppSnapshot, TranscriptSession } from "../types/dictation";
+import { sessionDisplayText } from "../types/dictation";
 import { Aura } from "./Aura";
 
 interface HomePanelProps {
@@ -64,7 +65,7 @@ export function HomePanel({
             Latest transcript
           </div>
           <div className="latest-transcript">
-            <p>{recentSession.cleanedText}</p>
+            <p>{sessionDisplayText(recentSession)}</p>
             <button
               className="pill-btn ghost"
               type="button"

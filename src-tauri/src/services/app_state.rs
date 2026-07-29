@@ -15,8 +15,8 @@ use crate::{
     db::Database,
     models::{RuntimeEvent, ShortcutStatus, StageMetrics},
     services::{
-        asr_host::AsrHost, dictation_engine::EngineHandle, recorder::RecorderService,
-        streaming_asr::StreamingAsr,
+        asr_host::AsrHost, dictation_engine::EngineHandle, llama_host::LlamaHost,
+        recorder::RecorderService, streaming_asr::StreamingAsr,
     },
 };
 
@@ -39,6 +39,7 @@ pub struct AppState {
     engine: Mutex<Option<EngineHandle>>,
     last_metrics: Mutex<Option<StageMetrics>>,
     asr_host: Mutex<Option<Arc<AsrHost>>>,
+    llama_host: Mutex<Option<Arc<LlamaHost>>>,
     streaming_asr: Mutex<Option<Arc<StreamingAsr>>>,
     streaming_asr_generation: AtomicU64,
 }
@@ -83,6 +84,7 @@ impl AppState {
             engine: Mutex::new(None),
             last_metrics: Mutex::new(None),
             asr_host: Mutex::new(None),
+            llama_host: Mutex::new(None),
             streaming_asr: Mutex::new(None),
             streaming_asr_generation: AtomicU64::new(0),
         })
@@ -103,6 +105,26 @@ impl AppState {
 
     pub fn shutdown_asr_host(&self) {
         if let Some(host) = self.asr_host.lock().take() {
+            host.shutdown();
+        }
+    }
+
+    pub fn set_llama_host(&self, host: Arc<LlamaHost>) {
+        if let Some(previous) = self.llama_host.lock().replace(host) {
+            previous.shutdown();
+        }
+    }
+
+    pub fn llama_host(&self) -> Option<Arc<LlamaHost>> {
+        self.llama_host.lock().clone()
+    }
+
+    pub fn llama_host_from(app: &AppHandle) -> Option<Arc<LlamaHost>> {
+        app.try_state::<AppState>()?.llama_host()
+    }
+
+    pub fn shutdown_llama_host(&self) {
+        if let Some(host) = self.llama_host.lock().take() {
             host.shutdown();
         }
     }

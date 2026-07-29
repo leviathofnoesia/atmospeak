@@ -1,12 +1,14 @@
 use regex::Regex;
 
 use crate::models::{DictionaryEntry, Snippet};
+use crate::services::backtrack;
 
 pub fn clean_text(raw: &str, dictionary: &[DictionaryEntry], snippets: &[Snippet]) -> String {
     let mut text = raw.replace('\n', " ");
     text = strip_whisper_timestamps(&text);
-    text = apply_correction_commands(&text);
+    text = backtrack::apply_backtrack(&text);
     text = normalize_spoken_punctuation(&text);
+    text = backtrack::apply_short_phrase_restate(&text);
     text = remove_fillers(&text);
     text = apply_dictionary(&text, dictionary);
     text = apply_snippets(&text, snippets);
@@ -52,19 +54,6 @@ fn normalize_spoken_punctuation(value: &str) -> String {
                 .expect("spoken punctuation regex");
             regex.replace_all(&acc, *to).to_string()
         })
-}
-
-fn apply_correction_commands(value: &str) -> String {
-    let correction_pattern = Regex::new(r"(?i)\b(scratch that|delete that|never mind|nevermind)\b")
-        .expect("correction command regex");
-    correction_pattern
-        .split(value)
-        .last()
-        .unwrap_or(value)
-        .trim_start_matches(|character: char| {
-            character.is_whitespace() || [',', '.', '!', '?', ';', ':'].contains(&character)
-        })
-        .to_string()
 }
 
 fn remove_fillers(value: &str) -> String {
@@ -217,5 +206,63 @@ mod tests {
         );
 
         assert_eq!(result, "Send the revised note.");
+    }
+
+    #[test]
+    fn go_back_and_forget_that_cut_like_scratch() {
+        assert_eq!(
+            clean_text("draft one go back draft two", &[], &[]),
+            "Draft two."
+        );
+        assert_eq!(
+            clean_text("old plan forget that new plan", &[], &[]),
+            "New plan."
+        );
+    }
+
+    #[test]
+    fn collapses_stutter_phrase_repeats() {
+        assert_eq!(
+            clean_text("the accuracy is not is not as resilient", &[], &[]),
+            "The accuracy is not as resilient."
+        );
+        assert_eq!(
+            clean_text("right there. Right there I've been using", &[], &[]),
+            "Right there. I've been using."
+        );
+        assert_eq!(
+            clean_text("if I go too fast fast or it's too short", &[], &[]),
+            "If I go too fast or it's too short."
+        );
+        assert_eq!(
+            clean_text("it seems seems to lag", &[], &[]),
+            "It seems to lag."
+        );
+    }
+
+    #[test]
+    fn actually_replaces_prior_token() {
+        assert_eq!(
+            clean_text("Let's do coffee at 2 actually 3", &[], &[]),
+            "Let's do coffee at 3."
+        );
+    }
+
+    #[test]
+    fn preserves_non_correction_actually() {
+        let result = clean_text("I actually enjoyed the movie", &[], &[]);
+        assert_eq!(result, "I actually enjoyed the movie.");
+    }
+
+    #[test]
+    fn restate_as_a_keeps_later_ending() {
+        assert_eq!(
+            clean_text(
+                "I wanted to buy a record as a gift as a present",
+                &[],
+                &[],
+            ),
+            "I wanted to buy a record as a present."
+        );
     }
 }

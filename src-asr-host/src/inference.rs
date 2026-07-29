@@ -129,11 +129,15 @@ pub fn merge_overlap(committed: &str, next: &str, confirmed_overlap_words: usize
 }
 
 fn overlap_count(left: &[&str], right: &[&str], confirmed_overlap_words: usize) -> usize {
-    let maximum = left
-        .len()
-        .min(right.len())
-        .min(confirmed_overlap_words)
-        .min(12);
+    // When acoustic overlap confirmed at least one boundary word, allow the
+    // longest matching suffix/prefix (Whisper often re-emits past the overlap
+    // zone). With zero confirmed words, do not soft-match — intentional
+    // repeats across chunk boundaries must be preserved.
+    let maximum = if confirmed_overlap_words >= 1 {
+        left.len().min(right.len()).min(12)
+    } else {
+        0
+    };
     (1..=maximum)
         .rev()
         .find(|count| {
@@ -204,13 +208,19 @@ mod tests {
             merge_overlap("the porcelain moon", "porcelain moon hums", 2),
             "the porcelain moon hums"
         );
+        // Zero confirmed overlap: keep intentional boundary doubles.
         assert_eq!(
             merge_overlap("very very", "very good", 0),
             "very very very good"
         );
+        // Confirmed >= 1: soft-extend to the longest matching boundary.
+        assert_eq!(
+            merge_overlap("very very", "very good", 1),
+            "very very good"
+        );
         assert_eq!(
             merge_overlap("very very", "very very good", 1),
-            "very very very good"
+            "very very good"
         );
         assert_eq!(
             merge_overlap("wait, for me", "wait for me now", 3),

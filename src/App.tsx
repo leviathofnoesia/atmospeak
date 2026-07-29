@@ -44,10 +44,14 @@ import {
   getLastStageMetrics,
   getModelInventory,
   getModelStatus,
+  getPolishInventory,
   getRuntimeEvents,
   getShortcutStatus,
   handleDictationAction,
   hasTauriRuntime,
+  polishSession,
+  setSessionPreferPolished,
+  ensurePolishRuntime,
   injectText,
   listMicrophones,
   openWindowsSoundSettings,
@@ -73,6 +77,7 @@ import type {
   MicLevel,
   MicrophoneInfo,
   ModelInventory,
+  ModelInventoryItem,
   ModelDownloadProgress,
   ModelStatus,
   LiveTranscriptEvent,
@@ -88,7 +93,7 @@ import type {
   UpdateCheckResult,
   UpdateStatus,
 } from "./types/dictation";
-import { ONBOARDING_VERSION } from "./types/dictation";
+import { ONBOARDING_VERSION, sessionDisplayText } from "./types/dictation";
 
 const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "home", label: "Home", icon: Home },
@@ -247,6 +252,9 @@ function AppShell() {
   const [microphones, setMicrophones] = useState<MicrophoneInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelInventory, setModelInventory] = useState<ModelInventory | null>(null);
+  const [polishInventory, setPolishInventory] = useState<ModelInventoryItem[]>([]);
+  const [polishSetupBusy, setPolishSetupBusy] = useState(false);
+  const [polishSetupMessage, setPolishSetupMessage] = useState("");
   const [modelDownload, setModelDownload] = useState<ModelDownloadProgress | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
@@ -499,15 +507,17 @@ function AppShell() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [next, mics, status, inventory, shortcut, events, metrics] = await Promise.all([
-      getAppSnapshot(),
-      listMicrophones(),
-      getModelStatus(),
-      getModelInventory(),
-      getShortcutStatus(),
-      getRuntimeEvents(),
-      getLastStageMetrics(),
-    ]);
+    const [next, mics, status, inventory, polishModels, shortcut, events, metrics] =
+      await Promise.all([
+        getAppSnapshot(),
+        listMicrophones(),
+        getModelStatus(),
+        getModelInventory(),
+        getPolishInventory(),
+        getShortcutStatus(),
+        getRuntimeEvents(),
+        getLastStageMetrics(),
+      ]);
     setSnapshot(next);
     const preferredMicrophone =
       next.settings.microphoneName ??
@@ -518,6 +528,7 @@ function AppShell() {
     setMicrophones(mics);
     setModelStatus(status);
     setModelInventory(inventory);
+    setPolishInventory(polishModels);
     setShortcutStatus(shortcut);
     setRuntimeEvents(events);
     setLastMetrics(metrics);
@@ -1226,7 +1237,7 @@ function AppShell() {
             snapshot={snapshot}
             recentSession={recentSession}
             onCopyRecent={async (session) => {
-              const message = await copyText(session.cleanedText);
+              const message = await copyText(sessionDisplayText(session));
               setNotice({ tone: "success", message });
             }}
           />
@@ -1235,11 +1246,11 @@ function AppShell() {
           <HistoryPanel
             sessions={snapshot.sessions}
             onCopy={async (session) => {
-              const message = await copyText(session.cleanedText);
+              const message = await copyText(sessionDisplayText(session));
               setNotice({ tone: "success", message });
             }}
             onInject={async (session) => {
-              const result = await injectText(session.cleanedText);
+              const result = await injectText(sessionDisplayText(session));
               setNotice({
                 tone: result.injected ? "success" : "error",
                 message: result.message,
@@ -1249,6 +1260,28 @@ function AppShell() {
               const next = await deleteSession(session.id);
               setSnapshot(next);
               setNotice({ tone: "success", message: "Transcript deleted." });
+            }}
+            onPolish={async (session) => {
+              try {
+                const next = await polishSession(session.id);
+                setSnapshot(next);
+                setNotice({ tone: "success", message: "AI polish applied." });
+              } catch (error) {
+                setNotice({
+                  tone: "error",
+                  message: error instanceof Error ? error.message : String(error),
+                });
+              }
+            }}
+            onUndoAiEdit={async (session) => {
+              const next = await setSessionPreferPolished(session.id, false);
+              setSnapshot(next);
+              setNotice({ tone: "success", message: "AI edit undone." });
+            }}
+            onRedoAiEdit={async (session) => {
+              const next = await setSessionPreferPolished(session.id, true);
+              setSnapshot(next);
+              setNotice({ tone: "success", message: "AI edit restored." });
             }}
           />
         ) : null}
@@ -1447,6 +1480,26 @@ function AppShell() {
               } catch (error: unknown) {
                 setUpdateStatus("error");
                 setNotice({ tone: "error", message: stringifyError(error) });
+              }
+            }}
+            polishInventory={polishInventory}
+            polishSetupBusy={polishSetupBusy}
+            polishSetupMessage={polishSetupMessage}
+            onEnsurePolishRuntime={async () => {
+              if (!settingsDraft) return;
+              setPolishSetupBusy(true);
+              setPolishSetupMessage("Downloading local editor runtime if needed…");
+              try {
+                await ensurePolishRuntime(settingsDraft.polishModel || "qwen2.5-0.5b");
+                setPolishInventory(await getPolishInventory());
+                setPolishSetupMessage("Local editor is ready.");
+                setNotice({ tone: "success", message: "Local AI editor is ready." });
+              } catch (error: unknown) {
+                const message = stringifyError(error);
+                setPolishSetupMessage(message);
+                setNotice({ tone: "error", message });
+              } finally {
+                setPolishSetupBusy(false);
               }
             }}
             advanced={

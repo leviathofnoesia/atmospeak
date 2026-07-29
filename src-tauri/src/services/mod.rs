@@ -1,11 +1,15 @@
 pub mod app_state;
 pub mod asr_host;
+pub mod backtrack;
 pub mod cleanup;
 pub mod dictation_engine;
 pub mod injection;
+pub mod llama_host;
 pub mod metrics;
 pub mod model_downloader;
 pub mod overlay_window;
+pub mod polish;
+pub mod polish_models;
 pub mod proc;
 pub mod recorder;
 pub mod runtime;

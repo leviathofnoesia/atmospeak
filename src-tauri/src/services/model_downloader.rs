@@ -282,7 +282,25 @@ fn emit(app: &AppHandle, payload: ModelDownloadProgress) {
     let _ = app.emit("atmospeak://model-download", payload);
 }
 
-fn write_verified_stream<R, F>(
+/// Write a response body to disk without checksum verification (zip installs, etc.).
+pub(crate) fn write_stream_unchecked(mut response: impl Read, destination: &Path) -> Result<()> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = fs::File::create(destination)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = response.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..read])?;
+    }
+    file.flush()?;
+    Ok(())
+}
+
+pub(crate) fn write_verified_stream<R, F>(
     mut reader: R,
     destination: &Path,
     expected_sha256: &str,

@@ -180,6 +180,9 @@
 
 /* ── Settings / Advanced ── */
 .hub-shell .settings-panel { display: flex; flex-direction: column; gap: 18px; padding: 26px 34px 40px; max-width: 720px; }
+.hub-shell .settings-polish { display: flex; flex-direction: column; gap: 12px; }
+.hub-shell .settings-polish__advanced { display: flex; flex-direction: column; gap: 12px; }
+.hub-shell .settings-polish__key-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .hub-shell .settings-shortcut { display: flex; flex-direction: column; gap: 10px; }
 .hub-shell .settings-shortcut__label,
 .hub-shell .settings-gesture legend {

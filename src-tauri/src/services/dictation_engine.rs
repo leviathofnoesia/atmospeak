@@ -21,7 +21,7 @@ use crate::{
         app_state::AppState,
         cleanup, injection,
         metrics::{self, StageTimer},
-        recorder, sound_check, transcriber,
+        polish, recorder, sound_check, transcriber,
     },
 };
 
@@ -829,13 +829,16 @@ impl Worker {
                         });
                         host.cancel_session(&finished.id);
                         transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
-                    } else if finished.duration_ms <= 5_000 && host.first_partial_ms().is_none() {
-                        // Short utterances with no streaming commits decode
-                        // faster on the warm resident batch host than a
-                        // full-utterance streaming finalize on CPU.
+                    } else if finished.duration_ms <= 5_000 {
+                        // Short utterances decode faster on the warm resident
+                        // batch host than a full-utterance streaming finalize,
+                        // even when a partial already appeared in the dock.
                         host.cancel_session(&finished.id);
                         processed_during_recording_ms = 0;
                         tail_audio_ms = finished.duration_ms;
+                        fallback_reason = Some(
+                            "short utterance routed to warm batch host".to_string(),
+                        );
                         transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
                     } else {
                         match host.await_final(&finished.id, Duration::from_secs(120)) {
@@ -907,6 +910,45 @@ impl Worker {
                 };
                 timer.mark_cleanup(cleanup_started.elapsed().as_millis() as u64);
 
+                let mut polished_text: Option<String> = None;
+                let paste_text = match polish::polish_if_enabled(
+                    &app,
+                    &snapshot.settings,
+                    &cleaned_text,
+                    polish::AUTO_POLISH_TIMEOUT,
+                ) {
+                    Ok(Some(outcome)) => {
+                        metrics::emit_runtime(
+                            &app,
+                            "polish-ok",
+                            format!(
+                                "session={} elapsed_ms={}",
+                                finished.id, outcome.elapsed_ms
+                            ),
+                        );
+                        polished_text = Some(outcome.text.clone());
+                        outcome.text
+                    }
+                    Ok(None) => cleaned_text.clone(),
+                    Err(error) => {
+                        let kind = if polish::is_timeout_error(&error) {
+                            "polish-timeout"
+                        } else {
+                            "polish-fallback"
+                        };
+                        metrics::emit_runtime(
+                            &app,
+                            kind,
+                            format!(
+                                "session={} {}",
+                                finished.id,
+                                polish::sanitize_message(&error.to_string())
+                            ),
+                        );
+                        cleaned_text.clone()
+                    }
+                };
+
                 let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
                     hwnd,
                     process_name: injection::process_name_for(hwnd),
@@ -915,12 +957,12 @@ impl Worker {
                 let inject_started = Instant::now();
                 let injection_result = if snapshot.settings.auto_inject {
                     Some(injection::inject_text(
-                        &cleaned_text,
+                        &paste_text,
                         snapshot.settings.restore_clipboard,
                         preferred,
                     )?)
                 } else {
-                    if let Err(error) = injection::copy_text_to_clipboard(&cleaned_text) {
+                    if let Err(error) = injection::copy_text_to_clipboard(&paste_text) {
                         metrics::emit_runtime(
                             &app,
                             "clipboard-copy-error",
@@ -935,8 +977,10 @@ impl Worker {
                 let session = TranscriptSession {
                     id: finished.id.clone(),
                     raw_text,
-                    word_count: cleaned_text.split_whitespace().count(),
+                    word_count: paste_text.split_whitespace().count(),
                     cleaned_text,
+                    polished_text,
+                    prefer_polished: true,
                     audio_path: finished.path.to_string_lossy().to_string(),
                     duration_ms: finished.duration_ms,
                     injected: injection_result

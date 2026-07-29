@@ -4,9 +4,11 @@ Atmospeak 0.5 keeps microphone audio and transcription on the local machine.
 From 0.5.1 the sidecar splits ingestion from inference so capture never stalls
 behind a decode. From 0.5.2, commits are more aggressive and short warm clips
 can finish on the resident host when streaming has not already committed
-mid-utterance. The recorder sends bounded 20 ms, mono 16 kHz PCM frames to a
-crash-isolated `atmospeak-asr-host` process while retaining the recording for
-history and batch fallback.
+mid-utterance. From 0.5.3, **all ≤5 s** utterances prefer the warm batch host
+(even if a dock partial appeared), deterministic Backtrack runs in cleanup, and
+optional LLM polish can rewrite before paste. The recorder sends bounded 20 ms,
+mono 16 kHz PCM frames to a crash-isolated `atmospeak-asr-host` process while
+retaining the recording for history and batch fallback.
 
 ## Runtime selection
 

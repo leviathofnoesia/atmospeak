@@ -1,6 +1,6 @@
 [package]
 name = "atmospeak"
-version = "0.5.2"
+version = "0.5.3"
 description = "Local-first desktop dictation prototype"
 authors = ["Atmospeak"]
 edition = "2024"
@@ -26,11 +26,13 @@ cpal = "0.16"
 dirs = "6"
 hound = "3"
 parking_lot = "0.12"
+keyring = "3"
 regex = "1"
 rmp-serde = "1.3"
 # The ASR host is loopback-only; rustls is enabled for HTTPS model downloads.
 reqwest = { version = "0.12", default-features = false, features = [
   "blocking",
+  "json",
   "multipart",
   "rustls-tls",
 ] }

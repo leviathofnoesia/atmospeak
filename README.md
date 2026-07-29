@@ -10,83 +10,41 @@
 
 <p align="center">
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-setup.exe"><strong>Download v0.5.2</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-setup.exe"><strong>Download v0.5.3</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v0.5.2"><strong>Release notes</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v0.5.3"><strong>Release notes</strong></a>
 </p>
 
 Atmospeak is a Windows desktop dictation app built around a local
 [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) runtime. It requires
 no account and sends no microphone audio to a transcription service.
 
-## What ships in 0.5.2
+## What ships in 0.5.3
 
-- **Faster release→paste.** Hotkey release to text-in-target is a hard native
-  gate again. Short warm clips prefer the resident host when streaming has not
-  already committed mid-utterance, so stop no longer waits on a full-clip
-  streaming finalize.
-- **Inject stays on the critical path.** Clipboard restore runs after Ctrl+V,
-  focus restore uses `AttachThreadInput`, and paste-only latency is gated
-  separately from ASR.
-- **Streaming stays hot.** Capture always uses the streaming sidecar when it is
-  available; commits are more aggressive; previews yield when backlog is high.
-- **Live dock preview, one final paste.** Partial and stable text stays inside
-  the Atmospeak dock. The target application receives exactly one final paste.
-- **Vulkan acceleration with CPU fallback.** A crash-isolated ASR sidecar tries
-  the local Vulkan backend first and falls back through CPU, the resident batch
-  host, and the one-shot CLI.
-- **Automatic Balanced model selection.** Atmospeak measures local backlog and
-  finalization time, then chooses among models you already installed. It never
-  downloads or deletes a model automatically.
-- **Reliable Hold and Tap gestures.** Hold stops as soon as any required chord
-  key is released. Tap stops on the second complete press without depending on
-  release polling.
-- **Local VAD and bounded decoding.** Silero VAD finalizes natural speech
-  segments, force-splits continuous speech, and keeps long dictations from
-  requiring a complete re-transcription at stop.
-- **Resilient fallback.** Full audio remains available locally if streaming
-  fails, and fallback transcription still produces only one final result.
-- **Inspectable local diagnostics.** Shortcut acknowledgements, ASR timing,
-  backlog, dropped-frame counts, and fallback reasons are stored locally
-  without dictated text or unrelated keystrokes.
+- **Deterministic Backtrack.** Cleanup collapses stutters, applies
+  `actually` / `I mean` / `wait no`, honors `go back` / `forget that`, and
+  keeps the later ending on restates like `as a doctor…as a nurse`.
+- **Optional on-device AI edit.** Toggle AI auto-edit, download a small local
+  editor once (~470&nbsp;MB), and polish stays on your machine. Advanced settings
+  still allow Ollama or OpenAI-compatible endpoints; API keys live in the OS
+  keyring.
+- **Paste never waits on setup.** If the local editor is not ready yet,
+  Atmospeak pastes cleaned text immediately. Timeouts and errors fall back the
+  same way.
+- **History undo / redo for AI edits.** Restore cleaned text or re-apply the
+  polished version per session.
+- **Everything from 0.5.2 still applies.** Fast release→paste gates, streaming
+  dock preview, Vulkan→CPU fallback, Hold/Tap gestures, and local diagnostics.
 
-### Speed before / after
-
-Measured on a warm `base.en` CPU path with the porcelain-moon fixture
-(~3.2 s audio). “Before” is the v0.5.1 user-felt / restore-inflated path;
-“After” is the v0.5.2 native harness gate.
-
-```mermaid
-xychart-beta
-    title "Release → paste (ms, lower is better)"
-    x-axis ["v0.5.1 feel", "v0.5.2 measured"]
-    y-axis "Milliseconds" 0 --> 11000
-    bar [10000, 1905]
-```
-
-```mermaid
-xychart-beta
-    title "Inject path (ms, lower is better)"
-    x-axis ["v0.5.1 measured+restore", "v0.5.2 injectMs"]
-    y-axis "Milliseconds" 0 --> 450
-    bar [400, 54]
-```
-
-| Metric | Before | After (v0.5.2) | Gate |
-| --- | ---: | ---: | ---: |
-| Release → paste (`totalMs`) | ~10 000 ms | **1905 ms** | ≤ 2000 ms |
-| Inject (`injectMs`) | ~400 ms (incl. restore) | **54 ms** | ≤ 150 ms |
-| Paste-only wall (`pasteVisibleMs`) | n/a | **89 ms** | ≤ 300 ms |
-
-Stretch goal remains ≤ 1000 ms release→paste once mid-utterance streaming
-commits leave only a short stop-time tail (or Vulkan is available). See
+See [`docs/releases/v0.5.3.md`](docs/releases/v0.5.3.md) for the full release
+note. Speed charts from 0.5.2 remain in
 [`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
 
 ## Install
@@ -95,9 +53,9 @@ Atmospeak currently supports **Windows 10/11 x64**.
 
 | Package | Use it when | Download |
 | --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_0.5.2_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_0.5.2_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_0.5.2_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-portable.zip) |
+| Setup EXE | Recommended installation | [atmospeak_0.5.3_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_0.5.3_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_0.5.3_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-portable.zip) |
 | Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/SHA256SUMS.txt) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
@@ -106,6 +64,10 @@ Atmospeak, and choose **Run anyway**. You can verify the download against the
 published SHA-256 manifest before opening it.
 
 ## Daily use
+
+<p align="center">
+  <img src="docs/readme/daily-use-annotated.png" width="920" alt="Annotated daily-use flow: hold Ctrl+Win, preview in the dock, release, one paste into the focused app">
+</p>
 
 1. Complete the six-step first-run setup and its real microphone transcription.
 2. Leave Atmospeak in the tray.
@@ -129,9 +91,63 @@ Local application data lives under:
 That directory contains settings, history, downloaded models, diagnostics, and
 the local database. Atmospeak does not require a cloud account.
 
+## Backtrack (always on in cleanup)
+
+<p align="center">
+  <img src="docs/readme/backtrack-examples-annotated.png" width="920" alt="Annotated Backtrack examples: stutter collapse, actually corrections, and restates">
+</p>
+
+When cleanup is enabled, Atmospeak applies deterministic edits before paste:
+
+| You said | Pasted result |
+| --- | --- |
+| `is not is not` | `is not` |
+| `coffee at 2 actually 3` | `coffee at 3` |
+| `draft one go back draft two` | `draft two` |
+| `hire me as a doctor as a nurse` | `hire me as a nurse` |
+| `I want coffee I want tea` | `I want tea` |
+
+No network call is required for Backtrack.
+
+## Optional AI auto-edit
+
+<p align="center">
+  <img src="docs/readme/ai-edit-setup-annotated.png" width="920" alt="Annotated Settings panel for AI auto-edit: toggle, model picker, and Download & set up">
+</p>
+
+1. Open **Settings** and enable **AI auto-edit before paste**.
+2. Pick the recommended local model (Qwen2.5 0.5B).
+3. Click **Download & set up local editor** (or let the first toggle kick off
+   setup in the background). Progress appears in Settings.
+4. After setup completes, short dictations can polish within the 750&nbsp;ms
+   auto-edit budget. History can still **Undo AI edit** / **Redo AI edit**.
+
+Advanced provider settings stay collapsed by default. Remote OpenAI-compatible
+keys are stored in the OS keyring (`atmospeak` / `polish-api-key`), with
+`ATMOSPEAK_POLISH_API_KEY` or `OPENAI_API_KEY` as env fallbacks — never SQLite.
+
+### Paste safety when polish is enabled
+
+<p align="center">
+  <img src="docs/readme/polish-hotpath-annotated.png" width="920" alt="Annotated polish hot path: runtime ready check, 750ms polish, fallback to cleaned paste">
+</p>
+
+```mermaid
+flowchart LR
+  stop[Stop dictation] --> clean[clean_text + Backtrack]
+  clean --> ready{runtime ready?}
+  ready -->|no| pasteClean[Paste cleaned]
+  ready -->|yes| polish[HTTP polish ≤750ms]
+  polish -->|ok| pastePolished[Paste polished]
+  polish -->|timeout / error| pasteClean
+```
+
+Setup and downloads happen only from Settings (or the background job started
+when you enable the toggle). The paste path never waits on a model download.
+
 ## Speech models
 
-The bundled model works immediately. Optional models download from their
+The bundled Whisper model works immediately. Optional models download from their
 published Hugging Face repositories into Atmospeak's local model directory,
 stream to a temporary file, and are installed only after their pinned SHA-256
 hash passes.
@@ -146,31 +162,54 @@ hash passes.
 | `distil-large-v3.5` | Distil-Whisper Large v3.5 | Settings | 1.42 GB |
 | `distil-large-v3` | Distil-Whisper Large v3 | Legacy installs | 1.42 GB |
 
-If an optional selection is missing, Atmospeak falls back to the bundled
-`base.en` model. Advanced Settings can also point to a custom compatible
+Optional **AI edit** model (separate from Whisper):
+
+| Atmospeak ID | Upstream | Availability | Approx. size |
+| --- | --- | --- | ---: |
+| `qwen2.5-0.5b` | Qwen2.5 0.5B Instruct GGUF | Settings → AI auto-edit | ~470 MB |
+
+If an optional Whisper selection is missing, Atmospeak falls back to the
+bundled `base.en` model. Advanced Settings can also point to a custom compatible
 Whisper CLI and GGML model.
 
 ## How it works
 
-```text
-Hold / Tap shortcut or dock
-        ↓
-Rust dictation engine → immediate stop acknowledgement
-        ↓
-CPAL capture → bounded queue → mono 16 kHz frames
-        ↓
-Silero VAD → rolling preview + stable Whisper segments
-        ↓
-Vulkan sidecar → CPU sidecar → resident host → CLI fallback
-        ↓
-Tail reconciliation → cleanup + dictionary + snippets exactly once
-        ↓
-Restore original target → one clipboard paste → local History
+```mermaid
+flowchart TD
+  A[Hold / Tap shortcut or dock] --> B[Rust dictation engine]
+  B --> C[CPAL capture → mono 16 kHz]
+  C --> D[Silero VAD → rolling preview]
+  D --> E[Vulkan / CPU sidecar → resident host → CLI]
+  E --> F[Tail reconcile → cleanup + Backtrack]
+  F --> G{AI auto-edit ready?}
+  G -->|yes ≤750ms| H[Polished text]
+  G -->|no / timeout| I[Cleaned text]
+  H --> J[One paste → History]
+  I --> J
 ```
 
 Ordinary dictation is rejected before ASR when it is effectively silent, too
 quiet, or too noisy. This prevents empty recordings from becoming Whisper
 hallucinations.
+
+### Speed (unchanged gates from 0.5.2)
+
+Measured on a warm `base.en` CPU path with the porcelain-moon fixture
+(~3.2 s audio).
+
+```mermaid
+xychart-beta
+    title "Release → paste (ms, lower is better)"
+    x-axis ["v0.5.1 feel", "v0.5.2+ measured"]
+    y-axis "Milliseconds" 0 --> 11000
+    bar [10000, 1905]
+```
+
+| Metric | Gate |
+| --- | ---: |
+| Release → paste (`totalMs`) | ≤ 2000 ms |
+| Inject (`injectMs`) | ≤ 150 ms |
+| Paste-only wall (`pasteVisibleMs`) | ≤ 300 ms |
 
 ## Build from source
 
@@ -198,6 +237,15 @@ contains pointer files instead of the runtime, recover them with:
 powershell -ExecutionPolicy Bypass -File scripts/bootstrap-whisper.ps1
 ```
 
+Optional: refresh the bundled `llama-server` stub path with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/bootstrap-llama.ps1
+```
+
+(If missing, Atmospeak can still download the polish runtime into
+`%LOCALAPPDATA%\Atmospeak` when you run **Download & set up**.)
+
 ## Validate a change
 
 ```powershell
@@ -219,7 +267,8 @@ bun run validation:paste-latency
 
 The deterministic audio seam exists only in debug builds. Release acceptance
 still requires real microphone runs for Notepad one-shot (`001`) and
-push-to-talk (`005`), recorded in
+push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
+**064**, recorded in
 [`tests/manual/production-run-log.md`](tests/manual/production-run-log.md).
 
 ## Current boundaries
@@ -229,9 +278,11 @@ push-to-talk (`005`), recorded in
 - No cloud STT, mobile client, cross-device synchronization, or live typing
   into the target application.
 - Live preview is local and appears only in the Atmospeak dock.
+- AI auto-edit is optional and must not block paste; first-time setup is
+  Settings-driven and downloads ~470&nbsp;MB once.
 - Latency depends on speech length, selected model, GPU/CPU performance, and
-  current ASR backlog. v0.5.2 gates short warm fixtures; it does not promise a
-  fixed latency on every machine or utterance.
+  current ASR backlog. Short warm fixtures remain gated; Atmospeak does not
+  promise a fixed latency on every machine or utterance.
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
 

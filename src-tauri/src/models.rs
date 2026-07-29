@@ -34,6 +34,34 @@ pub struct AppSettings {
     pub transcription_profile: TranscriptionProfile,
     pub acceleration_preference: AccelerationPreference,
     pub live_preview_enabled: bool,
+    /// When true, cleaned text is optionally rewritten by an LLM before paste.
+    pub auto_polish: bool,
+    pub polish_style: PolishStyle,
+    pub custom_instructions: String,
+    pub polish_endpoint: String,
+    pub polish_model: String,
+    pub polish_provider: PolishProvider,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PolishStyle {
+    #[default]
+    None,
+    Concise,
+    Formal,
+    Casual,
+    Excited,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PolishProvider {
+    /// Bundled llama-server + curated GGUF (default, frictionless).
+    #[default]
+    Bundled,
+    Ollama,
+    OpenaiCompatible,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -119,6 +147,12 @@ impl Default for AppSettings {
             transcription_profile: TranscriptionProfile::Balanced,
             acceleration_preference: AccelerationPreference::Auto,
             live_preview_enabled: true,
+            auto_polish: false,
+            polish_style: PolishStyle::None,
+            custom_instructions: String::new(),
+            polish_endpoint: "http://127.0.0.1:11434/v1/chat/completions".to_string(),
+            polish_model: "qwen2.5-0.5b".to_string(),
+            polish_provider: PolishProvider::Bundled,
         }
     }
 }
@@ -240,12 +274,22 @@ pub struct TranscriptSession {
     pub id: String,
     pub raw_text: String,
     pub cleaned_text: String,
+    /// LLM polish result when auto-polish succeeded. Kept for Undo/Redo AI edit.
+    #[serde(default)]
+    pub polished_text: Option<String>,
+    /// When true and `polished_text` is set, UI / paste-again prefer the polished text.
+    #[serde(default = "default_prefer_polished")]
+    pub prefer_polished: bool,
     pub audio_path: String,
     pub duration_ms: u64,
     pub word_count: usize,
     pub injected: bool,
     pub source_application: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+fn default_prefer_polished() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

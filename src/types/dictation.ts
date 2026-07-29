@@ -26,7 +26,16 @@ export interface AppSettings {
   transcriptionProfile: TranscriptionProfile;
   accelerationPreference: AccelerationPreference;
   livePreviewEnabled: boolean;
+  autoPolish: boolean;
+  polishStyle: PolishStyle;
+  customInstructions: string;
+  polishEndpoint: string;
+  polishModel: string;
+  polishProvider: PolishProvider;
 }
+
+export type PolishStyle = "none" | "concise" | "formal" | "casual" | "excited";
+export type PolishProvider = "bundled" | "ollama" | "openaiCompatible";
 
 export type Accent = "dusk" | "teal" | "lilac";
 export type DockShape = "orb" | "capsule" | "tape";
@@ -54,12 +63,21 @@ export interface TranscriptSession {
   id: string;
   rawText: string;
   cleanedText: string;
+  polishedText: string | null;
+  preferPolished: boolean;
   audioPath: string;
   durationMs: number;
   wordCount: number;
   injected: boolean;
   sourceApplication: string | null;
   createdAt: string;
+}
+
+export function sessionDisplayText(session: TranscriptSession): string {
+  if (session.preferPolished && session.polishedText?.trim()) {
+    return session.polishedText;
+  }
+  return session.cleanedText;
 }
 
 export interface RuntimeEvent {
@@ -333,5 +351,11 @@ export function defaultSettings(): AppSettings {
     transcriptionProfile: "balanced",
     accelerationPreference: "auto",
     livePreviewEnabled: true,
+    autoPolish: false,
+    polishStyle: "none",
+    customInstructions: "",
+    polishEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+    polishModel: "qwen2.5-0.5b",
+    polishProvider: "bundled",
   };
 }
