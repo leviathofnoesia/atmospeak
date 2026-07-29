@@ -17,7 +17,7 @@ honor its STOP conditions, and update your row when done.
 | 007  | Extract App.tsx panels into separate component files | P1 | M | — | IN PROGRESS (6 of 8 panels extracted; Onboarding + OverlayWindow remain) |
 | 008  | Move Tauri command handlers off the main thread for polish operations | P2 | M | — | TODO |
 | 009  | Replace full AppSnapshot refresh with targeted state updates | P3 | M | 007 | TODO |
-| 010  | Add frontend unit tests for core App behavior | P3 | L | 007 | TODO |
+| 010  | Add frontend unit tests for core App behavior | P3 | L | 007 | IN PROGRESS (HistoryPanel covered; App-level flows and remaining panels pending) |
 
 ## Dependency notes
 
