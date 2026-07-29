@@ -101,6 +101,14 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and -not [string]::IsNullOrWhiteSpace($
   $env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content $SigningKeyPath -Raw).Trim()
 }
 $env:CI = "true"
+# Stamp the build with its release date. Licence update windows are compared
+# against this rather than the wall clock, so a machine with a wrong system
+# clock can never lose access to a paid feature. Setting it here — rather than
+# letting build.rs default to "today" — keeps the date stable if a release is
+# ever rebuilt. See src-tauri/build.rs and src-tauri/src/services/license.rs.
+if (-not $env:ATMOSPEAK_RELEASE_DATE) {
+  $env:ATMOSPEAK_RELEASE_DATE = (Get-Date).ToString("yyyy-MM-dd")
+}
 if ((Test-Path $CargoBin) -and ($env:PATH -notlike "*$CargoBin*")) {
   $env:PATH = "$CargoBin;$env:PATH"
 }

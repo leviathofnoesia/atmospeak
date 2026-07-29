@@ -183,6 +183,16 @@
 .hub-shell .settings-polish { display: flex; flex-direction: column; gap: 12px; }
 .hub-shell .settings-polish__advanced { display: flex; flex-direction: column; gap: 12px; }
 .hub-shell .settings-polish__key-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.hub-shell .license-status { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border: 1px solid rgba(18,17,19,0.12); border-radius: 10px; }
+.hub-shell .license-status strong { font-size: 18px; }
+.hub-shell .license-features { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.hub-shell .license-activate { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.hub-shell .license-activate textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: vertical; }
+.hub-shell .license-message { font-size: 13px; line-height: 1.5; }
+.hub-shell .license-message.is-error { color: #c66b4b; }
+.hub-shell .license-offline-note { display: flex; align-items: flex-start; gap: 8px; }
+.hub-shell .license-offline-note svg { flex: none; margin-top: 3px; color: var(--accent); }
+
 .hub-shell .settings-shortcut { display: flex; flex-direction: column; gap: 10px; }
 .hub-shell .settings-shortcut__label,
 .hub-shell .settings-gesture legend {

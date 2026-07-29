@@ -15,8 +15,8 @@ use crate::{
     db::Database,
     models::{RuntimeEvent, ShortcutStatus, StageMetrics},
     services::{
-        asr_host::AsrHost, dictation_engine::EngineHandle, llama_host::LlamaHost,
-        recorder::RecorderService, streaming_asr::StreamingAsr,
+        asr_host::AsrHost, dictation_engine::EngineHandle, license::LicenseState,
+        llama_host::LlamaHost, recorder::RecorderService, streaming_asr::StreamingAsr,
     },
 };
 
@@ -32,6 +32,8 @@ pub struct AppState {
     pub shortcut_capture_active: Arc<Mutex<bool>>,
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
+    /// Resolved once at startup so no dictation ever waits on a keyring read.
+    pub license: Arc<Mutex<LicenseState>>,
     pub retention_sweeper_cancel: Arc<AtomicBool>,
     pub model_download_cancel: Arc<AtomicBool>,
     level_stream_generation: AtomicU64,
@@ -77,6 +79,9 @@ impl AppState {
             shortcut_capture_active: Arc::new(Mutex::new(false)),
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(runtime_events)),
+            // Reading the keyring cannot fail into an error here: an absent or
+            // unreadable licence simply resolves to the free tier.
+            license: Arc::new(Mutex::new(crate::services::license::load())),
             retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
             model_download_cancel: Arc::new(AtomicBool::new(false)),
             level_stream_generation: AtomicU64::new(0),

@@ -9,11 +9,13 @@ use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
-    cancel_model_download, cancel_recording, cancel_shortcut_capture, cancel_sound_check,
-    clear_polish_api_key, complete_onboarding, delete_dictionary_entry, delete_model, delete_session,
+    activate_license, cancel_model_download, cancel_recording, cancel_shortcut_capture,
+    cancel_sound_check, clear_polish_api_key, complete_onboarding, deactivate_license,
+    delete_dictionary_entry, delete_model, delete_session,
     delete_snippet, download_model, download_polish_model, ensure_polish_runtime, finish_sound_check,
-    get_app_snapshot, get_last_stage_metrics, get_model_inventory, get_model_status,
-    get_polish_inventory, get_recording_level, get_runtime_events, get_shortcut_status,
+    get_app_snapshot, get_last_stage_metrics, get_license_status, get_model_inventory,
+    get_model_status, get_polish_inventory, get_recording_level, get_runtime_events,
+    get_shortcut_status,
     handle_dictation_action, has_polish_api_key, inject_text, list_microphones, mic_check_start,
     mic_check_stop, open_windows_sound_settings, polish_session, register_setup_shortcut,
     reset_overlay_position, save_overlay_position, save_settings, set_polish_api_key,
@@ -443,7 +445,10 @@ pub fn run() {
             get_model_inventory,
             download_model,
             cancel_model_download,
-            delete_model
+            delete_model,
+            activate_license,
+            deactivate_license,
+            get_license_status
         ])
         .build(tauri::generate_context!())
         .expect("error while building Atmospeak")

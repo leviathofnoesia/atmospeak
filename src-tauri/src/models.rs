@@ -1,5 +1,5 @@
 pub use atmospeak_asr_protocol::{AsrBackend, StreamingMetrics, TranscriptionProfile};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,6 +299,31 @@ pub struct DictationStats {
     pub total_words: usize,
     pub total_duration_ms: u64,
     pub average_words_per_minute: f32,
+}
+
+/// Licence picture for the activation panel.
+///
+/// Deliberately *not* part of [`AppSnapshot`]: the snapshot is assembled by the
+/// database layer, which has no business reading the OS keyring. Licence state
+/// is fetched through its own command instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LicenseStatus {
+    /// "free", "pro", or "team".
+    pub tier: String,
+    /// Whether a verified licence is stored on this machine.
+    pub activated: bool,
+    /// False when a licence is present but this build was released after the
+    /// update window closed. Surfaced as "renew for updates", never as an error.
+    pub in_update_window: bool,
+    /// Stringified so large ids survive the trip through JavaScript intact.
+    pub license_id: Option<String>,
+    pub issued_at: Option<NaiveDate>,
+    pub updates_until: Option<NaiveDate>,
+    pub seats: u8,
+    pub build_released_on: NaiveDate,
+    /// Feature ids this licence unlocks, so the UI does not restate the rules.
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

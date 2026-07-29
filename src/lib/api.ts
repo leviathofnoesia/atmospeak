@@ -10,6 +10,7 @@ import type {
   DictionaryEntry,
   DownloadArtifact,
   InjectionResult,
+  LicenseStatus,
   MicrophoneInfo,
   ModelInventory,
   ModelInventoryItem,
@@ -23,7 +24,7 @@ import type {
   StageMetrics,
   UpdateCheckResult,
 } from "../types/dictation";
-import { defaultSettings } from "../types/dictation";
+import { defaultSettings, freeLicenseStatus } from "../types/dictation";
 
 type InvokeArgs = Record<string, unknown>;
 
@@ -599,6 +600,27 @@ export function clearPolishApiKey(): Promise<void> {
 
 export function hasPolishApiKey(): Promise<boolean> {
   return command("has_polish_api_key", undefined, () => false);
+}
+
+/**
+ * Verify and store a licence key.
+ *
+ * Rejects by throwing, exactly as the Rust side does. Note that this never
+ * performs a network request — activation works fully offline, which is a
+ * product guarantee rather than an implementation detail.
+ */
+export function activateLicense(key: string): Promise<LicenseStatus> {
+  return command("activate_license", { key }, () => {
+    throw new Error("Licence activation is only available in the desktop app.");
+  });
+}
+
+export function deactivateLicense(): Promise<LicenseStatus> {
+  return command("deactivate_license", undefined, () => freeLicenseStatus());
+}
+
+export function getLicenseStatus(): Promise<LicenseStatus> {
+  return command("get_license_status", undefined, () => freeLicenseStatus());
 }
 
 export function registerSetupShortcut(hotkey: string): Promise<ShortcutStatus> {

@@ -4,6 +4,7 @@ pub mod backtrack;
 pub mod cleanup;
 pub mod dictation_engine;
 pub mod injection;
+pub mod license;
 pub mod llama_host;
 pub mod metrics;
 pub mod model_downloader;

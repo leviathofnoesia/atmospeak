@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 anyhow = "1"
 atmospeak-asr-protocol = { path = "../src-asr-protocol" }
 arboard = "3"
+atmospeak-license = { path = "../src-license" }
 chrono = { version = "0.4", features = ["serde"] }
 cpal = "0.16"
 dirs = "6"

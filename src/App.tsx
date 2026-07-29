@@ -5,6 +5,7 @@ import {
   BookOpen,
   History,
   Home,
+  KeyRound,
   Radio,
   Scissors,
   Settings,
@@ -21,6 +22,7 @@ import { AdvancedPanel } from "./components/AdvancedPanel";
 import { DictionaryPanel } from "./components/DictionaryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { HomePanel } from "./components/HomePanel";
+import { LicensePanel } from "./components/LicensePanel";
 import { Onboarding } from "./components/Onboarding";
 import { ModelManagement } from "./components/ModelManagement";
 import { RecorderOverlay } from "./components/RecorderOverlay";
@@ -101,6 +103,7 @@ const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "dictionary", label: "Dictionary", icon: BookOpen },
   { id: "snippets", label: "Snippets", icon: Scissors },
   { id: "settings", label: "Settings", icon: Settings },
+  { id: "license", label: "Licence", icon: KeyRound },
 ];
 
 interface ShortcutTestState {
@@ -1547,6 +1550,8 @@ function AppShell() {
             }
           />
         ) : null}
+
+        {activeTab === "license" ? <LicensePanel /> : null}
       </main>
     </div>
   );

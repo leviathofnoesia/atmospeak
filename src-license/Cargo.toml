@@ -1,0 +1,22 @@
+[package]
+name = "atmospeak-license"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Offline-verifiable Ed25519 licence keys for Atmospeak"
+
+# This crate is deliberately free of Tauri and platform dependencies so the
+# licence format can be tested and minted on any host, and so the verifier and
+# the minting tool are guaranteed to share one implementation.
+
+[dependencies]
+chrono = "0.4"
+data-encoding = "2"
+ed25519-dalek = { version = "2", default-features = false, features = [
+  "alloc",
+  "rand_core",
+] }
+postcard = { version = "1", features = ["alloc"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"

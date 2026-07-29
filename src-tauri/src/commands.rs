@@ -4,14 +4,14 @@ use uuid::Uuid;
 use crate::{
     models::{
         AppSettings, AppSnapshot, DictationResult, DictionaryEntry, InjectionResult,
-        MicrophoneInfo, ModelInventory, ModelStatus, RecordingStarted, RuntimeEvent,
+        LicenseStatus, MicrophoneInfo, ModelInventory, ModelStatus, RecordingStarted, RuntimeEvent,
         ShortcutStatus, Snippet, SoundCheckResult, StageMetrics,
     },
     services::{
         app_state::AppState,
         dictation_engine::{self, EngineAction},
-        injection, model_downloader, overlay_window, polish, proc, runtime, shortcuts, sound_check,
-        startup, window_manager,
+        injection, license, model_downloader, overlay_window, polish, proc, runtime, shortcuts,
+        sound_check, startup, window_manager,
     },
 };
 
@@ -673,6 +673,31 @@ pub async fn ensure_polish_runtime(app: AppHandle, model_id: String) -> CommandR
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Verify and store a licence key.
+///
+/// This performs no network request. Activation works with the machine
+/// completely offline, by design — see `docs/STRATEGY.md`.
+#[tauri::command]
+pub fn activate_license(state: State<'_, AppState>, key: String) -> CommandResult<LicenseStatus> {
+    let resolved = license::activate(&key).map_err(|error| error.to_string())?;
+    let status = license::status(&resolved);
+    *state.license.lock() = resolved;
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn deactivate_license(state: State<'_, AppState>) -> CommandResult<LicenseStatus> {
+    let resolved = license::deactivate().map_err(|error| error.to_string())?;
+    let status = license::status(&resolved);
+    *state.license.lock() = resolved;
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn get_license_status(state: State<'_, AppState>) -> CommandResult<LicenseStatus> {
+    Ok(license::status(&state.license.lock()))
 }
 
 #[tauri::command]

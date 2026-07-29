@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Offline licence activation.** New `atmospeak-license` crate implementing
+  Ed25519-signed licence keys, verified entirely on-device. Activation performs
+  **no network request** — it works with the machine disconnected, there is no
+  activation server, and no account is involved. New Licence panel in the hub.
+- Vendor-side `mint` tool (`cargo run --bin mint` from `src-license/`) for
+  issuing keys. The signing key lives only in the environment; builds embed the
+  public key.
+- Builds are stamped with a release date (`ATMOSPEAK_RELEASE_DATE`). Licence
+  update windows compare against that date rather than the system clock, so a
+  wrong or offline clock can never revoke a paid feature.
+- `docs/STRATEGY.md` — product positioning, improvement tracks, and the
+  open-core revenue architecture.
+
+### Notes
+
+- **Nothing that already shipped has been paywalled, and nothing will be.**
+  Dictation, every local model, cleanup, Backtrack, injection, history,
+  dictionary, snippets, and on-device AI polish remain free and unlimited with
+  no account. Licensing gates only capability that does not exist yet.
+- The core dictation path does not consult the licence layer at all. An absent,
+  invalid, or expired licence resolves to the free tier and cannot affect
+  dictation.
+
 # 0.5.3 — Backtrack + optional AI polish (2026-07-29)
 
 ### Added

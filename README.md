@@ -254,7 +254,11 @@ bun run test
 bun run e2e
 bun run site:build
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-license/Cargo.toml
 ```
+
+The licence crate is deliberately free of Tauri and platform dependencies, so
+`cargo test --manifest-path src-license/Cargo.toml` runs on any host.
 
 The native push-to-talk harness exercises shortcut persistence, key-down,
 key-up, transcription, target restoration, exactly one native paste, and the
@@ -285,6 +289,23 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
   promise a fixed latency on every machine or utterance.
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
+
+## What is free
+
+Dictation, every local Whisper model, cleanup, Backtrack, injection, history,
+dictionary, snippets, and on-device AI edit are **free, unlimited, and require
+no account**. Everything shipped through 0.5.3 stays that way — this is a
+standing commitment, not a promotion. Nothing that already works for free will
+be moved behind a licence.
+
+A paid licence adds capability that does not exist yet, and is a **one-time
+purchase** that keeps working offline forever. Activation is verified locally
+against a signature: there is no activation server, no account, and no network
+request — you can activate with the machine disconnected. Letting the update
+window lapse ends *updates*, never the software.
+
+See [`docs/STRATEGY.md`](docs/STRATEGY.md) for the full positioning and revenue
+architecture.
 
 ## Project
 

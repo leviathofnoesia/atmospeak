@@ -149,6 +149,49 @@ export interface DictationStats {
   averageWordsPerMinute: number;
 }
 
+export type LicenseTier = "free" | "pro" | "team";
+
+/** Gateable capability ids. Mirrors `Feature` in the `atmospeak-license` crate. */
+export type LicenseFeature =
+  | "compliancePack"
+  | "voiceMacros"
+  | "mcpServer"
+  | "ideAwareness"
+  | "sync"
+  | "teamSharedVocabulary";
+
+/**
+ * Mirrors Rust `LicenseStatus`. Fetched through its own command rather than
+ * `AppSnapshot`, because licence state lives in the OS keyring, not the
+ * database.
+ */
+export interface LicenseStatus {
+  tier: LicenseTier;
+  activated: boolean;
+  /** False when a licence is present but this build postdates its update window. */
+  inUpdateWindow: boolean;
+  licenseId: string | null;
+  issuedAt: string | null;
+  updatesUntil: string | null;
+  seats: number;
+  buildReleasedOn: string;
+  features: LicenseFeature[];
+}
+
+export function freeLicenseStatus(buildReleasedOn = "1970-01-01"): LicenseStatus {
+  return {
+    tier: "free",
+    activated: false,
+    inUpdateWindow: false,
+    licenseId: null,
+    issuedAt: null,
+    updatesUntil: null,
+    seats: 0,
+    buildReleasedOn,
+    features: [],
+  };
+}
+
 export interface AppSnapshot {
   settings: AppSettings;
   dictionary: DictionaryEntry[];
@@ -313,7 +356,8 @@ export type HubTab =
   | "history"
   | "dictionary"
   | "snippets"
-  | "settings";
+  | "settings"
+  | "license";
 
 export interface AppNotice {
   tone: "neutral" | "success" | "warning" | "error";
