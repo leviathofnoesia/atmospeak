@@ -10,24 +10,36 @@
 
 <p align="center">
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-setup.exe"><strong>Download v0.5.3</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe"><strong>Download v1.0.0</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v0.5.3"><strong>Release notes</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.0"><strong>Release notes</strong></a>
 </p>
 
 Atmospeak is a Windows desktop dictation app built around a local
 [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) runtime. It requires
 no account and sends no microphone audio to a transcription service.
 
-## What ships in 0.5.3
+## What ships in 1.0.0
 
+Version 1.0.0 is the complete Atmospeak dictation product. It is not a preview
+of something paid — it is the finished free application, and everything below is
+unlimited and requires no account.
+
+- **Speak and paste.** Hold or tap your hotkey, watch the live preview in the
+  dock, and get exactly one paste into whatever application had focus. Warm
+  short clips target under 500&nbsp;ms from key release to paste on the native
+  Vulkan streaming validation path; actual latency depends on machine and
+  utterance.
+- **Local Whisper, your choice of model.** A bundled model works immediately;
+  the downloader adds larger ones. Streaming ASR runs on Vulkan and falls back
+  to CPU on its own.
 - **Deterministic Backtrack.** Cleanup collapses stutters, applies
   `actually` / `I mean` / `wait no`, honors `go back` / `forget that`, and
   keeps the later ending on restates like `as a doctor…as a nurse`.
@@ -38,12 +50,11 @@ no account and sends no microphone audio to a transcription service.
 - **Paste never waits on setup.** If the local editor is not ready yet,
   Atmospeak pastes cleaned text immediately. Timeouts and errors fall back the
   same way.
-- **History undo / redo for AI edits.** Restore cleaned text or re-apply the
-  polished version per session.
-- **Everything from 0.5.2 still applies.** Fast release→paste gates, streaming
-  dock preview, Vulkan→CPU fallback, Hold/Tap gestures, and local diagnostics.
+- **Your words stay yours.** Searchable history with export, undo / redo for AI
+  edits, a personal dictionary, snippets, and local diagnostics — all on disk,
+  on your machine.
 
-See [`docs/releases/v0.5.3.md`](docs/releases/v0.5.3.md) for the full release
+See [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md) for the full release
 note. Speed charts from 0.5.2 remain in
 [`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
 
@@ -53,10 +64,10 @@ Atmospeak currently supports **Windows 10/11 x64**.
 
 | Package | Use it when | Download |
 | --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_0.5.3_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_0.5.3_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_0.5.3_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.3_x64-portable.zip) |
-| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/SHA256SUMS.txt) |
+| Setup EXE | Recommended installation | [atmospeak_1.0.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_1.0.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_1.0.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-portable.zip) |
+| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/SHA256SUMS.txt) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
 **Windows protected your PC**. Choose **More info**, verify the app name is
@@ -199,17 +210,17 @@ Measured on a warm `base.en` CPU path with the porcelain-moon fixture
 
 ```mermaid
 xychart-beta
-    title "Release → paste (ms, lower is better)"
-    x-axis ["v0.5.1 feel", "v0.5.2+ measured"]
-    y-axis "Milliseconds" 0 --> 11000
-    bar [10000, 1905]
+    title "Release → paste totalMs (warm porcelain-moon, lower is better)"
+    x-axis ["Before: host ≤5s route", "After: Vulkan stream (1.0.0)"]
+    y-axis "Milliseconds" 0 --> 2200
+    bar [1718, 213]
 ```
 
-| Metric | Gate |
-| --- | ---: |
-| Release → paste (`totalMs`) | ≤ 2000 ms |
-| Inject (`injectMs`) | ≤ 150 ms |
-| Paste-only wall (`pasteVisibleMs`) | ≤ 300 ms |
+| Metric | Before (≤5 s → warm host) | After (Vulkan streaming) | Gate |
+| --- | ---: | ---: | ---: |
+| Release → paste (`totalMs`) | ~1250–1840 ms | **190–244 ms** | ≤ **500** ms |
+| Inject (`injectMs`) | ~54–55 ms | ~54–55 ms | ≤ 150 ms |
+| Paste-only wall (`pasteVisibleMs`) | — | — | ≤ 300 ms |
 
 ## Build from source
 
@@ -285,6 +296,21 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
   promise a fixed latency on every machine or utterance.
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
+
+## What is free
+
+All of it. Dictation, every local Whisper model, cleanup, Backtrack, injection,
+history, dictionary, snippets, and on-device AI edit are **free, unlimited, and
+require no account**. There is nothing to sign into, no usage cap, and no trial
+that expires.
+
+Everything shipped through 1.0.0 stays that way. This is a standing commitment,
+not a promotion: nothing that already works for free will be moved behind a
+licence. Atmospeak is MIT licensed, and that grant cannot be withdrawn from
+anyone who already has the code.
+
+If paid capability is ever offered, it will be capability that does not exist
+today — never a fence around something this release already does.
 
 ## Project
 

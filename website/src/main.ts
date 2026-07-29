@@ -1,8 +1,7 @@
 import "./styles.css";
-import { APP_VERSION } from "./version";
+import { APP_VERSION, RELEASE_DOWNLOAD_BASE } from "./version";
 
-const releaseBaseUrl =
-  "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
+const releaseBaseUrl = RELEASE_DOWNLOAD_BASE;
 const releaseArtifacts = {
   setup: `atmospeak_${APP_VERSION}_x64-setup.exe`,
   msi: `atmospeak_${APP_VERSION}_x64_en-US.msi`,

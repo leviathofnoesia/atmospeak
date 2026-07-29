@@ -4,11 +4,13 @@ Atmospeak 0.5 keeps microphone audio and transcription on the local machine.
 From 0.5.1 the sidecar splits ingestion from inference so capture never stalls
 behind a decode. From 0.5.2, commits are more aggressive and short warm clips
 can finish on the resident host when streaming has not already committed
-mid-utterance. From 0.5.3, **all ≤5 s** utterances prefer the warm batch host
-(even if a dock partial appeared), deterministic Backtrack runs in cleanup, and
-optional LLM polish can rewrite before paste. The recorder sends bounded 20 ms,
-mono 16 kHz PCM frames to a crash-isolated `atmospeak-asr-host` process while
-retaining the recording for history and batch fallback.
+mid-utterance. From 0.5.3, short clips briefly preferred the warm batch host
+even when a dock partial appeared. From **1.0.0**, short clips stay on
+**streaming finalize** (Vulkan first) so mid-hold commits count toward
+release→paste: measured warm `totalMs` **190–244 ms** under a **500 ms** SLO
+(porcelain-moon / `base.en`). The recorder sends bounded 20 ms, mono 16 kHz PCM
+frames to a crash-isolated `atmospeak-asr-host` process while retaining the
+recording for history and batch fallback.
 
 ## Runtime selection
 
@@ -20,7 +22,9 @@ warm `whisper-server`, and finally `whisper-cli`. Set
 
 `scripts/build-asr-sidecars.ps1` verifies the pinned Silero VAD model checksum
 and creates both sidecar executables. It requires CMake, libclang, and (for the
-Vulkan variant) the Vulkan SDK.
+Vulkan variant) the Vulkan SDK. On Windows it prefers a short target dir
+(`C:\asrb` or `ATMOSPEAK_ASR_TARGET_DIR`) and Ninja when available — long-path
+MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
 
 ## Session flow
 
@@ -34,18 +38,24 @@ Vulkan variant) the Vulkan SDK.
    uncommitted chunk (every ~100 ms of fresh audio), commits after ~300 ms of
    silence or a ~2 second forced split, and runs rolling six-second previews at
    most once per second — skipping previews while decode backlog is high so
-   `StopSession` is not starved.
-4. Stable chunks are reconciled with their overlap. Dictionary and snippet
-   context is prompt-only during streaming. Capture always uses the streaming
-   sidecar when it is available; the live-preview setting no longer disables
-   that hot path.
+   `StopSession` is not starved. Decode reuses one `WhisperState`, uses
+   single-segment greedy params, and honors an abort flag so StopSession is not
+   stuck behind an in-flight force-split.
+4. Stable chunks are reconciled with their overlap. Lone silence markers
+   (`[BLANK_AUDIO]`, `[silence]`, …) are dropped; real filler words are kept.
+   Dictionary and snippet context is prompt-only during streaming. Capture always
+   uses the streaming sidecar when it is available; the live-preview setting no
+   longer disables that hot path.
 5. Stop detaches capture before acknowledging the shortcut, flushes the writer,
    and sends `StopSession` immediately so the host finalizes the uncommitted
-   tail while WAV teardown runs in parallel. Stop cancels pending preview work
-   and always decodes the uncommitted tail. For short warm clips (≤ ~5 s) with
-   no streaming partials, Atmospeak cancels streaming finalize and uses the
-   warm resident host instead. Cleanup/snippet expansion and the single paste
-   run once after the final; clipboard restore is off the inject critical path.
+   tail while WAV teardown runs in parallel. The stdin reader sets the shared
+   abort flag so an in-flight `whisper_full` can exit without waiting for the
+   worker to dequeue Stop. Stop also cancels pending preview work and skips
+   near-silent tails (full-tail VAD). Atmospeak prefers streaming finalize for
+   all lengths when the sidecar accepted stop; batch host remains the fallback
+   when streaming fails or is unavailable. Cleanup/snippet expansion and the
+   single paste run once after the final; clipboard restore is off the inject
+   critical path.
 6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop leaves
    the full local recording available to the legacy batch path, which prefers
    the lazy resident `whisper-server` over a cold one-shot `whisper-cli`. An

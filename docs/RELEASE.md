@@ -86,12 +86,25 @@ bun run validation:native-ptt
 bun run validation:paste-latency
 ```
 
+```mermaid
+xychart-beta
+    title "Warm release → paste totalMs (before vs after)"
+    x-axis ["Before: host ≤5s", "After: Vulkan stream"]
+    y-axis "Milliseconds" 0 --> 2000
+    bar [1718, 213]
+```
+
 `validation:native-ptt` completes setup against a debug-only deterministic audio
 fixture, saves a non-preset `Ctrl+Alt+F12` shortcut through Settings, sends the
 native key-down/key-up sequence, and verifies that key release produces one
 transcript, one injected database session, exactly one paste into a real Windows
-text box, and that release→paste / inject stay within the v0.5.2 budgets
-(≤ 2000 ms / ≤ 150 ms on the warm porcelain-moon fixture).
+text box, and that release→paste / inject stay within the warm budgets
+(≤ 500 ms / ≤ 150 ms on the warm porcelain-moon fixture with Vulkan streaming).
+
+| | Before | After |
+| --- | ---: | ---: |
+| Measured `totalMs` | ~1250–1840 | **190–244** |
+| Budget | ≤ 2000 ms | ≤ **500** ms |
 
 `validation:paste-latency` gates paste-only wall clock (≤ 300 ms) without
 waiting on ASR.

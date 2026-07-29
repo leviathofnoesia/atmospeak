@@ -2,15 +2,29 @@
 //! here is either pure or takes its whisper state explicitly, so it can be
 //! unit-tested without a running session.
 
-use std::io::Write;
+use std::{
+    io::Write,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::{Result, anyhow, bail};
 use atmospeak_asr_protocol::{AsrBackend, AsrEvent, MAX_FRAME_SIZE, TranscriptionProfile};
 use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperState, WhisperVadContext, WhisperVadParams,
+    FullParams, SamplingStrategy, WhisperState, WhisperVadContext, WhisperVadParams,
 };
 
 pub const SAMPLE_RATE: usize = 16_000;
+
+unsafe extern "C" fn abort_callback_trampoline(user_data: *mut std::ffi::c_void) -> bool {
+    if user_data.is_null() {
+        return false;
+    }
+    // Safety: caller passes a live AtomicBool pointer for the duration of whisper_full.
+    unsafe { (*(user_data as *const AtomicBool)).load(Ordering::Acquire) }
+}
 
 /// Bound Silero's input to the trailing seconds of an uncommitted chunk. A
 /// pause that matters for finalization (≥500 ms silence after ≥250 ms speech)
@@ -61,7 +75,7 @@ pub fn vad_last_speech_end(vad: &mut WhisperVadContext, audio: &[f32]) -> Result
 
 #[allow(clippy::too_many_arguments)]
 pub fn transcribe(
-    context: &WhisperContext,
+    state: &mut WhisperState,
     backend: AsrBackend,
     threads: i32,
     audio: &[f32],
@@ -69,6 +83,7 @@ pub fn transcribe(
     prompt: &str,
     profile: TranscriptionProfile,
     leading_overlap_samples: usize,
+    abort: Option<&Arc<AtomicBool>>,
 ) -> Result<DecodedText> {
     if audio.len() < SAMPLE_RATE / 10 {
         return Ok(DecodedText {
@@ -76,9 +91,9 @@ pub fn transcribe(
             confirmed_overlap_words: 0,
         });
     }
-    let mut state: WhisperState = context
-        .create_state()
-        .map_err(|error| anyhow!("failed to create decoder state: {error}"))?;
+    if abort.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        bail!("whisper decode aborted");
+    }
     let best_of = match profile {
         TranscriptionProfile::Speed => 1,
         TranscriptionProfile::Balanced if backend == AsrBackend::Vulkan => 2,
@@ -90,13 +105,41 @@ pub fn transcribe(
     params.set_language(Some(if language.is_empty() { "en" } else { language }));
     params.set_initial_prompt(prompt);
     params.set_no_context(true);
+    // Streaming chunks are short; single-segment + no timestamps cuts encoder
+    // work on pure-fresh audio. With retained acoustic overlap we need real
+    // segment timestamps so confirmed_overlap_words can drop the re-emitted
+    // prefix — single_segment collapses overlap+fresh into one segment and
+    // leaves confirmed_overlap at 0 (duplicated words at chunk boundaries).
+    if leading_overlap_samples == 0 {
+        params.set_single_segment(true);
+        params.set_no_timestamps(true);
+    } else {
+        params.set_single_segment(false);
+        params.set_no_timestamps(false);
+    }
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_special(false);
     params.set_print_timestamps(false);
+    // ggml_abort_callback: return true to abort. StopSession sets this flag so
+    // an in-flight force-split cannot block release→paste for seconds.
+    if let Some(flag) = abort {
+        // Safety: `flag` outlives `state.full` below; whisper only calls this
+        // during that decode. Prefer a raw AtomicBool pointer over whisper-rs's
+        // boxed trampoline, which has a known type mismatch with dyn FnMut.
+        unsafe {
+            params.set_abort_callback(Some(abort_callback_trampoline));
+            params.set_abort_callback_user_data(
+                Arc::as_ptr(flag) as *const AtomicBool as *mut std::ffi::c_void,
+            );
+        }
+    }
     state
         .full(params, audio)
         .map_err(|error| anyhow!("Whisper inference failed: {error}"))?;
+    if abort.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        bail!("whisper decode aborted");
+    }
     let overlap_end_timestamp =
         i64::try_from(samples_to_ms(leading_overlap_samples) / 10).unwrap_or(i64::MAX);
     let mut text = String::new();

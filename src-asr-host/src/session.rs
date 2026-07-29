@@ -5,7 +5,11 @@
 
 use std::{
     io::Write,
-    sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, RecvTimeoutError, TryRecvError},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -13,7 +17,10 @@ use anyhow::{Result, anyhow, bail};
 use atmospeak_asr_protocol::{
     AsrBackend, AsrCapabilities, AsrCommand, AsrEvent, PROTOCOL_VERSION, TranscriptionProfile,
 };
-use whisper_rs::{WhisperContext, WhisperContextParameters, WhisperVadContext, WhisperVadContextParams};
+use whisper_rs::{
+    WhisperContext, WhisperContextParameters, WhisperState, WhisperVadContext,
+    WhisperVadContextParams,
+};
 
 use crate::inference::{
     self, SAMPLE_RATE, samples_to_ms, vad_window_start, write_error, write_event,
@@ -43,11 +50,18 @@ pub struct AudioFrameMsg {
 }
 
 struct Model {
+    /// Kept so the context outlives `state` (whisper-rs state borrows the ctx).
+    #[allow(dead_code)]
     context: WhisperContext,
+    /// Reused across commits/previews/finalize — creating a state per decode
+    /// was a multi-hundred-ms fixed cost on the release→paste path.
+    state: WhisperState,
     backend: AsrBackend,
     threads: i32,
     model_id: String,
     vad: WhisperVadContext,
+    /// StopSession sets this so in-flight `whisper_full` aborts promptly.
+    abort: Arc<AtomicBool>,
 }
 
 struct Session {
@@ -108,6 +122,8 @@ impl Session {
 pub fn run_worker(
     control_rx: Receiver<AsrCommand>,
     audio_rx: Receiver<AudioFrameMsg>,
+    abort: Arc<AtomicBool>,
+    active_session_id: Arc<Mutex<Option<String>>>,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut model: Option<Model> = None;
@@ -124,6 +140,8 @@ pub fn run_worker(
                     &mut model,
                     &mut session,
                     &mut stop_requested,
+                    &abort,
+                    &active_session_id,
                     output,
                 )? {
                     return Ok(());
@@ -167,7 +185,39 @@ pub fn run_worker(
             if drained > 0 {
                 continue;
             }
-            finalize_stopped_session(&mut model, &mut session, output)?;
+            // Honor CancelSession that raced ahead of finalize so we never
+            // emit Final for a session the client already canceled.
+            loop {
+                match control_rx.try_recv() {
+                    Ok(command) => {
+                        if handle_control(
+                            command,
+                            &mut model,
+                            &mut session,
+                            &mut stop_requested,
+                            &abort,
+                            &active_session_id,
+                            output,
+                        )? {
+                            return Ok(());
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return Ok(()),
+                }
+            }
+            if session.is_none() {
+                stop_requested = false;
+                abort.store(false, Ordering::Release);
+                continue;
+            }
+            finalize_stopped_session(
+                &mut model,
+                &mut session,
+                &abort,
+                &active_session_id,
+                output,
+            )?;
             stop_requested = false;
             continue;
         }
@@ -175,6 +225,29 @@ pub fn run_worker(
         // 4. Scheduled inference work.
         if let Some(active) = session.as_ref() {
             if vad_check_due(active) {
+                // StopSession may have arrived while we drained audio. Never
+                // start another multi-hundred-ms commit that delays the stop
+                // fast path — finalize_stopped_session owns the remaining tail.
+                match control_rx.try_recv() {
+                    Ok(command) => {
+                        if handle_control(
+                            command,
+                            &mut model,
+                            &mut session,
+                            &mut stop_requested,
+                            &abort,
+                            &active_session_id,
+                            output,
+                        )? {
+                            return Ok(());
+                        }
+                    }
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => return Ok(()),
+                }
+                if stop_requested {
+                    continue;
+                }
                 let mut active = session.take().expect("session checked above");
                 run_vad_pass(&mut model, &mut active, output)?;
                 session = Some(active);
@@ -191,7 +264,7 @@ pub fn run_worker(
                     Err(TryRecvError::Empty) => {
                         let mut active = session.take().expect("session checked above");
                         emit_preview(
-                            model.as_ref().ok_or_else(|| anyhow!("model is not loaded"))?,
+                            model.as_mut().ok_or_else(|| anyhow!("model is not loaded"))?,
                             &mut active,
                             output,
                         )?;
@@ -220,12 +293,20 @@ pub fn run_worker(
     }
 }
 
+fn publish_active_session(active_session_id: &Arc<Mutex<Option<String>>>, id: Option<String>) {
+    if let Ok(mut guard) = active_session_id.lock() {
+        *guard = id;
+    }
+}
+
 /// Ok(true) means the worker should exit.
 fn handle_control(
     command: AsrCommand,
     model: &mut Option<Model>,
     session: &mut Option<Session>,
     stop_requested: &mut bool,
+    abort: &Arc<AtomicBool>,
+    active_session_id: &Arc<Mutex<Option<String>>>,
     output: &mut impl Write,
 ) -> Result<bool> {
     match command {
@@ -249,7 +330,7 @@ fn handle_control(
             backend,
             threads,
         } => {
-            if let Some(loaded) = load_model(&model_path, backend, threads, output)? {
+            if let Some(loaded) = load_model(&model_path, backend, threads, abort, output)? {
                 *model = Some(loaded);
             }
         }
@@ -272,6 +353,8 @@ fn handle_control(
                 )?;
                 return Ok(false);
             }
+            abort.store(false, Ordering::Release);
+            publish_active_session(active_session_id, Some(session_id.clone()));
             *session = Some(Session::new(session_id, language, initial_prompt, profile));
             *stop_requested = false;
         }
@@ -285,7 +368,13 @@ fn handle_control(
                 .is_some_and(|active| active.id == session_id)
             {
                 *stop_requested = true;
+                // Abort any in-flight whisper_full so StopSession is not stuck
+                // behind a multi-second force-split commit.
+                abort.store(true, Ordering::Release);
             } else {
+                // Reader only aborts for the published active id; clear any
+                // stale flag if a mismatched stop raced the publish update.
+                abort.store(false, Ordering::Release);
                 write_error(output, Some(session_id), "session is not active", true)?;
             }
         }
@@ -296,6 +385,10 @@ fn handle_control(
             {
                 *session = None;
                 *stop_requested = false;
+                publish_active_session(active_session_id, None);
+                abort.store(true, Ordering::Release);
+            } else {
+                abort.store(false, Ordering::Release);
             }
         }
         AsrCommand::Shutdown => return Ok(true),
@@ -307,6 +400,7 @@ fn load_model(
     model_path: &str,
     backend: AsrBackend,
     threads: u16,
+    abort: &Arc<AtomicBool>,
     output: &mut impl Write,
 ) -> Result<Option<Model>> {
     if backend == AsrBackend::Vulkan && !cfg!(feature = "vulkan") {
@@ -325,6 +419,9 @@ fn load_model(
     parameters.flash_attn(true);
     let context = WhisperContext::new_with_params(model_path, parameters)
         .map_err(|error| anyhow!("failed to load model: {error}"))?;
+    let state = context
+        .create_state()
+        .map_err(|error| anyhow!("failed to create decoder state: {error}"))?;
     let vad_path = std::env::var("ATMOSPEAK_VAD_MODEL")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
@@ -356,10 +453,12 @@ fn load_model(
     )?;
     Ok(Some(Model {
         context,
+        state,
         backend,
         threads: i32::from(threads.max(1)),
         model_id,
         vad,
+        abort: Arc::clone(abort),
     }))
 }
 
@@ -448,62 +547,91 @@ fn run_vad_pass(
                 && active.audio.len().saturating_sub(end) >= SILENCE_SAMPLES
         });
     if finalize {
-        // Re-check stop before starting a multi-hundred-ms decode so
-        // StopSession is not stuck behind a force-split commit.
         finalize_chunk(model_mut, active, output)?;
     }
     Ok(())
 }
 
-fn model_slot_ref(model: &Option<Model>) -> Result<&Model> {
-    model.as_ref().ok_or_else(|| anyhow!("model is not loaded"))
+fn model_slot_mut(model: &mut Option<Model>) -> Result<&mut Model> {
+    model.as_mut().ok_or_else(|| anyhow!("model is not loaded"))
 }
 
 fn finalize_stopped_session(
     model: &mut Option<Model>,
     session: &mut Option<Session>,
+    abort: &Arc<AtomicBool>,
+    active_session_id: &Arc<Mutex<Option<String>>>,
     output: &mut impl Write,
 ) -> Result<()> {
-    let Some(mut active) = session.take() else {
+    let Some(active) = session.as_mut() else {
         return Ok(());
     };
+    // Keep the active session id published so CancelSession during this decode
+    // can still set abort from the reader thread.
+    abort.store(false, Ordering::Release);
     let finalize_started = Instant::now();
     let tail_audio_ms = samples_to_ms(active.audio.len().saturating_sub(active.chunk_start));
     // Always decode a meaningful uncommitted tail on stop. Skipping when VAD
     // misses speech (common with short fixture / TTS clips) left `committed`
     // empty and forced a multi-second batch fallback on the critical path.
+    // Skip decoding a near-silent stop tail — whisper often invents a stray
+    // token on padded silence, and the commit already holds the utterance.
     if active.audio.len() > active.chunk_start + SAMPLE_RATE / 10 {
-        finalize_chunk(model_slot_ref(model)?, &mut active, output)?;
+        let speechy = {
+            let model_mut = model_slot_mut(model)?;
+            let tail = &active.audio[active.chunk_start..];
+            // Scan the full uncommitted tail. A prefix-only window misses speech
+            // that arrives after a long silent stretch when VAD never advanced
+            // chunk_start.
+            inference::vad_last_speech_end(&mut model_mut.vad, tail)?.is_some()
+        };
+        if speechy {
+            finalize_chunk(model_slot_mut(model)?, active, output)?;
+        }
+    }
+    if abort.load(Ordering::Acquire) {
+        // Cancelled while finalizing — do not emit Final/Metrics.
+        *session = None;
+        publish_active_session(active_session_id, None);
+        abort.store(false, Ordering::Release);
+        return Ok(());
     }
     let audio_ms = samples_to_ms(active.total_samples_received as usize);
     let processed_during_recording_ms = audio_ms.saturating_sub(tail_audio_ms);
-    let model = model_slot_ref(model)?;
+    let session_id = active.id.clone();
+    let first_partial_ms = active.first_partial_ms;
+    let max_backlog_ms = active.max_backlog_ms;
+    let audio_frames_dropped = active.audio_frames_dropped;
+    let committed = active.committed.trim().to_string();
+    let loaded = model_slot_mut(model)?;
     write_event(
         output,
         &AsrEvent::Metrics(atmospeak_asr_protocol::StreamingMetrics {
-            session_id: active.id.clone(),
-            backend: model.backend,
-            model_id: model.model_id.clone(),
-            first_partial_ms: active.first_partial_ms,
+            session_id: session_id.clone(),
+            backend: loaded.backend,
+            model_id: loaded.model_id.clone(),
+            first_partial_ms,
             stop_ack_ms: 0,
             finalize_ms: finalize_started.elapsed().as_millis() as u64,
             paste_ms: 0,
             processed_during_recording_ms,
             tail_audio_ms,
-            max_backlog_ms: active.max_backlog_ms,
-            audio_frames_dropped: active.audio_frames_dropped,
+            max_backlog_ms,
+            audio_frames_dropped,
             fallback_reason: None,
         }),
     )?;
     write_event(
         output,
         &AsrEvent::Final {
-            session_id: active.id.clone(),
-            text: active.committed.trim().to_string(),
+            session_id,
+            text: committed,
             processed_during_recording_ms,
             tail_audio_ms,
         },
     )?;
+    *session = None;
+    publish_active_session(active_session_id, None);
     eprintln!(
         "finalized streaming session in {}ms",
         finalize_started.elapsed().as_millis()
@@ -511,7 +639,7 @@ fn finalize_stopped_session(
     Ok(())
 }
 
-fn emit_preview(model: &Model, session: &mut Session, output: &mut impl Write) -> Result<()> {
+fn emit_preview(model: &mut Model, session: &mut Session, output: &mut impl Write) -> Result<()> {
     // A preview is only a hypothesis for the uncommitted tail. Without this
     // clamp, the rolling window can include a committed chunk and visibly
     // repeat it in the dock.
@@ -520,8 +648,8 @@ fn emit_preview(model: &Model, session: &mut Session, output: &mut impl Write) -
         .len()
         .saturating_sub(PREVIEW_SAMPLES)
         .max(session.chunk_start);
-    let decoded = inference::transcribe(
-        &model.context,
+    let decoded = match inference::transcribe(
+        &mut model.state,
         model.backend,
         model.threads,
         &session.audio[start..],
@@ -529,7 +657,15 @@ fn emit_preview(model: &Model, session: &mut Session, output: &mut impl Write) -
         &prompt(session),
         session.profile,
         0,
-    )?;
+        Some(&model.abort),
+    ) {
+        Ok(decoded) => decoded,
+        Err(error) if model.abort.load(Ordering::Acquire) => {
+            eprintln!("preview aborted: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     session.revision += 1;
     session.last_preview = Instant::now();
     let latency = session.started.elapsed().as_millis() as u64;
@@ -547,12 +683,12 @@ fn emit_preview(model: &Model, session: &mut Session, output: &mut impl Write) -
     )
 }
 
-fn finalize_chunk(model: &Model, session: &mut Session, output: &mut impl Write) -> Result<()> {
+fn finalize_chunk(model: &mut Model, session: &mut Session, output: &mut impl Write) -> Result<()> {
     let end = session.audio.len();
     let overlap_samples = session.chunk_start.min(OVERLAP_SAMPLES);
     let decode_start = session.chunk_start.saturating_sub(overlap_samples);
-    let decoded = inference::transcribe(
-        &model.context,
+    let decoded = match inference::transcribe(
+        &mut model.state,
         model.backend,
         model.threads,
         &session.audio[decode_start..end],
@@ -560,24 +696,39 @@ fn finalize_chunk(model: &Model, session: &mut Session, output: &mut impl Write)
         &prompt(session),
         session.profile,
         overlap_samples,
-    )?;
-    session.committed = inference::merge_overlap(
-        &session.committed,
-        &decoded.text,
-        decoded.confirmed_overlap_words,
-    );
-    let start_ms = samples_to_ms(session.audio_base_samples as usize + session.chunk_start);
-    let end_ms = samples_to_ms(session.audio_base_samples as usize + end);
-    write_event(
-        output,
-        &AsrEvent::StableSegment {
-            session_id: session.id.clone(),
-            index: session.segment_index,
-            text: session.committed.clone(),
-            start_ms,
-            end_ms,
-        },
-    )?;
+        Some(&model.abort),
+    ) {
+        Ok(decoded) => decoded,
+        Err(error) if model.abort.load(Ordering::Acquire) => {
+            // StopSession aborted this commit; leave chunk_start unchanged so
+            // finalize_stopped_session still owns the uncommitted audio.
+            eprintln!("commit aborted: {error}");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    // Whisper often invents a lone filler on trailing silence after a good
+    // utterance ("The.", "[BLANK_AUDIO]"). Drop those; still advance the chunk
+    // so StopSession does not re-decode the same silence.
+    if !silence_hallucination(&decoded.text, &session.committed) {
+        session.committed = inference::merge_overlap(
+            &session.committed,
+            &decoded.text,
+            decoded.confirmed_overlap_words,
+        );
+        let start_ms = samples_to_ms(session.audio_base_samples as usize + session.chunk_start);
+        let end_ms = samples_to_ms(session.audio_base_samples as usize + end);
+        write_event(
+            output,
+            &AsrEvent::StableSegment {
+                session_id: session.id.clone(),
+                index: session.segment_index,
+                text: session.committed.clone(),
+                start_ms,
+                end_ms,
+            },
+        )?;
+    }
     session.segment_index += 1;
     // Keep only the audio needed to bridge the next chunk. This bounds host
     // memory for arbitrarily long recordings while retaining the 500 ms
@@ -591,6 +742,21 @@ fn finalize_chunk(model: &Model, session: &mut Session, output: &mut impl Write)
     session.last_vad_check = session.audio.len();
     session.speech_active = false;
     Ok(())
+}
+
+fn silence_hallucination(decoded: &str, _committed: &str) -> bool {
+    let trimmed = decoded.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    // Only drop unambiguous silence markers — never discard real filler words
+    // like "the"/"a" that can be legitimate VAD-boundary chunks.
+    lower.contains("blank_audio")
+        || lower.contains("[silence]")
+        || lower == "silence"
+        || lower == "silence."
+        || lower == "."
 }
 
 fn prompt(session: &Session) -> String {
@@ -618,5 +784,13 @@ mod tests {
         assert!(vad_check_due(&session));
         session.last_vad_check = SAMPLE_RATE - VAD_CHECK_SAMPLES + 1;
         assert!(!vad_check_due(&session));
+    }
+
+    #[test]
+    fn silence_hallucination_keeps_real_filler_words() {
+        assert!(silence_hallucination("[BLANK_AUDIO]", "hello there friend again"));
+        assert!(silence_hallucination(".", "hello there friend again"));
+        assert!(!silence_hallucination("the", "hello there friend again"));
+        assert!(!silence_hallucination("you", "hello there friend again"));
     }
 }

@@ -829,18 +829,10 @@ impl Worker {
                         });
                         host.cancel_session(&finished.id);
                         transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
-                    } else if finished.duration_ms <= 5_000 {
-                        // Short utterances decode faster on the warm resident
-                        // batch host than a full-utterance streaming finalize,
-                        // even when a partial already appeared in the dock.
-                        host.cancel_session(&finished.id);
-                        processed_during_recording_ms = 0;
-                        tail_audio_ms = finished.duration_ms;
-                        fallback_reason = Some(
-                            "short utterance routed to warm batch host".to_string(),
-                        );
-                        transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
                     } else {
+                        // Prefer streaming finalize so mid-hold commits can shrink
+                        // release→paste toward the 500ms SLO. Fall back below if
+                        // finalize is empty or fails.
                         match host.await_final(&finished.id, Duration::from_secs(120)) {
                             Ok(finalized) if !finalized.text.trim().is_empty() => {
                                 transcriber::Transcription {
