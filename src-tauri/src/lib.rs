@@ -125,6 +125,7 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                     {
                         return;
                     }
+                    publish_lazy_asr_host(&app);
                     metrics::emit_runtime(
                         &app,
                         "streaming-asr-ready",
@@ -162,6 +163,7 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                             {
                                 return;
                             }
+                            publish_lazy_asr_host(&app);
                             metrics::emit_runtime(
                                 &app,
                                 "streaming-asr-ready",
@@ -186,7 +188,33 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
 /// Bring up the resident ASR host in the background: loading the model takes
 /// seconds and must not delay the window. Dictation works off the CLI backend
 /// until the host is warm, and keeps working if it never comes up at all.
-pub(crate) fn start_asr_host(app: &tauri::AppHandle) {
+/// Publish the resident batch host in its lazy form alongside streaming: the
+/// `whisper-server` process spawns on first use and then stays resident (v0.4
+/// behavior). Without this, a streaming fallback pays a cold one-shot
+/// `whisper-cli` model load over the entire recording.
+fn publish_lazy_asr_host(app: &tauri::AppHandle) {
+    if asr_host::is_disabled() {
+        return;
+    }
+    let Ok(mut settings) = app.state::<AppState>().database.lock().load_settings() else {
+        return;
+    };
+    resolve_automatic_model(app, &mut settings, models::AsrBackend::Host);
+    let Some(server_exe) = runtime::resolve_server(app, &settings) else {
+        return;
+    };
+    let Ok(resolved) = runtime::resolve_runtime(app, &settings) else {
+        return;
+    };
+    if let Ok(host) = asr_host::AsrHost::new(server_exe, resolved.model_path) {
+        app.state::<AppState>().set_asr_host(std::sync::Arc::new(host));
+    }
+}
+
+/// Bring up the resident ASR host in the background: loading the model takes
+/// seconds and must not delay the window. Dictation works off the CLI backend
+/// until the host is warm, and keeps working if it never comes up at all.
+fn start_asr_host(app: &tauri::AppHandle) {
     if asr_host::is_disabled() {
         metrics::emit_runtime(
             app,

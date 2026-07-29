@@ -258,10 +258,26 @@ impl StreamingAsr {
         })
     }
 
+    /// Convenience wrapper kept for callers that do not need to overlap other
+    /// work with the host's finalize. Prefer `request_stop` + `await_final`
+    /// when capture teardown can run in parallel with the tail decode.
+    #[allow(dead_code)]
     pub fn stop_session(&self, session_id: &str, timeout: Duration) -> Result<StreamingFinal> {
+        self.request_stop(session_id)?;
+        self.await_final(session_id, timeout)
+    }
+
+    /// Tell the host to reconcile the session. Sent as soon as capture has
+    /// detached and the last frame is enqueued, so the sidecar decodes the
+    /// uncommitted tail while the recorder finishes file teardown instead of
+    /// only starting after it.
+    pub fn request_stop(&self, session_id: &str) -> Result<()> {
         self.send(&AsrCommand::StopSession {
             session_id: session_id.to_string(),
-        })?;
+        })
+    }
+
+    pub fn await_final(&self, session_id: &str, timeout: Duration) -> Result<StreamingFinal> {
         let deadline = Instant::now() + timeout;
         let mut host_metrics = None;
         loop {

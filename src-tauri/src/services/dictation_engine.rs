@@ -248,6 +248,16 @@ fn plan_cancel(state: EngineState) -> ActionPlan {
     }
 }
 
+/// Dropped streaming audio at or below this is absorbed by the 500 ms chunk
+/// overlap and the VAD silence margin; beyond it the streamed transcript is
+/// suspect and batch re-transcription is worth the extra latency. Frames are
+/// 20 ms, so 12 ≈ 240 ms of lost audio.
+const STREAMING_DROP_TOLERANCE_FRAMES: u64 = 12;
+
+fn streaming_drop_exceeds_tolerance(dropped_frames: u64) -> bool {
+    dropped_frames > STREAMING_DROP_TOLERANCE_FRAMES
+}
+
 /// How long the worker may block before it must settle a terminal phase back to idle.
 /// `None` means nothing is pending and the worker can block indefinitely.
 fn settle_wait(state: EngineState, deadline: Option<Instant>, now: Instant) -> Option<Duration> {
@@ -746,6 +756,24 @@ impl Worker {
             self.fail_pipeline(error.clone());
             return Err(error);
         }
+        // The writer thread has joined, so every surviving frame is already on
+        // its way to the sidecar. Ask it to reconcile now: the tail decode
+        // overlaps the quality gate and WAV teardown below instead of starting
+        // only after them.
+        let stop_signaled = match captured.streaming_host.as_ref() {
+            Some(host) => match host.request_stop(&captured.id) {
+                Ok(()) => true,
+                Err(error) => {
+                    metrics::emit_runtime(
+                        &self.app,
+                        "streaming-stop-signal-error",
+                        format!("session={} {error}", captured.id),
+                    );
+                    false
+                }
+            },
+            None => false,
+        };
         if let Err(error) = recorder::prepare_for_dictation(&mut captured) {
             if let Some(host) = captured.streaming_host.take() {
                 host.cancel_session(&captured.id);
@@ -794,14 +822,19 @@ impl Worker {
                 let asr_started = Instant::now();
                 let transcription = if let Some(host) = streaming_host {
                     first_partial_ms = host.first_partial_ms();
-                    if streaming_frames_dropped > 0 {
-                        fallback_reason = Some(format!(
-                            "{streaming_frames_dropped} streaming audio frames were dropped"
-                        ));
+                    if !stop_signaled || streaming_drop_exceeds_tolerance(streaming_frames_dropped)
+                    {
+                        fallback_reason = Some(if !stop_signaled {
+                            "streaming host did not accept the stop signal".to_string()
+                        } else {
+                            format!(
+                                "{streaming_frames_dropped} streaming audio frames were dropped"
+                            )
+                        });
                         host.cancel_session(&finished.id);
                         transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
                     } else {
-                        match host.stop_session(&finished.id, Duration::from_secs(120)) {
+                        match host.await_final(&finished.id, Duration::from_secs(120)) {
                             Ok(finalized) if !finalized.text.trim().is_empty() => {
                                 transcriber::Transcription {
                                     text: {
@@ -1214,6 +1247,14 @@ mod tests {
             plan_action(EngineState::Idle, PTT, EngineAction::Cancel),
             ActionPlan::Reject("no active recording to cancel")
         );
+    }
+
+    /// Micro-drops are tolerated; material loss must force the batch path.
+    #[test]
+    fn streaming_drop_tolerance_bounds_fallback() {
+        assert!(!streaming_drop_exceeds_tolerance(0));
+        assert!(!streaming_drop_exceeds_tolerance(STREAMING_DROP_TOLERANCE_FRAMES));
+        assert!(streaming_drop_exceeds_tolerance(STREAMING_DROP_TOLERANCE_FRAMES + 1));
     }
 
     /// The worker must not block indefinitely while a settle is pending, or the

@@ -215,8 +215,8 @@ pub async fn show_main_window(app: AppHandle) -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub fn save_overlay_position(app: AppHandle, x: i32, y: i32) {
-    overlay_window::save_position(&app, x, y);
+pub fn save_overlay_position(app: AppHandle, x: i32, y: i32) -> (i32, i32) {
+    overlay_window::save_position(&app, x, y)
 }
 
 #[tauri::command]

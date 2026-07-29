@@ -776,16 +776,30 @@ fn start_streaming_worker(
             let (asr_tx, asr_rx) = mpsc::sync_channel::<(u64, Vec<u8>)>(100);
             let writer_host = worker_host.clone();
             let writer_session_id = session_id.clone();
+            let writer_dropped = worker_dropped.clone();
             let writer = thread::Builder::new()
                 .name("atmospeak-asr-writer".to_string())
                 .spawn(move || {
+                    let mut send_failed = false;
                     while let Ok((timestamp_ms, pcm)) = asr_rx.recv() {
                         if writer_host
                             .send_audio(&writer_session_id, timestamp_ms, pcm)
                             .is_err()
                         {
+                            send_failed = true;
                             break;
                         }
+                    }
+                    if send_failed {
+                        // The failed frame plus everything still queued never
+                        // reached the host. Count them so the engine falls
+                        // back to batch instead of pasting a silently
+                        // truncated tail.
+                        let mut lost = 1_u64;
+                        while asr_rx.try_recv().is_ok() {
+                            lost += 1;
+                        }
+                        writer_dropped.fetch_add(lost, Ordering::Relaxed);
                     }
                 })
                 .ok();

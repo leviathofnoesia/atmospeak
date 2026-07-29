@@ -223,8 +223,8 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
             ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, GUITHREADINFO,
-            GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow, SW_RESTORE,
-            SetForegroundWindow, ShowWindow,
+            GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsIconic, IsWindow,
+            SW_RESTORE, SetForegroundWindow, ShowWindow,
         };
 
         if target.hwnd == 0 || !hwnd_is_valid(target.hwnd) {
@@ -258,7 +258,12 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
         // the foreground transition. Restore and retry briefly, then verify the
         // actual foreground HWND before sending Ctrl+V.
         for _ in 0..10 {
-            let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
+            // SW_RESTORE un-maximizes a maximized window (per Win32 semantics),
+            // so only use it to recover a minimized target. Normal and
+            // maximized windows keep their geometry untouched.
+            if unsafe { IsIconic(hwnd) }.as_bool() {
+                let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
+            }
             let _ = unsafe { BringWindowToTop(hwnd) };
             let _ = unsafe { SetForegroundWindow(hwnd) };
             if unsafe { GetForegroundWindow() } == hwnd && target_has_keyboard_focus() {

@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { PhysicalPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
 import {
   BookOpen,
@@ -1667,13 +1667,28 @@ function OverlayShell() {
         });
 
       // Remember where the companion was dropped. onMoved fires throughout the OS
-      // drag, so settle briefly before writing.
+      // drag, so settle briefly before writing. If the OS left it off-screen,
+      // the backend returns a clamped position — apply it so the orb springs
+      // back into reach instead of staying stranded until a tray reset.
       let moveTimer: number | undefined;
       const unlistenMoved = await getCurrentWindow().onMoved(({ payload }) => {
         if (suppressPositionSaveRef.current) return;
         window.clearTimeout(moveTimer);
         moveTimer = window.setTimeout(() => {
-          void saveOverlayPosition(payload.x, payload.y).catch(() => undefined);
+          void saveOverlayPosition(payload.x, payload.y)
+            .then(([x, y]) => {
+              if (x === payload.x && y === payload.y) return;
+              // Suppress the echo from our own settle so we don't write twice.
+              suppressPositionSaveRef.current = true;
+              void getCurrentWindow()
+                .setPosition(new PhysicalPosition(x, y))
+                .finally(() => {
+                  window.setTimeout(() => {
+                    suppressPositionSaveRef.current = false;
+                  }, 500);
+                });
+            })
+            .catch(() => undefined);
         }, 400);
       });
       if (cancelled) unlistenMoved();

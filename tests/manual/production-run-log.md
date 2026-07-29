@@ -2,6 +2,39 @@
 
 This file tracks evidence for the 100-test production matrix in `tests/manual/production-100.md`.
 
+## 2026-07-28 - 0.5.1 streaming recovery dogfood
+
+- App version target: **0.5.1**
+- Automated evidence:
+  - `cargo test --manifest-path src-tauri/Cargo.toml --lib`: **63 passed**
+    (includes clamp math, drop-tolerance threshold, settle bounds).
+  - `cargo test` in `src-asr-host`: **5 passed** (VAD window, overlap merge,
+    PCM framing, VAD cadence).
+  - `bun run test`: **24 passed**.
+  - `scripts/verify-host-transcription.ps1`: **pass** in **1166 ms**
+    (`The porcelain moon hums over the studio.`).
+  - `scripts/build-asr-sidecars.ps1 -CpuOnly`: **pass** — rebuilt
+    `atmospeak-asr-cpu.exe` with the reader/worker split.
+  - Full `build-asr-sidecars.ps1` (Vulkan): **failed** in this environment
+    during `whisper-rs-sys` cmake install with `VULKAN_SDK=C:\VulkanSDK\1.4.350.0`;
+    prior `atmospeak-asr-vulkan.exe` remains from 0.5.0 and must be rebuilt
+    before Vulkan dogfood.
+- Code-level acceptance for the three regressions:
+  - Stop path sends `StopSession` after writer flush and awaits final while
+    teardown runs; micro-drops ≤12 frames stay on the streamed path.
+  - `ShowWindow(SW_RESTORE)` is gated behind `IsIconic` — maximized targets
+    are never resized by paste restore.
+  - `save_overlay_position` clamps before persist and returns `(x, y)`; the
+    overlay settles via `setPosition` when the OS left it off-screen.
+- Operator checklist still required for live latency/geometry (needs mic + UI):
+  - Stop→paste on **3 s / 30 s / 120 s** clips with CPU `base.en`
+    (target: ≤≈1 s after release on the 3 s clip).
+  - Same matrix on Vulkan once `VULKAN_SDK` is available and
+    `build-asr-sidecars.ps1` rebuilds `atmospeak-asr-vulkan.exe`.
+  - Paste into **maximized** Notepad / VS Code / Chrome — geometry unchanged.
+  - Drag the orb past every screen edge — springs back and persists across
+    restart.
+
 ## 2026-07-26 - 0.3.1 recovery candidate (not approved for publication)
 
 - Public containment:

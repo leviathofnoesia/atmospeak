@@ -1,5 +1,29 @@
 # Changelog
 
+# 0.5.1 — Streaming recovery (2026-07-28)
+
+### Fixed
+
+- Decoupled ASR host ingestion from inference so microphone frames no longer
+  stall behind VAD and preview decodes, which was overflowing the upstream
+  queues and discarding streamed work on the first dropped frame.
+- Sent `StopSession` as soon as capture is flushed so the host finalizes the
+  uncommitted tail while WAV teardown runs in parallel.
+- Tolerated micro-drops (~250 ms) before falling back to batch, and closed the
+  drop-accounting hole that could paste a silently truncated tail.
+- Published a lazy resident `whisper-server` alongside streaming so batch
+  fallback no longer pays a cold one-shot `whisper-cli` model load.
+- Stopped calling `ShowWindow(SW_RESTORE)` on non-minimized paste targets, which
+  was un-maximizing maximized windows.
+- Clamped and settled the dock on drag end so it can no longer be stranded
+  fully off-screen.
+
+### Changed
+
+- The ASR sidecar now runs a reader thread plus an inference worker, with stop
+  priority over previews and Silero VAD limited to the trailing three seconds of
+  the uncommitted chunk.
+
 # 0.5.0 — Streaming local transcription (2026-07-28)
 
 ### Added

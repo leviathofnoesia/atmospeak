@@ -543,8 +543,11 @@ export function showMainWindow(): Promise<void> {
   return command("show_main_window", undefined, () => undefined);
 }
 
-export function saveOverlayPosition(x: number, y: number): Promise<void> {
-  return command("save_overlay_position", { x, y }, () => undefined);
+export function saveOverlayPosition(
+  x: number,
+  y: number,
+): Promise<[number, number]> {
+  return command("save_overlay_position", { x, y }, () => [x, y] as [number, number]);
 }
 
 export function micCheckStart(): Promise<void> {

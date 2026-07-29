@@ -1,6 +1,6 @@
 [package]
 name = "atmospeak"
-version = "0.5.0"
+version = "0.5.1"
 description = "Local-first desktop dictation prototype"
 authors = ["Atmospeak"]
 edition = "2024"

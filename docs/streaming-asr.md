@@ -1,9 +1,10 @@
 # Streaming local ASR
 
 Atmospeak 0.5 keeps microphone audio and transcription on the local machine.
-The recorder sends bounded 20 ms, mono 16 kHz PCM frames to a crash-isolated
-`atmospeak-asr-host` process while retaining the recording for history and
-batch fallback.
+From 0.5.1 the sidecar splits ingestion from inference so capture never stalls
+behind a decode. The recorder sends bounded 20 ms, mono 16 kHz PCM frames to a
+crash-isolated `atmospeak-asr-host` process while retaining the recording for
+history and batch fallback.
 
 ## Runtime selection
 
@@ -22,17 +23,25 @@ Vulkan variant) the Vulkan SDK.
 1. The CPAL callback downmixes a device frame and uses a bounded, non-blocking
    queue.
 2. A recorder worker appends the lossless capture, incrementally resamples it,
-   and queues 20 ms PCM frames for the sidecar writer.
-3. Silero VAD commits segments after 500 ms of silence or a 15 second forced
-   split. Rolling six-second previews run no more than once per second and
-   throttle or suspend under backlog.
+   and queues 20 ms PCM frames for the sidecar writer. Every hop feeds the same
+   dropped-frame counter.
+3. Inside `atmospeak-asr-host`, a reader thread only parses stdin. An inference
+   worker owns the session: Silero VAD runs on the trailing three seconds of the
+   uncommitted chunk (every ~100 ms of fresh audio), commits after 500 ms of
+   silence or a 15 second forced split, and runs rolling six-second previews at
+   most once per second — and only while the audio queue is idle.
 4. Stable chunks are reconciled with their 500 ms overlap. Dictionary and
    snippet context is prompt-only during streaming.
-5. Stop detaches capture before acknowledging the shortcut, flushes only the
-   uncommitted tail, runs cleanup/snippet expansion once, and pastes once.
-6. Any streaming failure leaves the full local recording available to the
-   legacy batch path; an incomplete streaming hypothesis is never pasted.
+5. Stop detaches capture before acknowledging the shortcut, flushes the writer,
+   and sends `StopSession` immediately so the host finalizes the uncommitted
+   tail while WAV teardown runs in parallel. Stop cancels pending preview work.
+   Cleanup/snippet expansion and the single paste run once after the final.
+6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop leaves
+   the full local recording available to the legacy batch path, which prefers
+   the lazy resident `whisper-server` over a cold one-shot `whisper-cli`. An
+   incomplete streaming hypothesis is never pasted.
 
 IPC is versioned, length-prefixed MessagePack over stdin/stdout. Protocol
 frames are capped at 1 MiB; stdout is protocol-only and logs go to stderr.
-The protocol types live in `src-asr-protocol`.
+The protocol types live in `src-asr-protocol`. The reader/worker split is
+internal to the sidecar and does not bump the protocol version.
