@@ -14,10 +14,18 @@ $Package = Get-Content (Join-Path $Root "package.json") -Raw | ConvertFrom-Json
 $Version = [string]$Package.version
 $ReleaseDir = Join-Path $Root "release"
 $StageDir = Join-Path $ReleaseDir "portable-stage"
-$BundleRoot = Join-Path $Root "src-tauri\target\release\bundle"
-$ReleaseExe = Join-Path $Root "src-tauri\target\release\atmospeak.exe"
-$SidecarExe = Join-Path $Root "src-tauri\target\release\whisper-cli.exe"
-$ResourcesDir = Join-Path $Root "src-tauri\target\release\resources"
+# Honor CARGO_TARGET_DIR (Cursor sandboxes redirect here). Without this, the
+# script packages stale installers from src-tauri/target while the real build
+# landed elsewhere.
+$CargoTargetRoot = if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+  Join-Path $env:CARGO_TARGET_DIR "release"
+} else {
+  Join-Path $Root "src-tauri\target\release"
+}
+$BundleRoot = Join-Path $CargoTargetRoot "bundle"
+$ReleaseExe = Join-Path $CargoTargetRoot "atmospeak.exe"
+$SidecarExe = Join-Path $CargoTargetRoot "whisper-cli.exe"
+$ResourcesDir = Join-Path $CargoTargetRoot "resources"
 $DefaultKey = Join-Path $env:USERPROFILE ".tauri\atmospeak\updater.key"
 $CargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $TauriCli = Join-Path $Root "node_modules\.bin\tauri.exe"
@@ -143,10 +151,16 @@ if (-not (Test-Path $BundleRoot)) {
   throw "Missing bundle output: $BundleRoot"
 }
 
-$NsisSource = Get-ChildItem (Join-Path $BundleRoot "nsis") -Filter "*.exe" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$MsiSource = Get-ChildItem (Join-Path $BundleRoot "msi") -Filter "*.msi" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $NsisSource) { throw "NSIS installer was not produced." }
-if (-not $MsiSource) { throw "MSI installer was not produced." }
+$NsisSource = Get-ChildItem (Join-Path $BundleRoot "nsis") -Filter "*$Version*.exe" -File |
+  Where-Object { $_.Name -notlike "*.sig" } |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+$MsiSource = Get-ChildItem (Join-Path $BundleRoot "msi") -Filter "*$Version*.msi" -File |
+  Where-Object { $_.Name -notlike "*.sig" } |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+if (-not $NsisSource) { throw "NSIS installer for version $Version was not produced under $BundleRoot\nsis." }
+if (-not $MsiSource) { throw "MSI installer for version $Version was not produced under $BundleRoot\msi." }
 
 $NsisName = "atmospeak_$Version`_x64-setup.exe"
 $MsiName = "atmospeak_$Version`_x64_en-US.msi"
