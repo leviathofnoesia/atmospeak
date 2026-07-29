@@ -17,7 +17,8 @@ use commands::{
     mic_check_stop, open_windows_sound_settings, register_setup_shortcut, reset_overlay_position,
     save_overlay_position, save_settings, set_shortcut_test_active, set_shortcuts_paused,
     show_main_window, show_overlay_window, start_recording, start_shortcut_capture,
-    start_sound_check, stop_recording, upsert_dictionary_entry, upsert_snippet,
+    start_sound_check, stop_recording, streaming_asr_available, upsert_dictionary_entry,
+    upsert_snippet,
 };
 use services::{
     app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, streaming_asr,
@@ -73,6 +74,10 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
     std::thread::Builder::new()
         .name("atmospeak-streaming-asr-warmup".into())
         .spawn(move || {
+            // Publish the lazy batch host before the multi-second streaming
+            // model load so sound-check and fallbacks do not report
+            // backend_unavailable while the sidecar is still warming.
+            publish_lazy_asr_host(&app);
             let Ok(mut settings) = app.state::<AppState>().database.lock().load_settings() else {
                 start_asr_host(&app);
                 return;
@@ -405,6 +410,7 @@ pub fn run() {
             cancel_shortcut_capture,
             save_overlay_position,
             get_runtime_events,
+            streaming_asr_available,
             get_last_stage_metrics,
             start_recording,
             stop_recording,

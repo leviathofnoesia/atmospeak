@@ -158,14 +158,73 @@ impl RecorderService {
             let (sample_rate, samples, duration_ms) = load_fixture_samples(&path)?;
             let id = Uuid::new_v4().to_string();
             let started_at = Utc::now();
+            let recording_path = self.recordings_dir.join(format!("{id}.wav"));
+            let samples_arc = Arc::new(Mutex::new(Vec::<f32>::new()));
+            let streaming = streaming_start.and_then(|start| {
+                match start
+                    .host
+                    .start_session(id.clone(), start.prompt, start.profile)
+                {
+                    Ok(()) => {
+                        // Let the sidecar apply StartSession before fixture frames arrive.
+                        thread::sleep(Duration::from_millis(200));
+                        match start_streaming_worker(
+                        start.host.clone(),
+                        id.clone(),
+                        samples_arc.clone(),
+                        recording_path.clone(),
+                    ) {
+                        Ok(mut streaming) => {
+                            if let Some(sender) = streaming.sender.clone() {
+                                let feed_rate = sample_rate;
+                                let feed_samples = samples.clone();
+                                thread::Builder::new()
+                                    .name("atmospeak-fixture-feed".into())
+                                    .spawn(move || {
+                                        if let Err(error) = feed_fixture_through_sender(
+                                            &sender,
+                                            feed_rate,
+                                            &feed_samples,
+                                        ) {
+                                            eprintln!(
+                                                "fixture streaming feed failed: {error}"
+                                            );
+                                        }
+                                    })
+                                    .ok();
+                            }
+                            // Keep the sender alive until stop, matching live capture.
+                            Some(streaming)
+                        }
+                        Err(error) => {
+                            start.host.cancel_session(&id);
+                            eprintln!(
+                                "fixture streaming worker unavailable, retaining batch fallback: {error}"
+                            );
+                            None
+                        }
+                    }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "fixture streaming session unavailable, retaining batch fallback: {error}"
+                        );
+                        None
+                    }
+                }
+            });
+            if streaming.is_none() {
+                // Preserve samples for batch fallback when streaming did not attach.
+                *samples_arc.lock() = samples;
+            }
             *active = Some(ActiveRecording {
                 id: id.clone(),
                 started_instant: Instant::now(),
                 sample_rate,
-                samples: Arc::new(Mutex::new(samples)),
+                samples: samples_arc,
                 duration_override_ms: Some(duration_ms),
                 _stream: None,
-                streaming: None,
+                streaming,
             });
             return Ok(RecordingStarted {
                 id,
@@ -518,6 +577,47 @@ const HARNESS_MICROPHONE_NAME: &str = "Atmospeak Test Audio Fixture";
 
 fn harness_microphone_name() -> &'static str {
     HARNESS_MICROPHONE_NAME
+}
+
+fn feed_fixture_through_sender(
+    sender: &StreamingFrameSender,
+    sample_rate: u32,
+    samples: &[f32],
+) -> Result<()> {
+    // Pace fixture frames at the live ~20 ms cadence so the sidecar does not
+    // accumulate a multi-second inference backlog before StopSession.
+    let frame_samples = (sample_rate as usize / 50).max(1);
+    let frame_duration = Duration::from_millis(20);
+    for chunk in samples.chunks(frame_samples) {
+        let frame_started = Instant::now();
+        let frame = InputFrame {
+            sample_rate,
+            samples: chunk.to_vec(),
+        };
+        sender
+            .fallback_samples
+            .lock()
+            .extend_from_slice(&frame.samples);
+        match sender.tx.try_send(frame) {
+            Ok(()) => {}
+            Err(TrySendError::Full(frame)) => {
+                sender.dropped.fetch_add(1, Ordering::Relaxed);
+                sender
+                    .tx
+                    .send(frame)
+                    .map_err(|_| anyhow!("fixture streaming worker exited while feeding audio"))?;
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                sender.dropped.fetch_add(1, Ordering::Relaxed);
+                return Err(anyhow!("fixture streaming worker exited while feeding audio"));
+            }
+        }
+        let elapsed = frame_started.elapsed();
+        if elapsed < frame_duration {
+            thread::sleep(frame_duration - elapsed);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(debug_assertions)]

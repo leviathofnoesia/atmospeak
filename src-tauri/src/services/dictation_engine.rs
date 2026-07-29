@@ -677,15 +677,11 @@ impl Worker {
             )
             .collect::<Vec<_>>()
             .join(", ");
-        let streaming = settings
-            .live_preview_enabled
-            .then(|| state.streaming_asr())
-            .flatten()
-            .map(|host| recorder::StreamingStart {
-                host,
-                prompt,
-                profile: settings.transcription_profile,
-            });
+        let streaming = state.streaming_asr().map(|host| recorder::StreamingStart {
+            host,
+            prompt,
+            profile: settings.transcription_profile,
+        });
         let started = state
             .recorder
             .start(settings.microphone_name, streaming)
@@ -832,6 +828,14 @@ impl Worker {
                             )
                         });
                         host.cancel_session(&finished.id);
+                        transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
+                    } else if finished.duration_ms <= 5_000 && host.first_partial_ms().is_none() {
+                        // Short utterances with no streaming commits decode
+                        // faster on the warm resident batch host than a
+                        // full-utterance streaming finalize on CPU.
+                        host.cancel_session(&finished.id);
+                        processed_during_recording_ms = 0;
+                        tail_audio_ms = finished.duration_ms;
                         transcriber::transcribe(&app, &snapshot.settings, &finished.path)?
                     } else {
                         match host.await_final(&finished.id, Duration::from_secs(120)) {

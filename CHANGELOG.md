@@ -1,5 +1,37 @@
 # Changelog
 
+# 0.5.2 — Release-to-paste speed (2026-07-29)
+
+### Changed
+
+- Made release→paste the product focus: clipboard restore no longer blocks the
+  inject critical path, focus restore uses `AttachThreadInput`, and short clips
+  without streaming commits prefer the warm resident host over a slow
+  full-utterance streaming finalize on CPU.
+- Streaming ASR now commits more aggressively (2 s force-split, 300 ms silence),
+  drains smaller audio batches so VAD can run, and skips dock previews while the
+  decode backlog is high so `StopSession` is not stuck behind UI candy.
+- Streaming is always used for capture when the sidecar is available; the live
+  preview setting no longer disables the streaming hot path.
+- Native harness fixtures feed the streaming sidecar in real time and assert
+  hard latency SLOs (`bun run validation:native-ptt`,
+  `bun run validation:paste-latency`).
+
+### Fixed
+
+- Published the lazy batch ASR host before the multi-second streaming warmup so
+  sound-check no longer reports `backend_unavailable` during sidecar load.
+- Restored paste-target focus more reliably under automation and multi-window
+  focus contention.
+
+### Measured (native harness, warm `base.en`, ~3.2 s fixture)
+
+| Metric | Before (v0.5.1 feel) | After (v0.5.2 gate) |
+|--------|----------------------|---------------------|
+| Release → paste (`totalMs`) | ~10 s user-reported | **1905 ms** (budget ≤2000) |
+| Inject visible (`injectMs`) | inflated by +350 ms restore | **54 ms** (budget ≤150) |
+| Paste-only wall (`pasteVisibleMs`) | n/a | **89 ms** (budget ≤300) |
+
 # 0.5.1 — Streaming recovery (2026-07-28)
 
 ### Fixed

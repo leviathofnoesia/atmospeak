@@ -34,7 +34,7 @@ $form.Add_Activated({
 $form.Add_Shown({
   $form.Activate()
   $editor.Focus() | Out-Null
-  [System.IO.File]::WriteAllText($ReadyPath, "ready", $encoding)
+  [System.IO.File]::WriteAllText($ReadyPath, $form.Handle.ToInt64().ToString(), $encoding)
 })
 
 [System.Windows.Forms.Application]::Run($form)

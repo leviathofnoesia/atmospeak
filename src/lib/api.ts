@@ -231,14 +231,25 @@ export function cancelRecording(): Promise<void> {
   return command("cancel_recording", undefined, () => undefined);
 }
 
-export function injectText(text: string): Promise<InjectionResult> {
-  return command("inject_text", { text }, () => ({
-    injected: text.trim().length > 0,
-    restoredClipboard: mockSnapshot.settings.restoreClipboard,
-    restoredTarget: false,
-    targetProcessName: null,
-    message: "Mock transcript copied to the focused application.",
-  }));
+export function injectText(
+  text: string,
+  targetHwnd?: number | string | null,
+): Promise<InjectionResult> {
+  return command(
+    "inject_text",
+    {
+      text,
+      targetHwnd:
+        targetHwnd === undefined || targetHwnd === null ? null : String(targetHwnd),
+    },
+    () => ({
+      injected: text.trim().length > 0,
+      restoredClipboard: mockSnapshot.settings.restoreClipboard,
+      restoredTarget: false,
+      targetProcessName: null,
+      message: "Mock transcript copied to the focused application.",
+    }),
+  );
 }
 
 export async function copyText(text: string): Promise<string> {

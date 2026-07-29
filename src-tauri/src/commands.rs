@@ -293,6 +293,11 @@ pub fn get_runtime_events(state: State<'_, AppState>) -> Vec<RuntimeEvent> {
 }
 
 #[tauri::command]
+pub fn streaming_asr_available(state: State<'_, AppState>) -> bool {
+    state.streaming_asr().is_some()
+}
+
+#[tauri::command]
 pub fn get_last_stage_metrics(state: State<'_, AppState>) -> Option<StageMetrics> {
     state.last_metrics()
 }
@@ -503,17 +508,32 @@ pub fn reset_overlay_position(app: AppHandle) -> CommandResult<()> {
 }
 
 #[tauri::command]
-pub fn inject_text(state: State<'_, AppState>, text: String) -> CommandResult<InjectionResult> {
+pub fn inject_text(
+    state: State<'_, AppState>,
+    text: String,
+    // Optional HWND as a decimal string so 64-bit handles survive JSON/JS Number.
+    target_hwnd: Option<String>,
+) -> CommandResult<InjectionResult> {
     let settings = state
         .database
         .lock()
         .load_settings()
         .map_err(|e| e.to_string())?;
-    let preferred = state
-        .last_target_window()
+    let preferred = target_hwnd
+        .as_deref()
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .filter(|hwnd| *hwnd != 0)
         .map(|hwnd| injection::InjectionTarget {
-            hwnd,
-            process_name: injection::process_name_for(hwnd),
+            hwnd: hwnd as isize,
+            process_name: injection::process_name_for(hwnd as isize),
+        })
+        .or_else(|| {
+            state
+                .last_target_window()
+                .map(|hwnd| injection::InjectionTarget {
+                    hwnd,
+                    process_name: injection::process_name_for(hwnd),
+                })
         });
     injection::inject_text(&text, settings.restore_clipboard, preferred).map_err(|e| e.to_string())
 }

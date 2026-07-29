@@ -1,12 +1,9 @@
 param(
-  [string]$AppExe = "",
-  [string]$FixturePath = "",
-  [string]$Hotkey = "Ctrl+Alt+F12"
+  [string]$AppExe = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$GeneratedFixture = $false
 
 function Stop-ProcessTree {
   param([int]$RootProcessId)
@@ -27,25 +24,6 @@ if (-not (Test-Path -LiteralPath $AppExe)) {
   throw "Atmospeak debug executable not found: $AppExe"
 }
 
-if ([string]::IsNullOrWhiteSpace($FixturePath)) {
-  $FixturePath = Join-Path $env:TEMP "atmospeak-ptt-fixture.wav"
-  $GeneratedFixture = $true
-  Add-Type -AssemblyName System.Speech
-  $voice = New-Object System.Speech.Synthesis.SpeechSynthesizer
-  try {
-    $voice.Rate = -1
-    $voice.Volume = 60
-    $voice.SetOutputToWaveFile($FixturePath)
-    $voice.Speak("The porcelain moon hums over the studio.")
-  }
-  finally {
-    $voice.Dispose()
-  }
-}
-if (-not (Test-Path -LiteralPath $FixturePath)) {
-  throw "Push-to-talk audio fixture not found: $FixturePath"
-}
-
 $listener = [System.Net.Sockets.TcpListener]::new(
   [System.Net.IPAddress]::Loopback,
   0
@@ -54,14 +32,12 @@ $listener.Start()
 $Port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
 $listener.Stop()
 $ProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) (
-  "atmospeak-native-ptt-{0}" -f [Guid]::NewGuid().ToString("N")
+  "atmospeak-native-paste-{0}" -f [Guid]::NewGuid().ToString("N")
 )
 
 $PreviousProfile = $env:ATMOSPEAK_APP_DATA_DIR
 $PreviousDebugPort = $env:ATMOSPEAK_WEBVIEW_DEBUG_PORT
 $PreviousHarness = $env:ATMOSPEAK_NATIVE_HARNESS
-$PreviousFixture = $env:ATMOSPEAK_TEST_AUDIO_FIXTURE
-$PreviousAsrBackend = $env:ATMOSPEAK_ASR_BACKEND
 $Process = $null
 $DevServer = $null
 try {
@@ -96,19 +72,15 @@ try {
   $env:ATMOSPEAK_APP_DATA_DIR = $ProfileDir
   $env:ATMOSPEAK_WEBVIEW_DEBUG_PORT = "$Port"
   $env:ATMOSPEAK_NATIVE_HARNESS = "1"
-  # Latency gate requires the rebuilt streaming sidecar; prefer CPU so a stale
-  # Vulkan binary cannot silently miss finalize-path speed fixes.
-  $env:ATMOSPEAK_ASR_BACKEND = "cpu"
-  $env:ATMOSPEAK_TEST_AUDIO_FIXTURE = (Resolve-Path -LiteralPath $FixturePath).Path
   $Process = Start-Process -FilePath $AppExe -PassThru
   Start-Sleep -Seconds 1
   if ($Process.HasExited) {
     throw "Atmospeak exited before WebView2 opened (code $($Process.ExitCode))."
   }
 
-  & node (Join-Path $PSScriptRoot "native-push-to-talk-harness.mjs") "--port=$Port" "--hotkey=$Hotkey"
+  & node (Join-Path $PSScriptRoot "native-paste-latency-harness.mjs") "--port=$Port"
   if ($LASTEXITCODE -ne 0) {
-    throw "Native push-to-talk harness failed with code $LASTEXITCODE."
+    throw "Native paste-latency harness failed with code $LASTEXITCODE."
   }
 }
 finally {
@@ -138,22 +110,7 @@ finally {
   else {
     $env:ATMOSPEAK_NATIVE_HARNESS = $PreviousHarness
   }
-  if ($null -eq $PreviousFixture) {
-    Remove-Item Env:ATMOSPEAK_TEST_AUDIO_FIXTURE -ErrorAction SilentlyContinue
-  }
-  else {
-    $env:ATMOSPEAK_TEST_AUDIO_FIXTURE = $PreviousFixture
-  }
-  if ($null -eq $PreviousAsrBackend) {
-    Remove-Item Env:ATMOSPEAK_ASR_BACKEND -ErrorAction SilentlyContinue
-  }
-  else {
-    $env:ATMOSPEAK_ASR_BACKEND = $PreviousAsrBackend
-  }
   if (Test-Path -LiteralPath $ProfileDir) {
     Remove-Item -LiteralPath $ProfileDir -Recurse -Force
-  }
-  if ($GeneratedFixture -and (Test-Path -LiteralPath $FixturePath)) {
-    Remove-Item -LiteralPath $FixturePath -Force
   }
 }

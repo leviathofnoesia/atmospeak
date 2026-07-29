@@ -22,15 +22,18 @@ use crate::inference::{
 const PREVIEW_INTERVAL: Duration = Duration::from_secs(1);
 const PREVIEW_SAMPLES: usize = SAMPLE_RATE * 6;
 const MIN_SPEECH_SAMPLES: usize = SAMPLE_RATE / 4;
-const SILENCE_SAMPLES: usize = SAMPLE_RATE / 2;
-const FORCE_SPLIT_SAMPLES: usize = SAMPLE_RATE * 15;
+/// Mid-utterance commit after this much trailing silence (was 500 ms).
+const SILENCE_SAMPLES: usize = SAMPLE_RATE * 3 / 10;
+/// Force-commit long uncommitted tails so stop only decodes a short remainder.
+const FORCE_SPLIT_SAMPLES: usize = SAMPLE_RATE * 2;
 const OVERLAP_SAMPLES: usize = SAMPLE_RATE / 2;
 const VAD_CHECK_SAMPLES: usize = SAMPLE_RATE / 10;
 const VAD_CADENCE: Duration = Duration::from_millis(100);
 const VAD_MODEL_FILENAME: &str = "ggml-silero-v6.2.0.bin";
 /// Audio frames appended per worker pass — bounds how long appends can delay a
-/// pending control command.
-const AUDIO_DRAIN_BATCH: usize = 250;
+/// pending control command. Keep this small enough that VAD still runs about
+/// every half-second while audio is flowing (~20 ms frames).
+const AUDIO_DRAIN_BATCH: usize = 25;
 
 pub struct AudioFrameMsg {
     pub session_id: String,
@@ -177,10 +180,9 @@ pub fn run_worker(
                 session = Some(active);
                 continue;
             }
-            // Previews are best-effort UI candy: only while fully caught up.
-            // try_recv both peeks and consumes — if a frame is waiting, fold it
-            // in and skip the preview this pass.
-            if preview_due(active) {
+            // Previews are best-effort UI candy: only while fully caught up and
+            // never when StopSession work should stay ahead of dock polish.
+            if preview_due(active) && active.max_backlog_ms <= 500 {
                 match audio_rx.try_recv() {
                     Ok(frame) => {
                         append_frame(&mut session, frame, output)?;
@@ -197,6 +199,10 @@ pub fn run_worker(
                         continue;
                     }
                     Err(TryRecvError::Disconnected) => {}
+                }
+            } else if preview_due(active) {
+                if let Some(active) = session.as_mut() {
+                    active.last_preview = Instant::now();
                 }
             }
         }
@@ -432,12 +438,18 @@ fn run_vad_pass(
         )?;
     }
     let chunk_len = active.audio.len().saturating_sub(active.chunk_start);
+    // Prefer silence-boundary commits. Force-split only when the uncommitted
+    // tail is long enough that waiting for stop would decode a multi-second
+    // chunk; keep the threshold modest so StopSession rarely waits on a
+    // multi-second in-flight commit.
     let finalize = chunk_len >= FORCE_SPLIT_SAMPLES
         || last_speech_end.is_some_and(|end| {
             end.saturating_sub(active.chunk_start) >= MIN_SPEECH_SAMPLES
                 && active.audio.len().saturating_sub(end) >= SILENCE_SAMPLES
         });
     if finalize {
+        // Re-check stop before starting a multi-hundred-ms decode so
+        // StopSession is not stuck behind a force-split commit.
         finalize_chunk(model_mut, active, output)?;
     }
     Ok(())
@@ -457,16 +469,10 @@ fn finalize_stopped_session(
     };
     let finalize_started = Instant::now();
     let tail_audio_ms = samples_to_ms(active.audio.len().saturating_sub(active.chunk_start));
-    let tail_has_speech = if active.audio.len() > active.chunk_start {
-        let window_start = vad_window_start(active.chunk_start, active.audio.len());
-        let model = model
-            .as_mut()
-            .ok_or_else(|| anyhow!("model is not loaded"))?;
-        inference::vad_last_speech_end(&mut model.vad, &active.audio[window_start..])?.is_some()
-    } else {
-        false
-    };
-    if tail_has_speech && active.audio.len() > active.chunk_start + SAMPLE_RATE / 10 {
+    // Always decode a meaningful uncommitted tail on stop. Skipping when VAD
+    // misses speech (common with short fixture / TTS clips) left `committed`
+    // empty and forced a multi-second batch fallback on the critical path.
+    if active.audio.len() > active.chunk_start + SAMPLE_RATE / 10 {
         finalize_chunk(model_slot_ref(model)?, &mut active, output)?;
     }
     let audio_ms = samples_to_ms(active.total_samples_received as usize);

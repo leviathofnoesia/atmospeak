@@ -10,7 +10,9 @@ param(
 
   [string]$FocusProcessName = "",
 
-  [string]$FocusWindowTitle = ""
+  [string]$FocusWindowTitle = "",
+
+  [Int64]$FocusHwnd = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -78,7 +80,10 @@ foreach ($digit in 0..9) {
 
 $focusProcess = $null
 $focusWindow = [IntPtr]::Zero
-if (-not [string]::IsNullOrWhiteSpace($FocusWindowTitle)) {
+if ($FocusHwnd -ne 0) {
+  $focusWindow = [IntPtr]::new($FocusHwnd)
+}
+elseif (-not [string]::IsNullOrWhiteSpace($FocusWindowTitle)) {
   $deadline = (Get-Date).AddSeconds(10)
   do {
     $focusWindow = [AtmospeakNativeKeys]::FindWindow($null, $FocusWindowTitle)
@@ -132,7 +137,9 @@ if ($focusWindow -ne [IntPtr]::Zero) {
   [AtmospeakNativeKeys]::SetForegroundWindow($focusWindow) | Out-Null
   Start-Sleep -Milliseconds 150
   if ([AtmospeakNativeKeys]::GetForegroundWindow() -ne $focusWindow) {
-    throw "Could not focus the requested native window."
+    # Harnesses still need to deliver global hotkeys even when Windows refuses
+    # the foreground transfer (common under automation / multi-monitor focus).
+    Write-Output "focus-soft-fail"
   }
 }
 

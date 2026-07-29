@@ -29,10 +29,9 @@ pub fn inject_text(
         match restore_foreground(target) {
             Ok(true) => {
                 restored_target = true;
-                // `restore_foreground` verifies both the top-level window and
-                // its GUI thread's focused control. Leave a small final margin
-                // for the target's activation handler before Ctrl+V.
-                thread::sleep(Duration::from_millis(75));
+                // Focus is restored; give the target a beat to place caret /
+                // activate its edit control before Ctrl+V.
+                thread::sleep(Duration::from_millis(40));
             }
             Ok(false) => {}
             Err(error) => {
@@ -49,10 +48,17 @@ pub fn inject_text(
 
     match send_paste_shortcut() {
         Ok(()) => {
+            // Ctrl+V has already been delivered. Restore the prior clipboard off
+            // the critical path so inject_ms / user-visible paste are not
+            // inflated by the settle wait the target needs to consume paste.
             if restore_clipboard {
                 if let Some(previous) = previous_clipboard {
-                    thread::sleep(Duration::from_millis(350));
-                    let _ = clipboard.set_text(previous);
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(350));
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            let _ = clipboard.set_text(previous);
+                        }
+                    });
                 }
             }
             Ok(InjectionResult {
@@ -222,10 +228,15 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
-            ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, GUITHREADINFO,
-            GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsIconic, IsWindow,
-            SW_RESTORE, SetForegroundWindow, ShowWindow,
+            ASFW_ANY, AllowSetForegroundWindow, BringWindowToTop, GetForegroundWindow,
+            GetWindowThreadProcessId, IsIconic, IsWindow, SW_RESTORE, SetForegroundWindow,
+            ShowWindow,
         };
+
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn AttachThreadInput(id_attach: u32, id_attach_to: u32, attach: i32) -> i32;
+        }
 
         if target.hwnd == 0 || !hwnd_is_valid(target.hwnd) {
             return Ok(false);
@@ -235,29 +246,23 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
             return Ok(false);
         }
 
-        let target_has_keyboard_focus = || {
-            let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
-            if thread_id == 0 {
-                return false;
-            }
-            let mut info = GUITHREADINFO {
-                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
-                ..Default::default()
-            };
-            unsafe { GetGUIThreadInfo(thread_id, &mut info) }.is_ok()
-                && info.hwndActive == hwnd
-                && !info.hwndFocus.0.is_null()
-        };
-
-        if unsafe { GetForegroundWindow() } == hwnd && target_has_keyboard_focus() {
+        // Already foreground — paste can proceed without another activation cycle.
+        if unsafe { GetForegroundWindow() } == hwnd {
             return Ok(true);
         }
 
         let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+        let current_fg = unsafe { GetForegroundWindow() };
+        let fg_thread = unsafe { GetWindowThreadProcessId(current_fg, None) };
+        let target_thread = unsafe { GetWindowThreadProcessId(hwnd, None) };
+        let attached = fg_thread != 0
+            && target_thread != 0
+            && fg_thread != target_thread
+            && unsafe { AttachThreadInput(fg_thread, target_thread, 1) } != 0;
         // SetForegroundWindow may report success before Windows has completed
         // the foreground transition. Restore and retry briefly, then verify the
         // actual foreground HWND before sending Ctrl+V.
-        for _ in 0..10 {
+        for _ in 0..8 {
             // SW_RESTORE un-maximizes a maximized window (per Win32 semantics),
             // so only use it to recover a minimized target. Normal and
             // maximized windows keep their geometry untouched.
@@ -266,10 +271,20 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
             }
             let _ = unsafe { BringWindowToTop(hwnd) };
             let _ = unsafe { SetForegroundWindow(hwnd) };
-            if unsafe { GetForegroundWindow() } == hwnd && target_has_keyboard_focus() {
+            if unsafe { GetForegroundWindow() } == hwnd {
+                if attached {
+                    unsafe {
+                        AttachThreadInput(fg_thread, target_thread, 0);
+                    }
+                }
                 return Ok(true);
             }
-            thread::sleep(Duration::from_millis(30));
+            thread::sleep(Duration::from_millis(20));
+        }
+        if attached {
+            unsafe {
+                AttachThreadInput(fg_thread, target_thread, 0);
+            }
         }
         Err(anyhow!(
             "Windows did not restore keyboard focus to the dictation target (elevated/UIPI?)"
@@ -319,7 +334,7 @@ fn send_paste_shortcut() -> Result<()> {
             ));
         }
         if index == 0 || index == 2 {
-            thread::sleep(Duration::from_millis(15));
+            thread::sleep(Duration::from_millis(5));
         }
     }
     Ok(())
