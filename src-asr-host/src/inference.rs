@@ -106,9 +106,17 @@ pub fn transcribe(
     params.set_initial_prompt(prompt);
     params.set_no_context(true);
     // Streaming chunks are short; single-segment + no timestamps cuts encoder
-    // and postprocess work that dominated ~200ms-tail finalize (~2s before).
-    params.set_single_segment(true);
-    params.set_no_timestamps(true);
+    // work on pure-fresh audio. With retained acoustic overlap we need real
+    // segment timestamps so confirmed_overlap_words can drop the re-emitted
+    // prefix — single_segment collapses overlap+fresh into one segment and
+    // leaves confirmed_overlap at 0 (duplicated words at chunk boundaries).
+    if leading_overlap_samples == 0 {
+        params.set_single_segment(true);
+        params.set_no_timestamps(true);
+    } else {
+        params.set_single_segment(false);
+        params.set_no_timestamps(false);
+    }
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_special(false);

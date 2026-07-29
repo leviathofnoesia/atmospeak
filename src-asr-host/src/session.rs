@@ -8,7 +8,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, RecvTimeoutError, TryRecvError},
-        Arc,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -123,6 +123,7 @@ pub fn run_worker(
     control_rx: Receiver<AsrCommand>,
     audio_rx: Receiver<AudioFrameMsg>,
     abort: Arc<AtomicBool>,
+    active_session_id: Arc<Mutex<Option<String>>>,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut model: Option<Model> = None;
@@ -140,6 +141,7 @@ pub fn run_worker(
                     &mut session,
                     &mut stop_requested,
                     &abort,
+                    &active_session_id,
                     output,
                 )? {
                     return Ok(());
@@ -183,7 +185,39 @@ pub fn run_worker(
             if drained > 0 {
                 continue;
             }
-            finalize_stopped_session(&mut model, &mut session, &abort, output)?;
+            // Honor CancelSession that raced ahead of finalize so we never
+            // emit Final for a session the client already canceled.
+            loop {
+                match control_rx.try_recv() {
+                    Ok(command) => {
+                        if handle_control(
+                            command,
+                            &mut model,
+                            &mut session,
+                            &mut stop_requested,
+                            &abort,
+                            &active_session_id,
+                            output,
+                        )? {
+                            return Ok(());
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return Ok(()),
+                }
+            }
+            if session.is_none() {
+                stop_requested = false;
+                abort.store(false, Ordering::Release);
+                continue;
+            }
+            finalize_stopped_session(
+                &mut model,
+                &mut session,
+                &abort,
+                &active_session_id,
+                output,
+            )?;
             stop_requested = false;
             continue;
         }
@@ -202,6 +236,7 @@ pub fn run_worker(
                             &mut session,
                             &mut stop_requested,
                             &abort,
+                            &active_session_id,
                             output,
                         )? {
                             return Ok(());
@@ -258,6 +293,12 @@ pub fn run_worker(
     }
 }
 
+fn publish_active_session(active_session_id: &Arc<Mutex<Option<String>>>, id: Option<String>) {
+    if let Ok(mut guard) = active_session_id.lock() {
+        *guard = id;
+    }
+}
+
 /// Ok(true) means the worker should exit.
 fn handle_control(
     command: AsrCommand,
@@ -265,6 +306,7 @@ fn handle_control(
     session: &mut Option<Session>,
     stop_requested: &mut bool,
     abort: &Arc<AtomicBool>,
+    active_session_id: &Arc<Mutex<Option<String>>>,
     output: &mut impl Write,
 ) -> Result<bool> {
     match command {
@@ -312,6 +354,7 @@ fn handle_control(
                 return Ok(false);
             }
             abort.store(false, Ordering::Release);
+            publish_active_session(active_session_id, Some(session_id.clone()));
             *session = Some(Session::new(session_id, language, initial_prompt, profile));
             *stop_requested = false;
         }
@@ -329,6 +372,9 @@ fn handle_control(
                 // behind a multi-second force-split commit.
                 abort.store(true, Ordering::Release);
             } else {
+                // Reader only aborts for the published active id; clear any
+                // stale flag if a mismatched stop raced the publish update.
+                abort.store(false, Ordering::Release);
                 write_error(output, Some(session_id), "session is not active", true)?;
             }
         }
@@ -339,7 +385,10 @@ fn handle_control(
             {
                 *session = None;
                 *stop_requested = false;
+                publish_active_session(active_session_id, None);
                 abort.store(true, Ordering::Release);
+            } else {
+                abort.store(false, Ordering::Release);
             }
         }
         AsrCommand::Shutdown => return Ok(true),
@@ -511,12 +560,14 @@ fn finalize_stopped_session(
     model: &mut Option<Model>,
     session: &mut Option<Session>,
     abort: &Arc<AtomicBool>,
+    active_session_id: &Arc<Mutex<Option<String>>>,
     output: &mut impl Write,
 ) -> Result<()> {
-    let Some(mut active) = session.take() else {
+    let Some(active) = session.as_mut() else {
         return Ok(());
     };
-    // Allow the stop-path tail decode after any in-flight commit was aborted.
+    // Keep the active session id published so CancelSession during this decode
+    // can still set abort from the reader thread.
     abort.store(false, Ordering::Release);
     let finalize_started = Instant::now();
     let tail_audio_ms = samples_to_ms(active.audio.len().saturating_sub(active.chunk_start));
@@ -526,44 +577,61 @@ fn finalize_stopped_session(
     // Skip decoding a near-silent stop tail — whisper often invents a stray
     // token on padded silence, and the commit already holds the utterance.
     if active.audio.len() > active.chunk_start + SAMPLE_RATE / 10 {
-        let tail = &active.audio[active.chunk_start..];
-        // Scan the full uncommitted tail. A prefix-only window misses speech that
-        // arrives after a long silent stretch when VAD never advanced chunk_start.
-        let speechy = inference::vad_last_speech_end(&mut model_slot_mut(model)?.vad, tail)?
-            .is_some();
+        let speechy = {
+            let model_mut = model_slot_mut(model)?;
+            let tail = &active.audio[active.chunk_start..];
+            // Scan the full uncommitted tail. A prefix-only window misses speech
+            // that arrives after a long silent stretch when VAD never advanced
+            // chunk_start.
+            inference::vad_last_speech_end(&mut model_mut.vad, tail)?.is_some()
+        };
         if speechy {
-            finalize_chunk(model_slot_mut(model)?, &mut active, output)?;
+            finalize_chunk(model_slot_mut(model)?, active, output)?;
         }
+    }
+    if abort.load(Ordering::Acquire) {
+        // Cancelled while finalizing — do not emit Final/Metrics.
+        *session = None;
+        publish_active_session(active_session_id, None);
+        abort.store(false, Ordering::Release);
+        return Ok(());
     }
     let audio_ms = samples_to_ms(active.total_samples_received as usize);
     let processed_during_recording_ms = audio_ms.saturating_sub(tail_audio_ms);
+    let session_id = active.id.clone();
+    let first_partial_ms = active.first_partial_ms;
+    let max_backlog_ms = active.max_backlog_ms;
+    let audio_frames_dropped = active.audio_frames_dropped;
+    let committed = active.committed.trim().to_string();
     let loaded = model_slot_mut(model)?;
     write_event(
         output,
         &AsrEvent::Metrics(atmospeak_asr_protocol::StreamingMetrics {
-            session_id: active.id.clone(),
+            session_id: session_id.clone(),
             backend: loaded.backend,
             model_id: loaded.model_id.clone(),
-            first_partial_ms: active.first_partial_ms,
+            first_partial_ms,
             stop_ack_ms: 0,
             finalize_ms: finalize_started.elapsed().as_millis() as u64,
             paste_ms: 0,
             processed_during_recording_ms,
             tail_audio_ms,
-            max_backlog_ms: active.max_backlog_ms,
-            audio_frames_dropped: active.audio_frames_dropped,
+            max_backlog_ms,
+            audio_frames_dropped,
             fallback_reason: None,
         }),
     )?;
     write_event(
         output,
         &AsrEvent::Final {
-            session_id: active.id.clone(),
-            text: active.committed.trim().to_string(),
+            session_id,
+            text: committed,
             processed_during_recording_ms,
             tail_audio_ms,
         },
     )?;
+    *session = None;
+    publish_active_session(active_session_id, None);
     eprintln!(
         "finalized streaming session in {}ms",
         finalize_started.elapsed().as_millis()
