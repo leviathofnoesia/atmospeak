@@ -26,6 +26,22 @@
 
 ### Measured (native harness, warm `base.en`, ~3.2 s fixture)
 
+```mermaid
+xychart-beta
+    title "Release → paste (ms, lower is better)"
+    x-axis ["v0.5.1 feel", "v0.5.2 measured"]
+    y-axis "Milliseconds" 0 --> 11000
+    bar [10000, 1905]
+```
+
+```mermaid
+xychart-beta
+    title "Inject path (ms, lower is better)"
+    x-axis ["v0.5.1 measured+restore", "v0.5.2 injectMs"]
+    y-axis "Milliseconds" 0 --> 450
+    bar [400, 54]
+```
+
 | Metric | Before (v0.5.1 feel) | After (v0.5.2 gate) |
 |--------|----------------------|---------------------|
 | Release → paste (`totalMs`) | ~10 s user-reported | **1905 ms** (budget ≤2000) |

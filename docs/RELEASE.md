@@ -77,21 +77,35 @@ The script installs the NSIS build into a temp directory, checks the executable
 and bundled runtime/model resources, launches briefly, uninstalls silently, and
 verifies the executable is removed.
 
-## Native Push-to-Talk Gate
+## Native Latency Gates
 
-Before packaging, run the isolated Windows/WebView2 push-to-talk harness:
+Before packaging, run the isolated Windows/WebView2 harnesses:
 
 ```powershell
 bun run validation:native-ptt
+bun run validation:paste-latency
 ```
 
-The harness completes setup against a debug-only deterministic audio fixture,
-saves a non-preset `Ctrl+Alt+F12` shortcut through Settings, sends the native
-key-down/key-up sequence, and verifies that key release produces one resident
-host transcript, one injected database session, and exactly one paste into a
-real Windows text box. The fixture seam is unavailable in release builds.
+`validation:native-ptt` completes setup against a debug-only deterministic audio
+fixture, saves a non-preset `Ctrl+Alt+F12` shortcut through Settings, sends the
+native key-down/key-up sequence, and verifies that key release produces one
+transcript, one injected database session, exactly one paste into a real Windows
+text box, and that release→paste / inject stay within the v0.5.2 budgets
+(≤ 2000 ms / ≤ 150 ms on the warm porcelain-moon fixture).
 
-This repeatable automation protects the release-to-inject behavior, but it does
-not replace the human Elgato Wave:3 gates. Tests 001 and 005 must still pass
-with deliberate speech and be recorded in
-`tests/manual/production-run-log.md` before publication.
+`validation:paste-latency` gates paste-only wall clock (≤ 300 ms) without
+waiting on ASR.
+
+The fixture seam is unavailable in release builds. This automation protects the
+release-to-inject behavior, but it does not replace the human Elgato Wave:3
+gates. Tests 001 and 005 must still pass with deliberate speech and be recorded
+in `tests/manual/production-run-log.md` before publication.
+
+## Docs checklist
+
+For each public release, also update:
+
+- `README.md` download links and “What ships in …” section
+- `CHANGELOG.md` with measured before/after timings (charts when speed-focused)
+- `docs/releases/vX.Y.Z.md` used as the GitHub release notes body
+- `docs/streaming-asr.md` when session/commit behavior changes

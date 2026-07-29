@@ -10,27 +10,33 @@
 
 <p align="center">
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-setup.exe"><strong>Download v0.5.0</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-setup.exe"><strong>Download v0.5.2</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><strong>Release notes</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v0.5.2"><strong>Release notes</strong></a>
 </p>
 
 Atmospeak is a Windows desktop dictation app built around a local
 [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) runtime. It requires
 no account and sends no microphone audio to a transcription service.
 
-## What ships in 0.5.0
+## What ships in 0.5.2
 
-- **Streaming local transcription.** Atmospeak decodes bounded speech segments
-  while the microphone is still active, then reconciles only the remaining tail
-  after you stop.
+- **Faster release→paste.** Hotkey release to text-in-target is a hard native
+  gate again. Short warm clips prefer the resident host when streaming has not
+  already committed mid-utterance, so stop no longer waits on a full-clip
+  streaming finalize.
+- **Inject stays on the critical path.** Clipboard restore runs after Ctrl+V,
+  focus restore uses `AttachThreadInput`, and paste-only latency is gated
+  separately from ASR.
+- **Streaming stays hot.** Capture always uses the streaming sidecar when it is
+  available; commits are more aggressive; previews yield when backlog is high.
 - **Live dock preview, one final paste.** Partial and stable text stays inside
   the Atmospeak dock. The target application receives exactly one final paste.
 - **Vulkan acceleration with CPU fallback.** A crash-isolated ASR sidecar tries
@@ -51,15 +57,47 @@ no account and sends no microphone audio to a transcription service.
   backlog, dropped-frame counts, and fallback reasons are stored locally
   without dictated text or unrelated keystrokes.
 
+### Speed before / after
+
+Measured on a warm `base.en` CPU path with the porcelain-moon fixture
+(~3.2 s audio). “Before” is the v0.5.1 user-felt / restore-inflated path;
+“After” is the v0.5.2 native harness gate.
+
+```mermaid
+xychart-beta
+    title "Release → paste (ms, lower is better)"
+    x-axis ["v0.5.1 feel", "v0.5.2 measured"]
+    y-axis "Milliseconds" 0 --> 11000
+    bar [10000, 1905]
+```
+
+```mermaid
+xychart-beta
+    title "Inject path (ms, lower is better)"
+    x-axis ["v0.5.1 measured+restore", "v0.5.2 injectMs"]
+    y-axis "Milliseconds" 0 --> 450
+    bar [400, 54]
+```
+
+| Metric | Before | After (v0.5.2) | Gate |
+| --- | ---: | ---: | ---: |
+| Release → paste (`totalMs`) | ~10 000 ms | **1905 ms** | ≤ 2000 ms |
+| Inject (`injectMs`) | ~400 ms (incl. restore) | **54 ms** | ≤ 150 ms |
+| Paste-only wall (`pasteVisibleMs`) | n/a | **89 ms** | ≤ 300 ms |
+
+Stretch goal remains ≤ 1000 ms release→paste once mid-utterance streaming
+commits leave only a short stop-time tail (or Vulkan is available). See
+[`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
+
 ## Install
 
 Atmospeak currently supports **Windows 10/11 x64**.
 
 | Package | Use it when | Download |
 | --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_0.5.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_0.5.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_0.5.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.0_x64-portable.zip) |
+| Setup EXE | Recommended installation | [atmospeak_0.5.2_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_0.5.2_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_0.5.2_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_0.5.2_x64-portable.zip) |
 | Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/SHA256SUMS.txt) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
@@ -171,11 +209,12 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 The native push-to-talk harness exercises shortcut persistence, key-down,
-key-up, resident-host transcription, target restoration, and exactly one
-native paste:
+key-up, transcription, target restoration, exactly one native paste, and the
+release→paste / inject latency gates:
 
 ```powershell
 bun run validation:native-ptt
+bun run validation:paste-latency
 ```
 
 The deterministic audio seam exists only in debug builds. Release acceptance
@@ -191,8 +230,8 @@ push-to-talk (`005`), recorded in
   into the target application.
 - Live preview is local and appears only in the Atmospeak dock.
 - Latency depends on speech length, selected model, GPU/CPU performance, and
-  current ASR backlog. Atmospeak exposes measured timings rather than promising
-  a fixed latency on every machine.
+  current ASR backlog. v0.5.2 gates short warm fixtures; it does not promise a
+  fixed latency on every machine or utterance.
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
 
