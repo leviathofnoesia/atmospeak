@@ -30,6 +30,7 @@ function Write-EditorSnapshot {
     [System.IO.File]::WriteAllText($OutputPath, $editor.Text, $encoding)
   } catch {
     # Best-effort; the harness also polls. Never break the UI thread on IO races.
+    Write-Warning "Write-EditorSnapshot failed for '${OutputPath}': $($_.Exception.Message)"
   }
 }
 $editor.Add_TextChanged({ Write-EditorSnapshot })

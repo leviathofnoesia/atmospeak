@@ -10,14 +10,14 @@
 
 <p align="center">
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_1.0.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_1.0.0_x64-setup.exe"><strong>Download v1.0.0</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe"><strong>Download v1.0.0</strong></a>
   ·
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.0"><strong>Release notes</strong></a>
 </p>
@@ -33,8 +33,9 @@ of something paid — it is the finished free application, and everything below 
 unlimited and requires no account.
 
 - **Speak and paste.** Hold or tap your hotkey, watch the live preview in the
-  dock, and get exactly one paste into whatever application had focus. Short
-  warm clips are gated at under two seconds from key release to paste.
+  dock, and get exactly one paste into whatever application had focus. Warm
+  short clips target under two seconds from key release to paste (native
+  validation SLO; actual latency depends on machine and utterance).
 - **Local Whisper, your choice of model.** A bundled model works immediately;
   the downloader adds larger ones. Streaming ASR runs on Vulkan and falls back
   to CPU on its own.
@@ -62,10 +63,10 @@ Atmospeak currently supports **Windows 10/11 x64**.
 
 | Package | Use it when | Download |
 | --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_1.0.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_1.0.0_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_1.0.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_1.0.0_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_1.0.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/atmospeak_1.0.0_x64-portable.zip) |
-| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/latest/download/SHA256SUMS.txt) |
+| Setup EXE | Recommended installation | [atmospeak_1.0.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_1.0.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_1.0.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-portable.zip) |
+| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/SHA256SUMS.txt) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
 **Windows protected your PC**. Choose **More info**, verify the app name is

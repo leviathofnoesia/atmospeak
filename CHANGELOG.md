@@ -1,6 +1,6 @@
 # Changelog
 
-# 1.0.0 — The finished free product (2026-07-29)
+## 1.0.0 — The finished free product (2026-07-29)
 
 Atmospeak 1.0.0 is a stabilization and verification release. It ships no new
 features: it declares the 0.5.3 product surface complete, verified, and free.

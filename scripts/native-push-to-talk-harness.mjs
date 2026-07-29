@@ -372,12 +372,11 @@ try {
     });
   }
 
-  const expectedText = pasted.result.session.cleanedText.trim();
+  const expectedText = pasted.result?.session?.cleanedText?.trim() ?? "";
   let targetText = "";
-  // Poll for the transcript. Exact equality is wrong on a live desktop (stray
-  // keystrokes). An empty poll file is also not proof of failure — paste is
-  // async and the app's injection result is authoritative when it reports
-  // success with the expected cleaned transcript.
+  // Poll for the transcript while the target stays alive. Exact equality is
+  // wrong on a live desktop (stray keystrokes). Injection flags alone are not
+  // proof the paste landed — require the target file to contain the transcript.
   const saveDeadline = Date.now() + 8_000;
   while (Date.now() < saveDeadline) {
     try {
@@ -389,31 +388,16 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const targetSawTranscript = Boolean(expectedText && targetText.includes(expectedText));
-  const injectOk =
-    Boolean(pasted.result?.injection?.injected) &&
-    Boolean(pasted.result?.session?.injected) &&
-    expectedText === expectedPhrase;
-  if (!targetSawTranscript && !injectOk) {
+  if (!targetSawTranscript) {
     throw new Error(
       `Native paste was not confirmed: ${JSON.stringify({
         expectedText,
         targetText,
-        injection: pasted.result.injection,
+        injection: pasted.result?.injection ?? null,
       })}`,
     );
   }
-  if (!targetSawTranscript && injectOk) {
-    console.warn(
-      JSON.stringify({
-        warning: "target-file-observation-missed",
-        detail:
-          "Injection reported success with the expected transcript; target file poll stayed empty or noisy.",
-        expectedText,
-        targetText,
-      }),
-    );
-  }
-  if (!pasted.result.injection?.restoredTarget) {
+  if (!pasted.result?.injection?.restoredTarget) {
     console.warn(
       JSON.stringify({
         warning: "paste-target-restore-soft-fail",
