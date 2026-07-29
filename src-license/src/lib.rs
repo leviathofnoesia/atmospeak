@@ -111,20 +111,73 @@ impl Feature {
     }
 }
 
-/// A verified licence. Constructing one outside [`verify`] is not possible, so
-/// holding a `License` is proof that a valid signature was checked.
+/// A verified licence. Fields are private so only [`verify`] / [`verify_with`]
+/// and [`License::issue`] (minting) can construct one — callers outside this
+/// crate cannot forge a `License` by struct literal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct License {
-    pub key_id: u8,
-    pub license_id: u64,
-    pub tier: LicenseTier,
+    key_id: u8,
+    license_id: u64,
+    tier: LicenseTier,
     /// First 8 bytes of the SHA-256 of the purchaser's normalised address. Ties
     /// a key to a buyer for support purposes without ever storing the address.
-    pub email_hash: [u8; 8],
-    pub issued_at: NaiveDate,
+    email_hash: [u8; 8],
+    issued_at: NaiveDate,
     /// Last build release date this licence entitles the holder to run.
-    pub updates_until: NaiveDate,
-    pub seats: u8,
+    updates_until: NaiveDate,
+    seats: u8,
+}
+
+impl License {
+    /// Construct a licence for minting. The application path only obtains a
+    /// `License` through [`verify`].
+    pub fn issue(
+        key_id: u8,
+        license_id: u64,
+        tier: LicenseTier,
+        email_hash: [u8; 8],
+        issued_at: NaiveDate,
+        updates_until: NaiveDate,
+        seats: u8,
+    ) -> Self {
+        Self {
+            key_id,
+            license_id,
+            tier,
+            email_hash,
+            issued_at,
+            updates_until,
+            seats,
+        }
+    }
+
+    pub fn key_id(&self) -> u8 {
+        self.key_id
+    }
+
+    pub fn license_id(&self) -> u64 {
+        self.license_id
+    }
+
+    pub fn tier(&self) -> LicenseTier {
+        self.tier
+    }
+
+    pub fn email_hash(&self) -> [u8; 8] {
+        self.email_hash
+    }
+
+    pub fn issued_at(&self) -> NaiveDate {
+        self.issued_at
+    }
+
+    pub fn updates_until(&self) -> NaiveDate {
+        self.updates_until
+    }
+
+    pub fn seats(&self) -> u8 {
+        self.seats
+    }
 }
 
 /// What the running build is allowed to do. Always obtainable — the free
@@ -154,8 +207,8 @@ impl Entitlements {
     /// are both fixed at build and purchase time.
     pub fn for_license(license: &License, build_released_on: NaiveDate) -> Self {
         Self {
-            tier: license.tier,
-            in_update_window: build_released_on <= license.updates_until,
+            tier: license.tier(),
+            in_update_window: build_released_on <= license.updates_until(),
         }
     }
 
@@ -245,14 +298,14 @@ fn date_from_days(days: u32) -> Option<NaiveDate> {
 /// ever verifies.
 pub fn mint(license: &License, signing_key: &SigningKey) -> Result<String, LicenseError> {
     let payload = Payload {
-        key_id: license.key_id,
-        license_id: license.license_id,
-        tier: license.tier.to_wire(),
-        email_hash: license.email_hash,
-        issued_at_days: days_from_date(license.issued_at).ok_or(LicenseError::InvalidDate)?,
-        updates_until_days: days_from_date(license.updates_until)
+        key_id: license.key_id(),
+        license_id: license.license_id(),
+        tier: license.tier().to_wire(),
+        email_hash: license.email_hash(),
+        issued_at_days: days_from_date(license.issued_at()).ok_or(LicenseError::InvalidDate)?,
+        updates_until_days: days_from_date(license.updates_until())
             .ok_or(LicenseError::InvalidDate)?,
-        seats: license.seats,
+        seats: license.seats(),
     };
 
     let body = postcard::to_allocvec(&payload).map_err(|_| LicenseError::MalformedPayload)?;
@@ -365,15 +418,43 @@ mod tests {
     }
 
     fn sample(tier: LicenseTier) -> License {
-        License {
-            key_id: 1,
-            license_id: 4_242_424_242,
+        License::issue(
+            1,
+            4_242_424_242,
             tier,
-            email_hash: hash_email("Buyer@Example.COM "),
-            issued_at: date(2026, 7, 29),
-            updates_until: date(2027, 7, 29),
-            seats: 1,
-        }
+            hash_email("Buyer@Example.COM "),
+            date(2026, 7, 29),
+            date(2027, 7, 29),
+            1,
+        )
+    }
+
+    fn sample_with_key_id(tier: LicenseTier, key_id: u8) -> License {
+        License::issue(
+            key_id,
+            4_242_424_242,
+            tier,
+            hash_email("Buyer@Example.COM "),
+            date(2026, 7, 29),
+            date(2027, 7, 29),
+            1,
+        )
+    }
+
+    fn sample_with_dates(
+        tier: LicenseTier,
+        issued_at: NaiveDate,
+        updates_until: NaiveDate,
+    ) -> License {
+        License::issue(
+            1,
+            4_242_424_242,
+            tier,
+            hash_email("Buyer@Example.COM "),
+            issued_at,
+            updates_until,
+            1,
+        )
     }
 
     #[test]
@@ -456,8 +537,7 @@ mod tests {
     #[test]
     fn rejects_an_untrusted_key_id() {
         let (signing, public) = keypair();
-        let mut license = sample(LicenseTier::Pro);
-        license.key_id = 9;
+        let license = sample_with_key_id(LicenseTier::Pro, 9);
         let key = mint(&license, &signing).expect("mint succeeds");
 
         assert_eq!(
@@ -471,10 +551,8 @@ mod tests {
         let (old_signing, old_public) = keypair();
         let (new_signing, new_public) = keypair();
 
-        let mut old_license = sample(LicenseTier::Pro);
-        old_license.key_id = 1;
-        let mut new_license = sample(LicenseTier::Pro);
-        new_license.key_id = 2;
+        let old_license = sample_with_key_id(LicenseTier::Pro, 1);
+        let new_license = sample_with_key_id(LicenseTier::Pro, 2);
 
         let trusted = [(1, old_public), (2, new_public)];
         assert!(verify_with(&mint(&old_license, &old_signing).unwrap(), &trusted).is_ok());
@@ -608,14 +686,12 @@ mod tests {
     #[test]
     fn dates_survive_the_round_trip() {
         let (signing, public) = keypair();
-        let mut license = sample(LicenseTier::Pro);
-        license.issued_at = date(2028, 2, 29);
-        license.updates_until = date(2099, 12, 31);
+        let license = sample_with_dates(LicenseTier::Pro, date(2028, 2, 29), date(2099, 12, 31));
 
         let key = mint(&license, &signing).expect("mint succeeds");
         let verified = verify_with(&key, &[(1, public)]).expect("verify succeeds");
 
-        assert_eq!(verified.issued_at, date(2028, 2, 29));
-        assert_eq!(verified.updates_until, date(2099, 12, 31));
+        assert_eq!(verified.issued_at(), date(2028, 2, 29));
+        assert_eq!(verified.updates_until(), date(2099, 12, 31));
     }
 }

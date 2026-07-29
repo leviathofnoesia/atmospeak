@@ -125,10 +125,10 @@ pub fn status(state: &LicenseState) -> LicenseStatus {
         license_id: state
             .license
             .as_ref()
-            .map(|license| license.license_id.to_string()),
-        issued_at: state.license.as_ref().map(|license| license.issued_at),
-        updates_until: state.license.as_ref().map(|license| license.updates_until),
-        seats: state.license.as_ref().map_or(0, |license| license.seats),
+            .map(|license| license.license_id().to_string()),
+        issued_at: state.license.as_ref().map(|license| license.issued_at()),
+        updates_until: state.license.as_ref().map(|license| license.updates_until()),
+        seats: state.license.as_ref().map_or(0, |license| license.seats()),
         build_released_on: build_release_date(),
         features,
     }
@@ -191,15 +191,15 @@ mod tests {
 
     #[test]
     fn status_lists_the_features_a_pro_licence_unlocks() {
-        let license = License {
-            key_id: 1,
-            license_id: 42,
-            tier: LicenseTier::Pro,
-            email_hash: [0u8; 8],
-            issued_at: build_release_date(),
-            updates_until: build_release_date(),
-            seats: 1,
-        };
+        let license = License::issue(
+            1,
+            42,
+            LicenseTier::Pro,
+            [0u8; 8],
+            build_release_date(),
+            build_release_date(),
+            1,
+        );
         let state = LicenseState {
             entitlements: Entitlements::for_license(&license, build_release_date()),
             license: Some(license),
@@ -221,15 +221,7 @@ mod tests {
     #[test]
     fn an_out_of_window_build_reports_the_tier_but_no_features() {
         let issued = NaiveDate::from_ymd_opt(2020, 1, 1).expect("valid date");
-        let license = License {
-            key_id: 1,
-            license_id: 42,
-            tier: LicenseTier::Pro,
-            email_hash: [0u8; 8],
-            issued_at: issued,
-            updates_until: issued,
-            seats: 1,
-        };
+        let license = License::issue(1, 42, LicenseTier::Pro, [0u8; 8], issued, issued, 1);
         let state = LicenseState {
             entitlements: Entitlements::for_license(&license, build_release_date()),
             license: Some(license),

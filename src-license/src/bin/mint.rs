@@ -8,7 +8,7 @@
 //! Generate a keypair once:
 //!
 //! ```text
-//! cargo run --bin mint -- generate-keypair
+//! cargo run --bin mint -- generate-keypair --key-id 1
 //! ```
 //!
 //! Then mint:
@@ -30,7 +30,7 @@ const SIGNING_KEY_ENV: &str = "ATMOSPEAK_LICENSE_SIGNING_KEY";
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
-        Some("generate-keypair") => generate_keypair(),
+        Some("generate-keypair") => generate_keypair(&args[1..]),
         Some("issue") => issue(&args[1..]),
         _ => {
             eprintln!("{USAGE}");
@@ -51,14 +51,18 @@ const USAGE: &str = "\
 Atmospeak licence minting tool
 
 USAGE:
-  mint generate-keypair
+  mint generate-keypair [--key-id N]
   mint issue --email <address> [--tier pro|team] [--updates-until YYYY-MM-DD]
              [--seats N] [--key-id N] [--license-id N]
 
 The signing key is read from ATMOSPEAK_LICENSE_SIGNING_KEY (64 hex chars).
---updates-until defaults to one year from today.";
+--updates-until defaults to one year from today.
+--key-id defaults to 1 for issue; generate-keypair requires an explicit --key-id
+when rotating away from the first key.";
 
-fn generate_keypair() -> Result<(), String> {
+fn generate_keypair(args: &[String]) -> Result<(), String> {
+    reject_unknown_flags(args, &["--key-id"])?;
+    let key_id: u8 = parse_number(args, "--key-id", 1)?;
     let signing = SigningKey::generate(&mut OsRng);
     let public = signing.verifying_key().to_bytes();
 
@@ -66,12 +70,28 @@ fn generate_keypair() -> Result<(), String> {
     println!("  {}", to_hex(&signing.to_bytes()));
     println!();
     println!("Public key — paste into TRUSTED_PUBLIC_KEYS in src-license/src/lib.rs:");
-    println!("    (1, {public:?}),");
+    println!("    ({key_id}, {public:?}),");
+    println!();
+    println!(
+        "Use a unique key id when rotating. Duplicate ids make verify_with keep the first match."
+    );
 
     Ok(())
 }
 
 fn issue(args: &[String]) -> Result<(), String> {
+    reject_unknown_flags(
+        args,
+        &[
+            "--email",
+            "--tier",
+            "--updates-until",
+            "--seats",
+            "--key-id",
+            "--license-id",
+        ],
+    )?;
+
     let email = required(args, "--email")?;
     let tier = match optional(args, "--tier")
         .unwrap_or_else(|| "pro".to_string())
@@ -95,26 +115,51 @@ fn issue(args: &[String]) -> Result<(), String> {
         return Err("--updates-until is before today".to_string());
     }
 
-    let license = License {
-        key_id: parse_number(args, "--key-id", 1)?,
-        license_id: parse_number(args, "--license-id", random_license_id())?,
+    let license = License::issue(
+        parse_number(args, "--key-id", 1)?,
+        parse_number(args, "--license-id", random_license_id())?,
         tier,
-        email_hash: hash_email(&email),
+        hash_email(&email),
         issued_at,
         updates_until,
-        seats: parse_number(args, "--seats", 1)?,
-    };
+        parse_number(args, "--seats", 1)?,
+    );
 
     let key = mint(&license, &signing_key()?).map_err(|error| error.to_string())?;
 
-    println!("tier:          {}", license.tier.as_str());
-    println!("licence id:    {}", license.license_id);
-    println!("issued:        {}", license.issued_at);
-    println!("updates until: {}", license.updates_until);
-    println!("seats:         {}", license.seats);
+    println!("tier:          {}", license.tier().as_str());
+    println!("licence id:    {}", license.license_id());
+    println!("issued:        {}", license.issued_at());
+    println!("updates until: {}", license.updates_until());
+    println!("seats:         {}", license.seats());
     println!();
     println!("{key}");
 
+    Ok(())
+}
+
+fn reject_unknown_flags(args: &[String], allowed: &[&str]) -> Result<(), String> {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if !arg.starts_with('-') {
+            return Err(format!("unexpected argument '{arg}'"));
+        }
+        if !allowed.iter().any(|flag| *flag == arg.as_str()) {
+            return Err(format!(
+                "unknown flag '{arg}'. Allowed: {}",
+                allowed.join(", ")
+            ));
+        }
+        if index + 1 >= args.len() {
+            return Err(format!("{arg} requires a value"));
+        }
+        let value = &args[index + 1];
+        if value.starts_with('-') {
+            return Err(format!("{arg} requires a value"));
+        }
+        index += 2;
+    }
     Ok(())
 }
 

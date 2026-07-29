@@ -1,5 +1,5 @@
 import { WifiOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { activateLicense, deactivateLicense, getLicenseStatus } from "../lib/api";
 import type { LicenseFeature, LicenseStatus } from "../types/dictation";
 import { freeLicenseStatus } from "../types/dictation";
@@ -30,15 +30,31 @@ export function LicensePanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
+  // Ignore the mount-time status fetch once the user has activated/deactivated,
+  // so a late response cannot overwrite a fresher mutation result.
+  const mutatedRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
     void getLicenseStatus()
-      .then(setStatus)
-      .catch(() => setStatus(freeLicenseStatus()));
+      .then((next) => {
+        if (!cancelled && !mutatedRef.current) {
+          setStatus(next);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && !mutatedRef.current) {
+          setStatus(freeLicenseStatus());
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const onActivate = async () => {
     if (!keyDraft.trim()) return;
+    mutatedRef.current = true;
     setBusy(true);
     setMessage("");
     setFailed(false);
@@ -56,6 +72,7 @@ export function LicensePanel() {
   };
 
   const onDeactivate = async () => {
+    mutatedRef.current = true;
     setBusy(true);
     setMessage("");
     setFailed(false);

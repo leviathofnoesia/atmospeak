@@ -16,24 +16,62 @@ fn main() {
 fn embed_release_date() {
     println!("cargo:rerun-if-env-changed=ATMOSPEAK_RELEASE_DATE");
 
-    let date = std::env::var("ATMOSPEAK_RELEASE_DATE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| is_iso_date(value))
-        .unwrap_or_else(today);
+    let date = match std::env::var("ATMOSPEAK_RELEASE_DATE") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                today()
+            } else if let Some(valid) = parse_calendar_date(trimmed) {
+                valid
+            } else {
+                panic!(
+                    "ATMOSPEAK_RELEASE_DATE must be a real calendar date in YYYY-MM-DD form, got: {trimmed}"
+                );
+            }
+        }
+        Err(_) => today(),
+    };
 
     println!("cargo:rustc-env=ATMOSPEAK_RELEASE_DATE={date}");
 }
 
-fn is_iso_date(value: &str) -> bool {
+/// Accept only real Gregorian calendar dates (rejects `2026-99-99`).
+fn parse_calendar_date(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    {
+        return None;
+    }
+
+    let year: i32 = value[0..4].parse().ok()?;
+    let month: u32 = value[5..7].parse().ok()?;
+    let day: u32 = value[8..10].parse().ok()?;
+    if !(1..=12).contains(&month) || day == 0 {
+        return None;
+    }
+
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if day > days_in_month {
+        return None;
+    }
+
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn today() -> String {

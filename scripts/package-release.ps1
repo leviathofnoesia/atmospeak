@@ -108,8 +108,14 @@ $env:CI = "true"
 # ever rebuilt. See src-tauri/build.rs and src-tauri/src/services/license.rs.
 if (-not $env:ATMOSPEAK_RELEASE_DATE) {
   $env:ATMOSPEAK_RELEASE_DATE = (Get-Date).ToString("yyyy-MM-dd")
-} elseif ($env:ATMOSPEAK_RELEASE_DATE -notmatch '^\d{4}-\d{2}-\d{2}$') {
-  throw "ATMOSPEAK_RELEASE_DATE must be in yyyy-MM-dd format, got: $env:ATMOSPEAK_RELEASE_DATE"
+} else {
+  $releaseDate = $env:ATMOSPEAK_RELEASE_DATE.Trim()
+  try {
+    $parsed = [datetime]::ParseExact($releaseDate, "yyyy-MM-dd", [System.Globalization.CultureInfo]::InvariantCulture)
+  } catch {
+    throw "ATMOSPEAK_RELEASE_DATE must be a real calendar date in yyyy-MM-dd format, got: $releaseDate"
+  }
+  $env:ATMOSPEAK_RELEASE_DATE = $parsed.ToString("yyyy-MM-dd")
 }
 if ((Test-Path $CargoBin) -and ($env:PATH -notlike "*$CargoBin*")) {
   $env:PATH = "$CargoBin;$env:PATH"
