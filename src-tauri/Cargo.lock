@@ -260,7 +260,6 @@ dependencies = [
  "anyhow",
  "arboard",
  "atmospeak-asr-protocol",
- "atmospeak-pro",
  "chrono",
  "cpal",
  "dirs",
@@ -292,16 +291,6 @@ name = "atmospeak-asr-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "atmospeak-pro"
-version = "1.0.3"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]

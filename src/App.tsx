@@ -5,7 +5,6 @@ import {
   BookOpen,
   History,
   Home,
-  KeyRound,
   Radio,
   Scissors,
   Settings,
@@ -24,7 +23,6 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { HomePanel } from "./components/HomePanel";
 import { Onboarding } from "./components/Onboarding";
 import { ModelManagement } from "./components/ModelManagement";
-import { ProPanel } from "./components/ProPanel";
 import { RecorderOverlay } from "./components/RecorderOverlay";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SnippetPanel } from "./components/SnippetPanel";
@@ -43,7 +41,6 @@ import {
   downloadAndInstallUpdate,
   downloadModel,
   getAppSnapshot,
-  getEdition,
   getLastStageMetrics,
   getModelInventory,
   getModelStatus,
@@ -264,14 +261,6 @@ function AppShell() {
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
   const [lastMetrics, setLastMetrics] = useState<StageMetrics | null>(null);
   const [activeTab, setActiveTab] = useState<HubTab>("home");
-  const [edition, setEdition] = useState<"free" | "pro">("free");
-  const tabs = useMemo(() => {
-    if (edition !== "pro") return baseTabs;
-    return [
-      ...baseTabs,
-      { id: "pro" as const, label: "Pro", icon: KeyRound },
-    ];
-  }, [edition]);
   const [notice, setNotice] = useState<AppNotice>({
     tone: "neutral",
     message: "Atmospeak ready.",
@@ -520,7 +509,7 @@ function AppShell() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [next, mics, status, inventory, polishModels, shortcut, events, metrics, nextEdition] =
+    const [next, mics, status, inventory, polishModels, shortcut, events, metrics] =
       await Promise.all([
         getAppSnapshot(),
         listMicrophones(),
@@ -530,9 +519,7 @@ function AppShell() {
         getShortcutStatus(),
         getRuntimeEvents(),
         getLastStageMetrics(),
-        getEdition(),
       ]);
-    setEdition(nextEdition === "pro" ? "pro" : "free");
     setSnapshot(next);
     const preferredMicrophone =
       next.settings.microphoneName ??
@@ -1235,7 +1222,7 @@ function AppShell() {
           </span>
         </div>
         <nav aria-label="Atmospeak sections">
-          {tabs.map((tab) => {
+          {baseTabs.map((tab) => {
             const Icon = tab.icon;
             const count =
               tab.id === "history"
@@ -1610,11 +1597,6 @@ function AppShell() {
                 onDelete={onDeleteModel}
               />
             }
-          />
-        ) : null}
-        {activeTab === "pro" && edition === "pro" ? (
-          <ProPanel
-            onNotice={(tone, message) => setNotice({ tone, message })}
           />
         ) : null}
       </main>

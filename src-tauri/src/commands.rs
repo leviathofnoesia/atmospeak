@@ -19,14 +19,7 @@ type CommandResult<T> = std::result::Result<T, String>;
 
 #[tauri::command]
 pub fn get_edition() -> String {
-    #[cfg(feature = "pro")]
-    {
-        "pro".to_string()
-    }
-    #[cfg(not(feature = "pro"))]
-    {
-        "free".to_string()
-    }
+    "free".to_string()
 }
 
 fn engine(state: &AppState) -> CommandResult<dictation_engine::EngineHandle> {

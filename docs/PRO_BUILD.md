@@ -1,38 +1,34 @@
-# Atmospeak Pro build & dual channel
+# Atmospeak Pro build (private)
 
-Atmospeak ships two Windows binaries:
+This **public** repository is **free-only**.
 
-| Channel | Feature | Updater | Licence |
+Atmospeak Pro sources, Polar licence adapters, Pro UI, gated-update Worker, and
+Pro packaging live in the private Nov Pax monorepo:
+
+[`leviathofnoesia/Nov-Pax-Web`](https://github.com/leviathofnoesia/Nov-Pax-Web)
+→ `products/atmospeak-pro/`
+
+## Channels
+
+| Channel | Where | Updater | Licence |
 | --- | --- | --- | --- |
-| Free | default (no `pro`) | `https://www.novpax.org/downloads/atmospeak/free/latest.json` | none |
-| Pro | `--features pro` + `tauri.pro.conf.json` | `https://updates.novpax.org/atmospeak/pro/latest.json` (auth; Worker follow-up) | Polar online |
+| Free | this repo | `https://www.novpax.org/downloads/atmospeak/free/latest.json` | none |
+| Pro | Nov-Pax-Web `products/atmospeak-pro` | `https://updates.novpax.org/atmospeak/pro/latest.json` (auth; Worker follow-up) | Polar online |
 
-First Pro purchase/reinstall uses **Polar File Downloads**, not the Worker.
-
-## Build
+## Free build (this repo)
 
 ```powershell
-# Free
 bun run release:build
-
-# Pro
-bun run release:build:pro
 ```
 
-Outputs land in `release/free/` or `release/pro/`.
+Outputs: `release/free/`. Publish per [`scripts/upload-free-cdn.md`](../scripts/upload-free-cdn.md).
 
-## Authenticode
+## Pro build (private)
 
-Sign **both** channels with the Nov Pax publisher identity before selling Pro.
-Tauri updater signatures (`TAURI_SIGNING_*`) are separate from Authenticode.
+```powershell
+cd products/atmospeak-pro   # in Nov-Pax-Web
+powershell -ExecutionPolicy Bypass -File scripts/package-pro.ps1
+```
 
-## Private Pro modules
-
-`src-pro/` is linked only when `pro` is enabled. For production hardening, move
-it to a private repository and point Pro CI at that source so Pro feature code
-is absent from the public free remote. See [`src-pro/README.md`](../src-pro/README.md).
-
-## Gated Pro updates
-
-See [`services/pro-updates/README.md`](../services/pro-updates/README.md).
-Deploy is an Atmospeak/Cloudflare follow-up; not required for Polar checkout.
+See that product README for assemble/dev details. Do **not** add a private git
+dependency to this public `Cargo.toml`.

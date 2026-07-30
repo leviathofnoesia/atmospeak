@@ -22,18 +22,22 @@ Production product (Nov Pax Polar org):
 
 ## App env (Pro builds)
 
+Pro desktop source lives in **private** Nov-Pax-Web `products/atmospeak-pro`.
 Organization and benefit IDs are **compile-time constants** in release Pro
 builds. `ATMOSPEAK_POLAR_ORGANIZATION_ID` / `ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID`
-only override those anchors in **debug** builds (local Polar sandboxes).
+only override those anchors in **debug** Pro builds (local Polar sandboxes).
 
 ```env
-# Debug-only overrides (ignored in release):
+# Debug-only overrides (ignored in release Pro builds):
 # ATMOSPEAK_POLAR_ORGANIZATION_ID=97f0d813-d25f-4cc4-b934-fd4705a01c47
 # ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID=b4e88474-01fa-450c-9aac-07bd92d8e887
 ATMOSPEAK_POLAR_CHECKOUT_URL=https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE
 ATMOSPEAK_LICENSE_GRACE_DAYS=14
 ATMOSPEAK_PRO_UPDATE_BASE=https://updates.novpax.org/atmospeak/pro
 ```
+
+Public free builds only need the checkout URL for marketing/help links
+(`ATMOSPEAK_POLAR_CHECKOUT_URL` / `VITE_ATMOSPEAK_POLAR_CHECKOUT_URL`).
 
 ## Customer flow
 

@@ -28,22 +28,19 @@ GitHub Releases may mirror the same files but is not the user-facing URL.
 App updater endpoint (free builds): the www path above
 (`src-tauri/tauri.conf.json`).
 
-## Pro channel (gated)
+## Pro channel (private)
 
-Artifacts under `release/pro/`:
-
-- `atmospeak-pro_<version>_x64-setup.exe` (+ sig)
-- MSI / portable as produced
-- `latest.json` (for gated Worker when deployed)
+Pro artifacts are **not** built from this public repo. Assemble and package from
+private Nov-Pax-Web `products/atmospeak-pro/` (see [`PRO_BUILD.md`](PRO_BUILD.md)).
 
 **First purchase / reinstall:** Polar File Downloads benefit (configure when the
 first Pro EXE exists).
 
-**In-app Pro updates:** `updates.novpax.org` Worker (`services/pro-updates/`) —
-Atmospeak/Cloudflare follow-up; not blocking Polar checkout or File Downloads.
+**In-app Pro updates:** `updates.novpax.org` Worker under
+`products/atmospeak-pro/services/pro-updates/` in Nov-Pax-Web — follow-up; not
+blocking Polar checkout or File Downloads.
 
-See [`PRO_BUILD.md`](PRO_BUILD.md), [`POLAR.md`](POLAR.md), and
-[`../services/pro-updates/README.md`](../services/pro-updates/README.md).
+See [`PRO_BUILD.md`](PRO_BUILD.md) and [`POLAR.md`](POLAR.md).
 
 ## Local Release Build
 
@@ -51,8 +48,9 @@ See [`PRO_BUILD.md`](PRO_BUILD.md), [`POLAR.md`](POLAR.md), and
 $env:ATMOSPEAK_FREE_CDN_BASE = "https://www.novpax.org/downloads/atmospeak/free"
 $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$env:USERPROFILE\.tauri\atmospeak\updater.key"
 bun run release:build          # free → release/free/
-bun run release:build:pro      # pro  → release/pro/
 ```
+
+Pro packaging: Nov-Pax-Web `products/atmospeak-pro/scripts/package-pro.ps1`.
 
 The private updater key must stay outside the repository. The matching public
 key is committed in `src-tauri/tauri.conf.json`.

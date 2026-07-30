@@ -129,20 +129,6 @@
   color: rgba(27,26,29,0.66);
 }
 
-.hub-shell .pro-ledger {
-  list-style: none;
-  margin: 0.75rem 0 0;
-  padding: 0;
-  display: grid;
-  gap: 0.35rem;
-  font-size: 0.85rem;
-}
-
-.hub-shell .pro-ledger li {
-  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  padding-top: 0.35rem;
-}
-
 .hub-shell .button-row {
   display: flex;
   flex-wrap: wrap;

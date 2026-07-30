@@ -21,11 +21,6 @@ use commands::{
     show_main_window, show_overlay_window, start_recording, start_shortcut_capture, start_sound_check,
     stop_recording, streaming_asr_available, upsert_dictionary_entry, upsert_snippet,
 };
-#[cfg(feature = "pro")]
-use services::pro_commands::{
-    activate_license, check_pro_update, deactivate_license, export_network_ledger,
-    get_license_status, get_pro_feature_status, set_airplane_mode, validate_license,
-};
 use services::{
     app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, streaming_asr,
     window_manager,
@@ -417,70 +412,6 @@ pub fn run() {
         });
 }
 
-#[cfg(feature = "pro")]
-fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![
-        get_edition,
-        get_app_snapshot,
-        get_shortcut_status,
-        get_recording_level,
-        list_microphones,
-        save_settings,
-        set_shortcuts_paused,
-        show_overlay_window,
-        show_main_window,
-        set_shortcut_test_active,
-        register_setup_shortcut,
-        start_shortcut_capture,
-        cancel_shortcut_capture,
-        save_overlay_position,
-        get_runtime_events,
-        streaming_asr_available,
-        get_last_stage_metrics,
-        start_recording,
-        stop_recording,
-        cancel_recording,
-        handle_dictation_action,
-        mic_check_start,
-        mic_check_stop,
-        start_sound_check,
-        finish_sound_check,
-        cancel_sound_check,
-        open_windows_sound_settings,
-        complete_onboarding,
-        reset_overlay_position,
-        inject_onboarding_sample,
-        inject_session,
-        upsert_dictionary_entry,
-        delete_dictionary_entry,
-        upsert_snippet,
-        delete_snippet,
-        delete_session,
-        polish_session,
-        set_session_prefer_polished,
-        get_polish_inventory,
-        download_polish_model,
-        ensure_polish_runtime,
-        set_polish_api_key,
-        clear_polish_api_key,
-        has_polish_api_key,
-        get_model_status,
-        get_model_inventory,
-        download_model,
-        cancel_model_download,
-        delete_model,
-        get_license_status,
-        activate_license,
-        deactivate_license,
-        validate_license,
-        get_pro_feature_status,
-        set_airplane_mode,
-        export_network_ledger,
-        check_pro_update
-    ]
-}
-
-#[cfg(not(feature = "pro"))]
 fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         get_edition,

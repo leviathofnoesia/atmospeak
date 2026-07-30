@@ -11,10 +11,6 @@ pub mod model_downloader;
 pub mod overlay_window;
 pub mod polish;
 pub mod polish_models;
-#[cfg(feature = "pro")]
-pub mod polar_license;
-#[cfg(feature = "pro")]
-pub mod pro_commands;
 pub mod proc;
 pub mod recorder;
 pub mod runtime;

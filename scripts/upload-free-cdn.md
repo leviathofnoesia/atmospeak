@@ -22,5 +22,5 @@ Do **not** use `downloads.novpax.org` (no CNAME / separate downloads host).
 3. Deploy the marketing site.
 
 Pro purchase/reinstall uses Polar File Downloads. The gated Pro update Worker
-(`services/pro-updates/`, `updates.novpax.org`) is a separate Atmospeak/Cloudflare
-follow-up — not required for first Pro sales.
+lives in private Nov-Pax-Web `products/atmospeak-pro/services/pro-updates/`
+(`updates.novpax.org`) — not required for first Pro sales.

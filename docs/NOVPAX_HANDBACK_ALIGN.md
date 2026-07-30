@@ -29,8 +29,8 @@ File Downloads benefit: deferred until first Pro EXE exists.
 
 ## Pro gated Worker
 
-`updates.novpax.org` / `services/pro-updates/` remains an Atmospeak/Cloudflare
-follow-up. Not blocking free CDN or Polar checkout.
+`updates.novpax.org` / Nov-Pax-Web `products/atmospeak-pro/services/pro-updates/`
+remains a Cloudflare follow-up. Not blocking free CDN or Polar checkout.
 
 ## Atmospeak repo status
 
