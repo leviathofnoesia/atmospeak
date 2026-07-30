@@ -759,11 +759,15 @@ impl Worker {
             }
         };
 
-        // Read the live counter: `streaming_frames_dropped` is still 0 here because
+        // Read the live signals: `streaming_frames_dropped` is still 0 here because
         // it only settles in `finalize_capture`, which preview paste deliberately
         // defers until after inject. Using the settled field made this gate dead.
+        // The count is a lower bound before the worker drains, so tail loss is
+        // taken from the sticky delivery flag the writer publishes on failure
+        // rather than from the frames it counts afterwards.
         let drops_exceeded =
-            streaming_drop_exceeds_tolerance(captured.observed_frames_dropped());
+            streaming_drop_exceeds_tolerance(captured.observed_frames_dropped())
+                || captured.streaming_delivery_failed();
         let preview_ready = preview_paste.as_ref().is_some_and(|preview| {
             preview.session_id == captured.id && !preview.paste_text.trim().is_empty()
         });

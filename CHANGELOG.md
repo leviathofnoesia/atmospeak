@@ -16,6 +16,8 @@ the same pull request, and re-arms a fallback gate that had become a no-op.
 - The "material streaming drops force Final" gate reads the live drop counter.
   It was reading `streaming_frames_dropped`, which `finalize_capture` only
   settles after preview paste has already injected — so it saw 0 every time.
+  Tail loss is taken from a sticky flag published at the instant a frame fails
+  to reach the ASR host, since the matching count only lands after the drain.
 - Fallback-path stage `totalMs` stops at inject, matching the preview path.
 
 ### Removed
