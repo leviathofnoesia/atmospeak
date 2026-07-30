@@ -13,6 +13,7 @@ clients that present a valid Polar licence + activation (and are inside the
    bunx wrangler secret put POLAR_ACCESS_TOKEN
    bunx wrangler secret put POLAR_ORGANIZATION_ID
    bunx wrangler secret put POLAR_LICENSE_BENEFIT_ID   # optional
+   bunx wrangler secret put ARTIFACT_SIGNING_SECRET   # required for signed artifact URLs
    ```
 4. Upload release artifacts:
    - `atmospeak/pro/latest.json`

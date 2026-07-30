@@ -50,11 +50,21 @@ fn hash_license_key(key: &str) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Production Nov Pax Polar org (Atmospeak Pro License). Not overridable in release builds.
+const POLAR_ORGANIZATION_ID: &str = "97f0d813-d25f-4cc4-b934-fd4705a01c47";
+/// Production Atmospeak Pro License Keys benefit. Not overridable in release builds.
+const POLAR_LICENSE_BENEFIT_ID: &str = "b4e88474-01fa-450c-9aac-07bd92d8e887";
+
 fn organization_id() -> Result<String, String> {
-    Ok(std::env::var("ATMOSPEAK_POLAR_ORGANIZATION_ID").unwrap_or_else(|_| {
-        // Production Nov Pax Polar org (Atmospeak Pro License).
-        "97f0d813-d25f-4cc4-b934-fd4705a01c47".to_string()
-    }))
+    // Env override is debug-only; release builds must not let users retarget Polar trust anchors.
+    if cfg!(debug_assertions) {
+        if let Ok(value) = std::env::var("ATMOSPEAK_POLAR_ORGANIZATION_ID") {
+            if !value.trim().is_empty() {
+                return Ok(value);
+            }
+        }
+    }
+    Ok(POLAR_ORGANIZATION_ID.to_string())
 }
 
 fn grace_days() -> i64 {
@@ -173,12 +183,14 @@ struct PolarActivationBody {
 }
 
 fn expected_benefit_id() -> Option<String> {
-    Some(
-        std::env::var("ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID").unwrap_or_else(|_| {
-            // Production Atmospeak Pro License Keys benefit.
-            "b4e88474-01fa-450c-9aac-07bd92d8e887".to_string()
-        }),
-    )
+    if cfg!(debug_assertions) {
+        if let Ok(value) = std::env::var("ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID") {
+            if !value.trim().is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    Some(POLAR_LICENSE_BENEFIT_ID.to_string())
 }
 
 fn compute_updates_until(

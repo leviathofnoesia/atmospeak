@@ -15,7 +15,9 @@ Do **not** use `downloads.novpax.org` (no CNAME / separate downloads host).
 
 1. Build free channel: `bun run release:build` → `release/free/`
 2. In the **novpax.org** repo, copy into `public/downloads/atmospeak/free/` in this order:
-   - Installers / portable / checksums / `.sig` files **first**
+   - `atmospeak_<ver>_x64-setup.exe` (+ `.sig` if present)
+   - `atmospeak_<ver>_x64-setup.nsis.zip` (+ `.sig` if present; required when `latest.json` points at the ZIP)
+   - MSI / portable / checksums / other `.sig` files
    - `latest.json` **last** (so updaters never see a version whose installer is missing)
 3. Deploy the marketing site.
 

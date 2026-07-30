@@ -106,7 +106,9 @@ pub fn set_airplane_mode(
     enabled: bool,
 ) -> CommandResult<atmospeak_pro::AirplaneMode> {
     let dir = app_data_dir(&app)?;
-    if !polar_license::entitlements_ok(&dir) {
+    // Allow turning airplane mode *off* without a current entitlement so an
+    // expired offline grace cannot trap the user with outbound forever blocked.
+    if enabled && !polar_license::entitlements_ok(&dir) {
         return Err("activate a valid Pro licence to use airplane mode".into());
     }
     let state =
