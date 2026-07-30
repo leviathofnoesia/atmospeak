@@ -320,15 +320,14 @@ fn download_and_extract_server(app: &AppHandle) -> Result<PathBuf> {
     let _ = fs::remove_file(&zip_path);
 
     let server = managed_server_path(&state.app_dir);
-    if !server.is_file() {
-        if let Some(found) = find_file_named(&dest_dir, "llama-server.exe") {
-            if found != server {
-                fs::copy(&found, &server).context("failed to place llama-server.exe")?;
-            }
-        }
+    // Drop a stale managed binary so find/copy cannot keep a corrupt install.
+    if server.is_file() {
+        let _ = fs::remove_file(&server);
     }
-    if !server.is_file() {
-        bail!("llama-server.exe missing after extracting the runtime zip");
+    let found = find_file_named(&dest_dir, "llama-server.exe")
+        .ok_or_else(|| anyhow::anyhow!("llama-server.exe missing after extracting the runtime zip"))?;
+    if found != server {
+        fs::copy(&found, &server).context("failed to place llama-server.exe")?;
     }
     verify_server_exe(&server)?;
     write_server_sha_sidecar(&server)?;

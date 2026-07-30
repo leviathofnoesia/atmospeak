@@ -107,24 +107,29 @@ fn save_settings_blocking(
 
     let validated_endpoint = polish::configured_endpoint_for_settings(&settings)
         .map_err(|e| polish::sanitize_message(&e.to_string()))?;
-    if let Some(endpoint) = validated_endpoint.as_ref() {
-        let new_origin = polish::canonical_origin(endpoint)
-            .map_err(|e| polish::sanitize_message(&e.to_string()))?;
-        let bound = settings.polish_api_key_origin.trim();
-        if polish::has_keyring_api_key()
-            && !bound.is_empty()
-            && !bound.eq_ignore_ascii_case(&new_origin)
-        {
-            if confirm_key_rebinding {
-                settings.polish_api_key_origin = new_origin;
-            } else {
-                return Err(format!(
-                    "Polish endpoint origin changed to {new_origin} while an API key is bound to {bound}. Confirm rebinding or clear the key first."
-                ));
+    // Only OpenAI-compatible sends the keyring key. Switching to bundled/Ollama
+    // must not require a remote-origin rebind confirmation.
+    if matches!(
+        settings.polish_provider,
+        crate::models::PolishProvider::OpenaiCompatible
+    ) {
+        if let Some(endpoint) = validated_endpoint.as_ref() {
+            let new_origin = polish::canonical_origin(endpoint)
+                .map_err(|e| polish::sanitize_message(&e.to_string()))?;
+            let bound = settings.polish_api_key_origin.trim();
+            if polish::has_keyring_api_key()
+                && !bound.is_empty()
+                && !bound.eq_ignore_ascii_case(&new_origin)
+            {
+                if confirm_key_rebinding {
+                    settings.polish_api_key_origin = new_origin;
+                } else {
+                    return Err(format!(
+                        "Polish endpoint origin changed to {new_origin} while an API key is bound to {bound}. Confirm rebinding or clear the key first."
+                    ));
+                }
             }
         }
-    } else {
-        // Bundled provider: keep existing origin metadata until the key is cleared.
     }
 
     // Release builds never persist executable overrides from the renderer.
@@ -763,18 +768,27 @@ pub fn set_polish_api_key(
     .map_err(|e| polish::sanitize_message(&e.to_string()))?;
     let origin = polish::canonical_origin(&validated)
         .map_err(|e| polish::sanitize_message(&e.to_string()))?;
-    polish::set_keyring_api_key(&api_key).map_err(|e| polish::sanitize_message(&e.to_string()))?;
     let mut settings = state
         .database
         .lock()
         .load_settings()
         .map_err(|e| e.to_string())?;
+    let previous_key = polish::read_keyring_api_key();
+    polish::set_keyring_api_key(&api_key).map_err(|e| polish::sanitize_message(&e.to_string()))?;
     settings.polish_api_key_origin = origin;
-    state
-        .database
-        .lock()
-        .save_settings(&settings)
-        .map_err(|e| e.to_string())?;
+    if let Err(error) = state.database.lock().save_settings(&settings) {
+        // Roll back keyring so a failed DB write cannot leave a new key paired
+        // with a stale origin.
+        match previous_key {
+            Some(previous) => {
+                let _ = polish::set_keyring_api_key(&previous);
+            }
+            None => {
+                let _ = polish::clear_keyring_api_key();
+            }
+        }
+        return Err(error.to_string());
+    }
     Ok(())
 }
 

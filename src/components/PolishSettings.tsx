@@ -58,6 +58,8 @@ export function PolishSettings({
     setApiKeyMessage("");
     try {
       await setPolishApiKey(apiKeyDraft.trim(), settings.polishEndpoint);
+      const origin = new URL(settings.polishEndpoint.trim()).origin;
+      setSettings({ ...settings, polishApiKeyOrigin: origin });
       setApiKeyDraft("");
       setHasApiKey(true);
       setApiKeyMessage("API key saved to the OS keyring and bound to this endpoint.");
@@ -68,23 +70,12 @@ export function PolishSettings({
     }
   };
 
-  const onEndpointChange = (polishEndpoint: string) => {
-    if (hasApiKey && polishEndpoint.trim() !== settings.polishEndpoint.trim()) {
-      const confirmed = window.confirm(
-        "A polish API key is saved for the previous endpoint. Changing the endpoint requires confirming that the key may be sent to the new origin on the next save, or clear the key first.\n\nContinue editing the endpoint?",
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
-    setSettings({ ...settings, polishEndpoint });
-  };
-
   const onClearApiKey = async () => {
     setApiKeyBusy(true);
     setApiKeyMessage("");
     try {
       await clearPolishApiKey();
+      setSettings({ ...settings, polishApiKeyOrigin: "" });
       setHasApiKey(false);
       setApiKeyDraft("");
       setApiKeyMessage("API key cleared.");
@@ -186,7 +177,9 @@ export function PolishSettings({
                   <span>Endpoint</span>
                   <input
                     value={settings.polishEndpoint}
-                    onChange={(event) => onEndpointChange(event.currentTarget.value)}
+                    onChange={(event) =>
+                      setSettings({ ...settings, polishEndpoint: event.currentTarget.value })
+                    }
                     placeholder={
                       settings.polishProvider === "ollama"
                         ? "http://127.0.0.1:11434/v1/chat/completions"
