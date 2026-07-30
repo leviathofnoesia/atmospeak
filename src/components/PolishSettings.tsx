@@ -10,7 +10,9 @@ import { ToggleRow } from "./ToggleRow";
 
 interface PolishSettingsProps {
   settings: AppSettings;
-  setSettings: (settings: AppSettings) => void;
+  setSettings: (
+    settings: AppSettings | ((prev: AppSettings) => AppSettings),
+  ) => void;
   polishInventory: ModelInventoryItem[];
   polishSetupBusy: boolean;
   polishSetupMessage: string;
@@ -57,9 +59,10 @@ export function PolishSettings({
     setApiKeyBusy(true);
     setApiKeyMessage("");
     try {
-      await setPolishApiKey(apiKeyDraft.trim(), settings.polishEndpoint);
-      const origin = new URL(settings.polishEndpoint.trim()).origin;
-      setSettings({ ...settings, polishApiKeyOrigin: origin });
+      const endpoint = settings.polishEndpoint.trim();
+      await setPolishApiKey(apiKeyDraft.trim(), endpoint);
+      const origin = new URL(endpoint).origin;
+      setSettings((prev) => ({ ...prev, polishApiKeyOrigin: origin }));
       setApiKeyDraft("");
       setHasApiKey(true);
       setApiKeyMessage("API key saved to the OS keyring and bound to this endpoint.");
@@ -75,7 +78,7 @@ export function PolishSettings({
     setApiKeyMessage("");
     try {
       await clearPolishApiKey();
-      setSettings({ ...settings, polishApiKeyOrigin: "" });
+      setSettings((prev) => ({ ...prev, polishApiKeyOrigin: "" }));
       setHasApiKey(false);
       setApiKeyDraft("");
       setApiKeyMessage("API key cleared.");

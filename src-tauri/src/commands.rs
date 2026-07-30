@@ -768,44 +768,61 @@ pub fn set_polish_api_key(
     .map_err(|e| polish::sanitize_message(&e.to_string()))?;
     let origin = polish::canonical_origin(&validated)
         .map_err(|e| polish::sanitize_message(&e.to_string()))?;
-    let mut settings = state
-        .database
-        .lock()
-        .load_settings()
-        .map_err(|e| e.to_string())?;
     let previous_key = polish::read_keyring_api_key();
     polish::set_keyring_api_key(&api_key).map_err(|e| polish::sanitize_message(&e.to_string()))?;
-    settings.polish_api_key_origin = origin;
-    if let Err(error) = state.database.lock().save_settings(&settings) {
-        // Roll back keyring so a failed DB write cannot leave a new key paired
-        // with a stale origin.
-        match previous_key {
-            Some(previous) => {
-                let _ = polish::set_keyring_api_key(&previous);
-            }
-            None => {
-                let _ = polish::clear_keyring_api_key();
-            }
-        }
-        return Err(error.to_string());
+
+    // Hold the DB lock across load+save so concurrent settings writes cannot be
+    // clobbered by a stale whole-document snapshot.
+    let db = state.database.lock();
+    let save_result = (|| -> Result<(), String> {
+        let mut settings = db.load_settings().map_err(|e| e.to_string())?;
+        settings.polish_api_key_origin = origin;
+        db.save_settings(&settings).map_err(|e| e.to_string())
+    })();
+    drop(db);
+
+    if let Err(error) = save_result {
+        let rollback = match previous_key {
+            Some(previous) => polish::set_keyring_api_key(&previous),
+            None => polish::clear_keyring_api_key(),
+        };
+        return Err(match rollback {
+            Ok(()) => error,
+            Err(rollback_err) => format!(
+                "{error}; also failed to roll back keyring: {}",
+                polish::sanitize_message(&rollback_err.to_string())
+            ),
+        });
     }
     Ok(())
 }
 
 #[tauri::command]
 pub fn clear_polish_api_key(state: State<'_, AppState>) -> CommandResult<()> {
+    let previous_key = polish::read_keyring_api_key();
     polish::clear_keyring_api_key().map_err(|e| polish::sanitize_message(&e.to_string()))?;
-    let mut settings = state
-        .database
-        .lock()
-        .load_settings()
-        .map_err(|e| e.to_string())?;
-    settings.polish_api_key_origin.clear();
-    state
-        .database
-        .lock()
-        .save_settings(&settings)
-        .map_err(|e| e.to_string())?;
+
+    let db = state.database.lock();
+    let save_result = (|| -> Result<(), String> {
+        let mut settings = db.load_settings().map_err(|e| e.to_string())?;
+        settings.polish_api_key_origin.clear();
+        db.save_settings(&settings).map_err(|e| e.to_string())
+    })();
+    drop(db);
+
+    if let Err(error) = save_result {
+        let rollback = match previous_key {
+            Some(previous) => polish::set_keyring_api_key(&previous),
+            None => Ok(()),
+        };
+        return Err(match rollback {
+            Ok(()) => error,
+            Err(rollback_err) => format!(
+                "{error}; also failed to restore keyring: {}",
+                polish::sanitize_message(&rollback_err.to_string())
+            ),
+        });
+    }
     Ok(())
 }
 
