@@ -17,6 +17,20 @@ pub struct LivePasteSnapshot {
     pub session_id: String,
     pub raw_text: String,
     pub paste_text: String,
+    pub covered_through_ms: u64,
+}
+
+/// Preview decode lag budget: rolling previews update at most ~1/s, so a short
+/// uncovered tail is expected. Larger gaps fall through to Final.
+pub const PREVIEW_COVERAGE_SLACK_MS: u64 = 1200;
+
+impl LivePasteSnapshot {
+    /// True when the live hypothesis covers nearly all captured audio.
+    pub fn covers_duration(&self, duration_ms: u64) -> bool {
+        self.covered_through_ms
+            .saturating_add(PREVIEW_COVERAGE_SLACK_MS)
+            >= duration_ms
+    }
 }
 
 #[derive(Debug, Default)]
@@ -27,6 +41,7 @@ struct LivePasteState {
     partial_text: String,
     paste_text: String,
     raw_text: String,
+    covered_through_ms: u64,
     revision: u64,
 }
 
@@ -65,6 +80,7 @@ impl LivePasteBuffer {
             session_id: state.session_id.clone(),
             raw_text: state.raw_text.clone(),
             paste_text: paste_text.to_string(),
+            covered_through_ms: state.covered_through_ms,
         })
     }
 
@@ -122,6 +138,7 @@ fn recompute_and_event(
 ) -> LiveTranscriptEvent {
     let raw = join_raw(&state.stable_text, &state.partial_text);
     state.raw_text = raw.clone();
+    state.covered_through_ms = covered_through_ms;
     let paste = match state.context.as_ref() {
         Some(context) if context.cleanup_enabled => {
             cleanup::clean_text(&raw, &context.dictionary, &context.snippets)
@@ -186,6 +203,9 @@ mod tests {
         let ready = buffer.take_paste_ready().expect("paste ready");
         assert_eq!(ready.paste_text, "BridgeMind, Thanks for the review.");
         assert!(ready.raw_text.contains("bridge mind"));
+        assert_eq!(ready.covered_through_ms, 1500);
+        assert!(ready.covers_duration(2000));
+        assert!(!ready.covers_duration(4000));
     }
 
     #[test]

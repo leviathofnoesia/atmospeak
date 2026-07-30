@@ -759,7 +759,9 @@ impl Worker {
             }
         };
 
-        if let Some(preview) = preview_paste.filter(|preview| preview.session_id == captured.id) {
+        if let Some(preview) = preview_paste.filter(|preview| {
+            preview.session_id == captured.id && preview.covers_duration(captured.duration_ms)
+        }) {
             match self.run_preview_paste_path(
                 recording.clone(),
                 captured,
@@ -1068,6 +1070,16 @@ impl Worker {
         self.finish_pipeline_result(recording, pipeline)
     }
 
+    fn abandon_captured_recording(&self, mut captured: recorder::CapturedRecording) {
+        if let Some(host) = captured.streaming_host.take() {
+            host.cancel_session(&captured.id);
+        }
+        let path = captured.path.clone();
+        let _ = recorder::finalize_capture(&mut captured);
+        let _ = std::fs::remove_file(path);
+        self.app.state::<AppState>().live_paste.clear();
+    }
+
     /// Paste the cleaned live hypothesis immediately; WAV / host teardown run after Pasted.
     fn run_preview_paste_path(
         &mut self,
@@ -1076,19 +1088,28 @@ impl Worker {
         preview: crate::services::live_paste::LivePasteSnapshot,
         capture_stop_ms: u64,
     ) -> Result<DictationResult, String> {
-        let (auto_inject, restore_clipboard, active_model_id, last_hwnd) = {
+        let settings_load = {
             let state = self.app.state::<AppState>();
-            let snapshot = state
+            state
                 .database
                 .lock()
                 .snapshot()
-                .map_err(|e| e.to_string())?;
-            (
-                snapshot.settings.auto_inject,
-                snapshot.settings.restore_clipboard,
-                snapshot.settings.active_model_id.clone(),
-                state.last_target_window(),
-            )
+                .map(|snapshot| {
+                    (
+                        snapshot.settings.auto_inject,
+                        snapshot.settings.restore_clipboard,
+                        snapshot.settings.active_model_id.clone(),
+                        state.last_target_window(),
+                    )
+                })
+                .map_err(|error| error.to_string())
+        };
+        let (auto_inject, restore_clipboard, active_model_id, last_hwnd) = match settings_load {
+            Ok(values) => values,
+            Err(error) => {
+                self.abandon_captured_recording(captured);
+                return Err(error);
+            }
         };
         let paste_text = preview.paste_text;
         let raw_text = preview.raw_text;

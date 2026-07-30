@@ -49,13 +49,14 @@ MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
    into a paste-ready buffer so the orb shows the same text release will paste.
    Capture always uses the streaming sidecar when it is available; the
    live-preview setting no longer disables that hot path.
-5. On release, if the paste-ready buffer is non-empty, Atmospeak pastes that
-   cleaned hypothesis immediately after mic stop (no wait on Final, quality
-   gate, or WAV). The orb advances to Pasted; host cancel, WAV teardown, and
-   session persistence run after paste. Clipboard restore stays off the inject
-   critical path. When no usable preview exists yet, stop falls back to the
-   prior path: finalize capture, quality gate, `StopSession` / `await_final`
-   (or batch), cleanup, then paste.
+5. On release, if the paste-ready buffer is non-empty **and** its
+   `covered_through_ms` covers the recording within a ~1.2 s preview-lag slack,
+   Atmospeak pastes that cleaned hypothesis immediately after mic stop (no wait
+   on Final, quality gate, or WAV). The orb advances to Pasted; host cancel,
+   WAV teardown, and session persistence run after paste. Clipboard restore
+   stays off the inject critical path. When preview is missing or lags the
+   capture by more than the slack, stop falls back to finalize capture, quality
+   gate, `StopSession` / `await_final` (or batch), cleanup, then paste.
 6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop on
    the slow path leaves the full local recording available to the legacy batch
    path, which prefers the lazy resident `whisper-server` over a cold one-shot
