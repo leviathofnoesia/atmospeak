@@ -768,7 +768,9 @@ impl Worker {
             .map(|settings| settings.auto_polish)
             .unwrap_or(false);
         // Auto-polish stays on the Final path so preview paste never skips or delays polish.
-        if !auto_polish {
+        // Material streaming drops also force Final/batch — the live hypothesis can look
+        // complete while missing overrun audio.
+        if !auto_polish && !streaming_drop_exceeds_tolerance(captured.streaming_frames_dropped) {
             if let Some(preview) = preview_paste.filter(|preview| {
                 preview.session_id == captured.id && preview.covers_duration(captured.duration_ms)
             }) {
