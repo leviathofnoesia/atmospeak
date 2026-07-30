@@ -1192,7 +1192,8 @@ impl Worker {
             injection: injection_result,
         };
 
-        // Surface Pasted before WAV join / host cancel so the orb matches paste latency.
+        // Surface Pasted/Saved in the UI immediately, but keep EngineState::Processing
+        // until teardown finishes so a queued hotkey cannot start/stop an empty hold.
         let injected = result
             .injection
             .as_ref()
@@ -1203,36 +1204,20 @@ impl Worker {
             .as_ref()
             .map(|injection| injection.message.clone())
             .unwrap_or_else(|| "Transcript saved to history.".to_string());
-        if injected {
-            self.state = EngineState::Pasted;
-            self.emit_phase(
-                DictationPhase::Pasted,
-                recording,
-                message,
-                Some(result.clone()),
-                Some(stage_metrics.clone()),
-            );
+        let terminal_phase = if injected {
+            DictationPhase::Pasted
         } else if result.injection.is_some() {
-            self.state = EngineState::Error;
-            self.emit_phase(
-                DictationPhase::Error,
-                recording,
-                message,
-                Some(result.clone()),
-                Some(stage_metrics.clone()),
-            );
+            DictationPhase::Error
         } else {
-            self.state = EngineState::Pasted;
-            self.emit_phase(
-                DictationPhase::Saved,
-                recording,
-                message,
-                Some(result.clone()),
-                Some(stage_metrics.clone()),
-            );
-        }
-        self.active_recording = None;
-        self.settle_from_terminal();
+            DictationPhase::Saved
+        };
+        self.emit_phase(
+            terminal_phase,
+            recording,
+            message,
+            Some(result.clone()),
+            Some(stage_metrics.clone()),
+        );
 
         // Deferred teardown: cancel finalize, retain WAV for history, persist session.
         if let Some(host) = captured.streaming_host.take() {
@@ -1284,6 +1269,15 @@ impl Worker {
         metrics::emit_stage_metrics(&self.app, &stage_metrics);
         metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
         state.live_paste.clear();
+        drop(state);
+
+        self.state = if matches!(terminal_phase, DictationPhase::Error) {
+            EngineState::Error
+        } else {
+            EngineState::Pasted
+        };
+        self.active_recording = None;
+        self.settle_from_terminal();
         Ok(DictationResult {
             session,
             injection: result.injection,
