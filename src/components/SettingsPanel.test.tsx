@@ -24,6 +24,8 @@ function settingsProps(overrides: Record<string, unknown> = {}) {
     },
     shortcutTest: { active: false, detected: false, message: "" },
     shortcutCapture: { arming: false, active: false, keys: [], message: "" },
+    dirty: false,
+    saving: false,
     onTestShortcut: vi.fn(),
     onRecordShortcut: vi.fn(),
     onCancelShortcutCapture: vi.fn(),
@@ -33,6 +35,7 @@ function settingsProps(overrides: Record<string, unknown> = {}) {
     onResetDockPosition: vi.fn(async () => undefined),
     onRerunOnboarding: vi.fn(async () => undefined),
     onSave: vi.fn(async () => undefined),
+    onDiscard: vi.fn(),
     updateStatus: "idle" as const,
     updateResult: null,
     onCheckUpdates: vi.fn(async () => undefined),
@@ -94,5 +97,40 @@ describe("SettingsPanel shortcut controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Ctrl+Shift+Space" }));
     expect(props.onShortcutChange).toHaveBeenCalledWith("Ctrl+Shift+Space");
+  });
+});
+
+describe("SettingsPanel save footer", () => {
+  it("keeps Save changes visible and disabled when clean", () => {
+    render(<SettingsPanel {...settingsProps({ dirty: false, saving: false })} />);
+
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect(save).toBeVisible();
+    expect(save).toBeDisabled();
+    expect(screen.getByText("All changes saved")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
+  });
+
+  it("enables Save and Discard when dirty", () => {
+    const props = settingsProps({ dirty: true });
+    render(<SettingsPanel {...props} />);
+
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect(save).toBeEnabled();
+    expect(screen.getByText("Unsaved changes")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(props.onDiscard).toHaveBeenCalledOnce();
+
+    fireEvent.click(save);
+    expect(props.onSave).toHaveBeenCalledOnce();
+  });
+
+  it("shows saving state and blocks discard while saving", () => {
+    render(<SettingsPanel {...settingsProps({ dirty: true, saving: true })} />);
+
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+    expect(screen.getByText("Saving…", { selector: ".settings-footer__status" })).toBeVisible();
   });
 });

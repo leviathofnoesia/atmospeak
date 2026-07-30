@@ -298,6 +298,7 @@ function AppShell() {
   });
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [dictEntry, setDictEntry] = useState({
     id: null as string | null,
     phrase: "",
@@ -878,9 +879,20 @@ function AppShell() {
     }
   }, [refreshSnapshotOnly]);
 
+  const settingsDirty = useMemo(() => {
+    if (!snapshot || !settingsDraft) return false;
+    return JSON.stringify(settingsDraft) !== JSON.stringify(snapshot.settings);
+  }, [settingsDraft, snapshot]);
+
+  const onDiscardSettings = useCallback(() => {
+    if (!snapshot) return;
+    setSettingsDraft(snapshot.settings);
+  }, [snapshot]);
+
   const onSaveSettings = useCallback(async () => {
-    if (!settingsDraft) return;
+    if (!settingsDraft || settingsSaving) return;
     setBusyState(true);
+    setSettingsSaving(true);
     try {
       let confirmKeyRebinding = false;
       const bound = settingsDraft.polishApiKeyOrigin?.trim() ?? "";
@@ -913,9 +925,10 @@ function AppShell() {
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
+      setSettingsSaving(false);
       setBusyState(false);
     }
-  }, [setBusyState, settingsDraft]);
+  }, [setBusyState, settingsDraft, settingsSaving]);
 
   const onDownloadModel = useCallback(async (modelId: string) => {
     setModelDownload({
@@ -1494,7 +1507,10 @@ function AppShell() {
               setSnapshot(next);
               setSettingsDraft(next.settings);
             }}
+            dirty={settingsDirty}
+            saving={settingsSaving}
             onSave={onSaveSettings}
+            onDiscard={onDiscardSettings}
             updateStatus={updateStatus}
             updateResult={updateResult}
             onCheckUpdates={async () => {
@@ -1556,7 +1572,6 @@ function AppShell() {
                   setSnapshot(next);
                   setSettingsDraft(next.settings);
                 }}
-                onSave={onSaveSettings}
               />
             }
             modelManagement={
