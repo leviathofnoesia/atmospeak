@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **One dictation pipeline.** Release used to run two parallel implementations —
+  a preview path and a fallback path — each with its own inject call, stage
+  clock, terminal-phase emit, session persistence, and teardown order. Every
+  paste bug fixed in 1.0.3 was a place where the two had drifted. There is now
+  one tail (`finish_pipeline_result_with_teardown`) and one inject
+  (`inject_transcript`); the only thing that varies is which transcript source
+  answered and whether it deferred teardown past paste. No user-visible change
+  except that the terminal phase now reaches the UI before the database write on
+  the decode source, as it already did on the live one.
+
 ## 1.0.3 — Nothing blocks paste that paste does not use (2026-07-30)
 
 Follow-up to 1.0.2. The preview-paste fix shipped intact; this removes the
