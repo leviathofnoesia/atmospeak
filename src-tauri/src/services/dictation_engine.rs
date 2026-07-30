@@ -759,21 +759,32 @@ impl Worker {
             }
         };
 
-        if let Some(preview) = preview_paste.filter(|preview| {
-            preview.session_id == captured.id && preview.covers_duration(captured.duration_ms)
-        }) {
-            match self.run_preview_paste_path(
-                recording.clone(),
-                captured,
-                preview,
-                capture_stop_ms,
-            ) {
-                Ok(result) => return Ok(result),
-                Err(error) => {
-                    // Preview paste failed after mic stop — surface the error.
-                    self.app.state::<AppState>().live_paste.clear();
-                    self.fail_pipeline(error.clone());
-                    return Err(error);
+        let auto_polish = self
+            .app
+            .state::<AppState>()
+            .database
+            .lock()
+            .load_settings()
+            .map(|settings| settings.auto_polish)
+            .unwrap_or(false);
+        // Auto-polish stays on the Final path so preview paste never skips or delays polish.
+        if !auto_polish {
+            if let Some(preview) = preview_paste.filter(|preview| {
+                preview.session_id == captured.id && preview.covers_duration(captured.duration_ms)
+            }) {
+                match self.run_preview_paste_path(
+                    recording.clone(),
+                    captured,
+                    preview,
+                    capture_stop_ms,
+                ) {
+                    Ok(result) => return Ok(result),
+                    Err(error) => {
+                        // Preview paste failed after mic stop — surface the error.
+                        self.app.state::<AppState>().live_paste.clear();
+                        self.fail_pipeline(error.clone());
+                        return Err(error);
+                    }
                 }
             }
         }
@@ -1212,7 +1223,7 @@ impl Worker {
             DictationPhase::Saved
         };
         self.emit_phase(
-            terminal_phase,
+            terminal_phase.clone(),
             recording,
             message,
             Some(result.clone()),
