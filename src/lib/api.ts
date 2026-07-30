@@ -31,12 +31,12 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://downloads.novpax.org/atmospeak/free";
+const releaseBaseUrl = "https://www.novpax.org/downloads/atmospeak/free";
 const releaseVersion = "1.0.3";
 const mockInstalledModels = new Set(["base.en"]);
 const polarCheckoutUrl =
   import.meta.env.VITE_ATMOSPEAK_POLAR_CHECKOUT_URL ??
-  "https://novpax.org/projects/atmospeak#pro";
+  "https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE";
 
 let mockSnapshot: AppSnapshot = {
   settings: defaultSettings(),

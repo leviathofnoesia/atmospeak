@@ -12,7 +12,7 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data:; font-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com https://downloads.novpax.org https://updates.novpax.org https://api.polar.sh https://polar.sh; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data:; font-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com https://www.novpax.org https://updates.novpax.org https://api.polar.sh https://polar.sh; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
@@ -46,7 +46,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3RjM2RjFDRjE5NTM3RTgKUldUb041WHhIRy96eHl6N3VOcDN1OXRUV20zTmJrRmoyM1k2TWZSajEvSGhPd0NrdTJnNjU4Nk8K",
       "endpoints": [
-        "https://downloads.novpax.org/atmospeak/free/latest.json"
+        "https://www.novpax.org/downloads/atmospeak/free/latest.json"
       ]
     }
   }

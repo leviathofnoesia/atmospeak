@@ -12,8 +12,8 @@ transcription consolidates into Atmospeak Pro (not a separate product).
 - Supporting: Free MIT dictation on Windows. Pro is a separate licensed build
   with compliance tools and gated updates — $69 for three years of updates,
   lifetime use of what you already installed after.
-- CTA: Download free → `https://downloads.novpax.org/atmospeak/free/atmospeak_1.0.3_x64-setup.exe`
-- CTA: Buy Pro → Polar checkout link
+- CTA: Download free → `https://www.novpax.org/downloads/atmospeak/free/atmospeak_1.0.3_x64-setup.exe`
+- CTA: Buy Pro → `https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE`
 
 ## Projects roadmap row
 

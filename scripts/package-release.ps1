@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($ReleaseRepo)) {
   $ReleaseRepo = "leviathofnoesia/atmospeak"
 }
 if ([string]::IsNullOrWhiteSpace($FreeCdnBase)) {
-  $FreeCdnBase = "https://downloads.novpax.org/atmospeak/free"
+  $FreeCdnBase = "https://www.novpax.org/downloads/atmospeak/free"
 }
 $FreeCdnBase = $FreeCdnBase.TrimEnd("/")
 $IsPro = $Channel -eq "pro"

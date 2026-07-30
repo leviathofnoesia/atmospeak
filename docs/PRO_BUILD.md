@@ -4,8 +4,10 @@ Atmospeak ships two Windows binaries:
 
 | Channel | Feature | Updater | Licence |
 | --- | --- | --- | --- |
-| Free | default (no `pro`) | `https://downloads.novpax.org/atmospeak/free/latest.json` | none |
-| Pro | `--features pro` + `tauri.pro.conf.json` | `https://updates.novpax.org/atmospeak/pro/latest.json` (auth) | Polar online |
+| Free | default (no `pro`) | `https://www.novpax.org/downloads/atmospeak/free/latest.json` | none |
+| Pro | `--features pro` + `tauri.pro.conf.json` | `https://updates.novpax.org/atmospeak/pro/latest.json` (auth; Worker follow-up) | Polar online |
+
+First Pro purchase/reinstall uses **Polar File Downloads**, not the Worker.
 
 ## Build
 
@@ -33,3 +35,4 @@ is absent from the public free remote. See [`src-pro/README.md`](../src-pro/READ
 ## Gated Pro updates
 
 See [`services/pro-updates/README.md`](../services/pro-updates/README.md).
+Deploy is an Atmospeak/Cloudflare follow-up; not required for Polar checkout.

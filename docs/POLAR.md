@@ -1,34 +1,31 @@
 # Polar product setup — Atmospeak Pro
 
-Configure the existing **$69** one-time Atmospeak Pro product in the Nov Pax
-Polar organization as follows.
+Production product (Nov Pax Polar org):
+
+| Field | Value |
+| --- | --- |
+| Product | Atmospeak Pro License |
+| product_id | `184d5727-0fbe-475c-b6c0-32fd93461cf9` |
+| organization_id | `97f0d813-d25f-4cc4-b934-fd4705a01c47` |
+| Price | $69.00 USD one-time |
+| License benefit | `b4e88474-01fa-450c-9aac-07bd92d8e887` (prefix `ATMO`, 3 activations, no key expiry) |
+| Checkout | https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE |
 
 ## Benefits
 
-1. **License Keys**
-   - Prefix optional (e.g. `ATMO`)
-   - **Do not** set a short absolute expiry that bricks the app — Pro uses
-     online validate + a **3-year update window** enforced by the gated update
-     Worker. Prefer no key expiry, or expiry far beyond the update window.
-   - Enable activations if you want a device limit (recommended: 3).
-   - Copy the benefit id into `ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID`.
-
-2. **File Downloads**
-   - Upload the current `atmospeak-pro_<version>_x64-setup.exe` after each Pro
-     release (or automate via Polar Files API from CI).
-   - This is the purchase / reinstall path; in-app updates use the gated Worker.
-
-## Checkout
-
-- Create a Polar checkout link for the product.
-- Set `ATMOSPEAK_POLAR_CHECKOUT_URL` / `VITE_ATMOSPEAK_POLAR_CHECKOUT_URL` to that URL
-  (website Buy buttons and in-app upgrade link).
+1. **License Keys** — configured as above. Prefer **no short key expiry**; the
+   3-year update window is enforced by the gated update Worker (when deployed),
+   not by killing the licence key.
+2. **File Downloads** — attach ≥1 Pro installer when the first
+   `atmospeak-pro_*_x64-setup.exe` exists (purchase / reinstall path). In-app
+   gated updates are a separate follow-up.
 
 ## App env (Pro builds)
 
 ```env
-ATMOSPEAK_POLAR_ORGANIZATION_ID=...
-ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID=...
+ATMOSPEAK_POLAR_ORGANIZATION_ID=97f0d813-d25f-4cc4-b934-fd4705a01c47
+ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID=b4e88474-01fa-450c-9aac-07bd92d8e887
+ATMOSPEAK_POLAR_CHECKOUT_URL=https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE
 ATMOSPEAK_LICENSE_GRACE_DAYS=14
 ATMOSPEAK_PRO_UPDATE_BASE=https://updates.novpax.org/atmospeak/pro
 ```
@@ -36,16 +33,15 @@ ATMOSPEAK_PRO_UPDATE_BASE=https://updates.novpax.org/atmospeak/pro
 ## Customer flow
 
 1. Buy on Polar from novpax.org / checkout link.
-2. Polar portal shows licence key + Pro installer download.
+2. Polar portal shows licence key + Pro installer download (once File Download is attached).
 3. Install Pro → Hub **Pro** tab → paste key → Activate (online).
-4. Offline grace (`ATMOSPEAK_LICENSE_GRACE_DAYS`) keeps Pro features working
-   between online validates.
-5. Pro update checks send licence headers to the Worker; expired update windows
-   get no new builds (installed Pro keeps running).
+4. Offline grace keeps Pro features working between online validates.
+5. When the gated Worker is live, Pro update checks send licence headers; expired
+   update windows get no new builds (installed Pro keeps running).
 
 ## Server secrets (Worker / CI only)
 
-Never ship these in the desktop app:
+Never ship these in the desktop app or commit them:
 
 - `POLAR_ACCESS_TOKEN`
 - R2 credentials / `ARTIFACT_SIGNING_SECRET`

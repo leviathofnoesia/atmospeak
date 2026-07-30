@@ -41,8 +41,10 @@ struct PersistedState {
 }
 
 fn organization_id() -> Result<String, String> {
-    std::env::var("ATMOSPEAK_POLAR_ORGANIZATION_ID")
-        .map_err(|_| "ATMOSPEAK_POLAR_ORGANIZATION_ID is not configured".to_string())
+    Ok(std::env::var("ATMOSPEAK_POLAR_ORGANIZATION_ID").unwrap_or_else(|_| {
+        // Production Nov Pax Polar org (Atmospeak Pro License).
+        "97f0d813-d25f-4cc4-b934-fd4705a01c47".to_string()
+    }))
 }
 
 fn grace_days() -> i64 {
@@ -158,7 +160,12 @@ struct PolarActivationBody {
 }
 
 fn expected_benefit_id() -> Option<String> {
-    std::env::var("ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID").ok()
+    Some(
+        std::env::var("ATMOSPEAK_POLAR_LICENSE_BENEFIT_ID").unwrap_or_else(|_| {
+            // Production Atmospeak Pro License Keys benefit.
+            "b4e88474-01fa-450c-9aac-07bd92d8e887".to_string()
+        }),
+    )
 }
 
 fn compute_updates_until(expires_at: Option<&str>) -> String {

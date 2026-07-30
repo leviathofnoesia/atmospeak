@@ -12,17 +12,20 @@ Artifacts under `release/free/`:
 - NSIS updater signature + `latest.json`
 - `SHA256SUMS.txt`
 
-**Advertised CDN**
+**Advertised download base** (Nov Pax marketing site, Vercel `public/downloads/`):
 
 ```text
-https://downloads.novpax.org/atmospeak/free/
-https://downloads.novpax.org/atmospeak/free/latest.json
+https://www.novpax.org/downloads/atmospeak/free/
+https://www.novpax.org/downloads/atmospeak/free/latest.json
 ```
 
-Upload every file from `release/free/` to that CDN prefix after each free
-release. GitHub Releases may mirror the same files but is not the user-facing URL.
+Copy every file from `release/free/` into the novpax.org repo at
+`public/downloads/atmospeak/free/` and deploy marketing. There is **no**
+`downloads.novpax.org` host.
 
-App updater endpoint (free builds): the CDN `latest.json` above
+GitHub Releases may mirror the same files but is not the user-facing URL.
+
+App updater endpoint (free builds): the www path above
 (`src-tauri/tauri.conf.json`).
 
 ## Pro channel (gated)
@@ -31,17 +34,21 @@ Artifacts under `release/pro/`:
 
 - `atmospeak-pro_<version>_x64-setup.exe` (+ sig)
 - MSI / portable as produced
-- `latest.json` (manifest body for private R2; Worker rewrites artifact URLs)
+- `latest.json` (for gated Worker when deployed)
 
-Upload to private R2 (`atmospeak/pro/…`), refresh the Polar File Download
-benefit, and ensure the Pro update Worker can read the manifest. See
-[`PRO_BUILD.md`](PRO_BUILD.md), [`POLAR.md`](POLAR.md), and
+**First purchase / reinstall:** Polar File Downloads benefit (configure when the
+first Pro EXE exists).
+
+**In-app Pro updates:** `updates.novpax.org` Worker (`services/pro-updates/`) —
+Atmospeak/Cloudflare follow-up; not blocking Polar checkout or File Downloads.
+
+See [`PRO_BUILD.md`](PRO_BUILD.md), [`POLAR.md`](POLAR.md), and
 [`../services/pro-updates/README.md`](../services/pro-updates/README.md).
 
 ## Local Release Build
 
 ```powershell
-$env:ATMOSPEAK_FREE_CDN_BASE = "https://downloads.novpax.org/atmospeak/free"
+$env:ATMOSPEAK_FREE_CDN_BASE = "https://www.novpax.org/downloads/atmospeak/free"
 $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$env:USERPROFILE\.tauri\atmospeak\updater.key"
 bun run release:build          # free → release/free/
 bun run release:build:pro      # pro  → release/pro/

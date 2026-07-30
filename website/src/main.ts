@@ -302,7 +302,7 @@ function downloadSection() {
   heading.textContent = `Atmospeak v${APP_VERSION}`;
   const copy = document.createElement("p");
   copy.textContent =
-    "Free edition installers and updater metadata live on the Nov Pax CDN. Pro is a separate signed build sold through Polar — not these public links.";
+    "Free edition installers and updater metadata live at www.novpax.org/downloads/atmospeak/free/. Pro is a separate signed build sold through Polar — not these public links.";
   header.append(heading, copy);
   section.append(header);
 

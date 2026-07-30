@@ -310,7 +310,7 @@ gated updates, Pro-only modules such as airplane mode and the network ledger).
 See [`docs/PRO_BUILD.md`](docs/PRO_BUILD.md) and [`docs/POLAR.md`](docs/POLAR.md).
 
 Canonical download and buy links: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
-Free updater feed: `https://downloads.novpax.org/atmospeak/free/latest.json`.
+Free updater feed: `https://www.novpax.org/downloads/atmospeak/free/latest.json`.
 
 ## Project
 

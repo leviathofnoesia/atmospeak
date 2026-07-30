@@ -1,17 +1,25 @@
-# Upload free release artifacts to downloads.novpax.org
+# Upload free release artifacts to novpax.org
 
-Requires Cloudflare credentials with write access to the public downloads bucket
-(or whatever backs `downloads.novpax.org`).
+Free installers are hosted **same-origin** on the Nov Pax marketing site
+(Vercel `public/downloads/atmospeak/free/`), matching Sanctuary Desktop.
 
-Example with Wrangler R2 (adjust bucket / prefix to match DNS):
+Canonical base:
 
-```powershell
-$ReleaseDir = "release\free"
-bunx wrangler r2 object put atmospeak-downloads/atmospeak/free/latest.json --file "$ReleaseDir\latest.json"
-Get-ChildItem $ReleaseDir -File | ForEach-Object {
-  bunx wrangler r2 object put "atmospeak-downloads/atmospeak/free/$($_.Name)" --file $_.FullName
-}
+```text
+https://www.novpax.org/downloads/atmospeak/free/
 ```
 
-Pro artifacts go to the **private** `atmospeak-pro` bucket — see
-`services/pro-updates/README.md`.
+Do **not** use `downloads.novpax.org` (no CNAME / separate downloads host).
+
+## Publish
+
+1. Build free channel: `bun run release:build` → `release/free/`
+2. In the **novpax.org** repo, copy into `public/downloads/atmospeak/free/`:
+   - `latest.json`
+   - `atmospeak_<ver>_x64-setup.exe` (+ `.sig` if present)
+   - MSI / portable / `SHA256SUMS.txt` as desired
+3. Deploy the marketing site.
+
+Pro purchase/reinstall uses Polar File Downloads. The gated Pro update Worker
+(`services/pro-updates/`, `updates.novpax.org`) is a separate Atmospeak/Cloudflare
+follow-up — not required for first Pro sales.

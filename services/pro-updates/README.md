@@ -33,4 +33,7 @@ from `check_pro_update`.
 ## Free channel
 
 Free builds do **not** use this Worker. They poll
-`https://downloads.novpax.org/atmospeak/free/latest.json` on the public CDN.
+
+`https://www.novpax.org/downloads/atmospeak/free/latest.json`
+
+on the Nov Pax marketing host (Vercel `public/downloads/`).
