@@ -291,10 +291,11 @@ fn strip_fences(value: &str) -> String {
 
 fn looks_like_prompt_leak(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
+    // Match fingerprints unique to our system prompt / the known leak, not
+    // ordinary phrases a user might dictate (e.g. "the system prompt needs…").
     lower.contains("provider mode")
         || lower.contains("you are atmospeak")
         || lower.contains("dictation polish layer")
-        || lower.contains("system prompt")
 }
 
 fn sanitize_reqwest_error(error: reqwest::Error) -> anyhow::Error {
@@ -366,6 +367,7 @@ mod tests {
     fn detects_provider_mode_prompt_leak() {
         assert!(looks_like_prompt_leak("Provider mode: Bundled."));
         assert!(!looks_like_prompt_leak("Correct method."));
+        assert!(!looks_like_prompt_leak("The system prompt needs updating."));
     }
 
     #[test]
