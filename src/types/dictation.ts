@@ -315,7 +315,8 @@ export type HubTab =
   | "history"
   | "dictionary"
   | "snippets"
-  | "settings";
+  | "settings"
+  | "pro";
 
 export interface AppNotice {
   tone: "neutral" | "success" | "warning" | "error";

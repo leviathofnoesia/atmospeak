@@ -1,5 +1,8 @@
 param(
+  [ValidateSet("free", "pro")]
+  [string]$Channel = "free",
   [string]$ReleaseRepo = $env:ATMOSPEAK_RELEASE_REPO,
+  [string]$FreeCdnBase = $env:ATMOSPEAK_FREE_CDN_BASE,
   [switch]$SkipTauriBuild
 )
 
@@ -9,10 +12,19 @@ $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ReleaseRepo)) {
   $ReleaseRepo = "leviathofnoesia/atmospeak"
 }
+if ([string]::IsNullOrWhiteSpace($FreeCdnBase)) {
+  $FreeCdnBase = "https://downloads.novpax.org/atmospeak/free"
+}
+$FreeCdnBase = $FreeCdnBase.TrimEnd("/")
+$IsPro = $Channel -eq "pro"
 
 $Package = Get-Content (Join-Path $Root "package.json") -Raw | ConvertFrom-Json
 $Version = [string]$Package.version
-$ReleaseDir = Join-Path $Root "release"
+$ReleaseDir = if ($IsPro) {
+  Join-Path $Root "release\pro"
+} else {
+  Join-Path $Root "release\free"
+}
 $StageDir = Join-Path $ReleaseDir "portable-stage"
 # Honor CARGO_TARGET_DIR (Cursor sandboxes redirect here). Without this, the
 # script packages stale installers from src-tauri/target while the real build
@@ -124,6 +136,14 @@ if (-not $SkipTauriBuild) {
       throw "ASR sidecar build failed with exit code $sidecarExitCode"
     }
     $buildArgs = @()
+    if ($IsPro) {
+      $proConfig = Join-Path $Root "src-tauri\tauri.pro.conf.json"
+      if (-not (Test-Path $proConfig)) {
+        throw "Missing Pro Tauri overlay: $proConfig"
+      }
+      $buildArgs += @("--features", "pro", "--config", $proConfig)
+      Write-Host "Building Atmospeak Pro channel (cargo feature pro + tauri.pro.conf.json)"
+    }
     if (-not $HasUpdaterSigningKey) {
       Write-Warning "No Tauri updater signing key found. Building unsigned local installers without updater artifacts or latest.json."
       $unsignedConfigPath = Join-Path $env:TEMP "atmospeak-tauri-unsigned-build.json"
@@ -132,7 +152,7 @@ if (-not $SkipTauriBuild) {
         "{`"bundle`":{`"createUpdaterArtifacts`":false}}",
         [System.Text.UTF8Encoding]::new($false)
       )
-      $buildArgs = @("--config", $unsignedConfigPath)
+      $buildArgs += @("--config", $unsignedConfigPath)
     }
 
     Invoke-TauriBuild $buildArgs
@@ -162,10 +182,11 @@ $MsiSource = Get-ChildItem (Join-Path $BundleRoot "msi") -Filter "*$Version*.msi
 if (-not $NsisSource) { throw "NSIS installer for version $Version was not produced under $BundleRoot\nsis." }
 if (-not $MsiSource) { throw "MSI installer for version $Version was not produced under $BundleRoot\msi." }
 
-$NsisName = "atmospeak_$Version`_x64-setup.exe"
-$MsiName = "atmospeak_$Version`_x64_en-US.msi"
-$UpdaterZipName = "atmospeak_$Version`_x64-setup.nsis.zip"
-$PortableName = "atmospeak_$Version`_x64-portable.zip"
+$ProductSlug = if ($IsPro) { "atmospeak-pro" } else { "atmospeak" }
+$NsisName = "$ProductSlug`_$Version`_x64-setup.exe"
+$MsiName = "$ProductSlug`_$Version`_x64_en-US.msi"
+$UpdaterZipName = "$ProductSlug`_$Version`_x64-setup.nsis.zip"
+$PortableName = "$ProductSlug`_$Version`_x64-portable.zip"
 $LatestName = "latest.json"
 $ChecksumsName = "SHA256SUMS.txt"
 
@@ -227,14 +248,27 @@ Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $PortableDest 
 
 if ($HasUpdaterSigningKey) {
   $UpdaterSignature = (Get-Content $UpdaterSignaturePath -Raw).Trim()
+  # Free channel: public CDN URLs embedded in latest.json.
+  # Pro channel: placeholder CDN-relative names; the gated update Worker rewrites
+  # `url` to short-lived pre-signed object URLs after licence checks.
+  $UpdaterUrl = if ($IsPro) {
+    "https://updates.novpax.org/atmospeak/pro/artifacts/$UpdaterAssetName"
+  } else {
+    "$FreeCdnBase/$UpdaterAssetName"
+  }
+  $ChannelNotes = if ($IsPro) {
+    "Atmospeak Pro $Version — licensed build with gated updates."
+  } else {
+    "Atmospeak $Version desktop release with bundled offline transcription runtime."
+  }
   $Latest = [ordered]@{
     version = $Version
-    notes = "Atmospeak $Version desktop release with bundled offline transcription runtime."
+    notes = $ChannelNotes
     pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     platforms = [ordered]@{
       "windows-x86_64" = [ordered]@{
         signature = $UpdaterSignature
-        url = "https://github.com/$ReleaseRepo/releases/latest/download/$UpdaterAssetName"
+        url = $UpdaterUrl
       }
     }
   }
@@ -250,7 +284,12 @@ $HashLines | Set-Content -Encoding ascii $ChecksumsDest
 
 Remove-Item $StageDir -Recurse -Force
 
-Write-Host "Release files written to $ReleaseDir"
+Write-Host "Release files written to $ReleaseDir (channel=$Channel)"
 Get-ChildItem $ReleaseDir -File | Sort-Object Name | ForEach-Object {
   Write-Host ("{0} {1:N0} bytes" -f $_.Name, $_.Length)
+}
+if (-not $IsPro) {
+  Write-Host "Upload free artifacts to $FreeCdnBase/ (and optionally mirror to GitHub Releases)."
+} else {
+  Write-Host "Upload Pro artifacts to the private Pro bucket; refresh Polar File Download; publish latest.json via the gated Worker."
 }

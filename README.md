@@ -300,18 +300,17 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
 
 ## What is free
 
-All of it. Dictation, every local Whisper model, cleanup, Backtrack, injection,
-history, dictionary, snippets, and on-device AI edit are **free, unlimited, and
-require no account**. There is nothing to sign into, no usage cap, and no trial
-that expires.
+Dictation, every local Whisper model, cleanup, Backtrack, injection, history,
+dictionary, snippets, and on-device AI edit are **free, unlimited, and require no
+account** in the public MIT build.
 
-Everything shipped through 1.0.0 stays that way. This is a standing commitment,
-not a promotion: nothing that already works for free will be moved behind a
-licence. Atmospeak is MIT licensed, and that grant cannot be withdrawn from
-anyone who already has the code.
+Everything shipped through 1.0.0 stays that way for the free edition. Paid
+capability lives in a **separate Atmospeak Pro build** (online Polar licence,
+gated updates, Pro-only modules such as airplane mode and the network ledger).
+See [`docs/PRO_BUILD.md`](docs/PRO_BUILD.md) and [`docs/POLAR.md`](docs/POLAR.md).
 
-If paid capability is ever offered, it will be capability that does not exist
-today — never a fence around something this release already does.
+Canonical download and buy links: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
+Free updater feed: `https://downloads.novpax.org/atmospeak/free/latest.json`.
 
 ## Project
 

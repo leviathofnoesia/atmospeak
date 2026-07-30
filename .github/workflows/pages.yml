@@ -1,5 +1,8 @@
 name: Deploy website to Pages
 
+# Transitional: GitHub Pages mirrors/redirects toward novpax.org.
+# Canonical storefront is https://www.novpax.org/projects/atmospeak
+
 on:
   push:
     branches: [main]

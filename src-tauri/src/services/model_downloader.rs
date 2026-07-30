@@ -139,6 +139,22 @@ pub fn download(app: &AppHandle, model_id: &str) -> Result<()> {
         );
     }
 
+    #[cfg(feature = "pro")]
+    {
+        use crate::services::pro_commands::{outbound_allowed, record_outbound};
+        if !outbound_allowed(app) {
+            record_outbound(
+                app,
+                "model_download",
+                &model.url,
+                false,
+                Some("airplane_mode".into()),
+            );
+            bail!("airplane mode is on — model downloads are blocked");
+        }
+        record_outbound(app, "model_download", &model.url, true, None);
+    }
+
     let state = app.state::<AppState>();
     state.begin_model_download(model_id)?;
     let result = download_inner(app, &state, model);

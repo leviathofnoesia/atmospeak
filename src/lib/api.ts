@@ -31,9 +31,12 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
-const releaseVersion = "0.3.1";
+const releaseBaseUrl = "https://downloads.novpax.org/atmospeak/free";
+const releaseVersion = "1.0.3";
 const mockInstalledModels = new Set(["base.en"]);
+const polarCheckoutUrl =
+  import.meta.env.VITE_ATMOSPEAK_POLAR_CHECKOUT_URL ??
+  "https://novpax.org/projects/atmospeak#pro";
 
 let mockSnapshot: AppSnapshot = {
   settings: defaultSettings(),
@@ -758,3 +761,108 @@ export function listReleaseArtifacts(): ReleaseArtifact[] {
 }
 
 export type { DownloadArtifact };
+
+export type AppEdition = "free" | "pro";
+
+export interface LicenceStatus {
+  isProBuild: boolean;
+  activated: boolean;
+  licenseDisplay: string | null;
+  activationId: string | null;
+  valid: boolean;
+  offlineGrace: boolean;
+  lastValidatedAt: string | null;
+  updatesUntil: string | null;
+  graceDays: number;
+  message: string;
+}
+
+export interface ProFeatureStatus {
+  airplaneMode: { enabled: boolean; updatedAt: string };
+  ledgerRecent: Array<{
+    at: string;
+    kind: string;
+    target: string;
+    allowed: boolean;
+    detail?: string | null;
+  }>;
+  capabilities: Array<{ id: string; label: string }>;
+}
+
+export function getEdition(): Promise<AppEdition> {
+  return command("get_edition", undefined, async () => "free" as AppEdition).then((value) =>
+    value === "pro" ? "pro" : "free",
+  );
+}
+
+export function getLicenseStatus(): Promise<LicenceStatus> {
+  return command("get_license_status", undefined, async () => ({
+    isProBuild: false,
+    activated: false,
+    licenseDisplay: null,
+    activationId: null,
+    valid: false,
+    offlineGrace: false,
+    lastValidatedAt: null,
+    updatesUntil: null,
+    graceDays: 14,
+    message: "Pro licence commands are only available in Atmospeak Pro.",
+  }));
+}
+
+export function activateLicense(key: string): Promise<LicenceStatus> {
+  return command("activate_license", { key }, async () => {
+    throw new Error("Atmospeak Pro required");
+  });
+}
+
+export function deactivateLicense(): Promise<LicenceStatus> {
+  return command("deactivate_license", undefined, async () => {
+    throw new Error("Atmospeak Pro required");
+  });
+}
+
+export function validateLicense(): Promise<LicenceStatus> {
+  return command("validate_license", undefined, async () => {
+    throw new Error("Atmospeak Pro required");
+  });
+}
+
+export function getProFeatureStatus(): Promise<ProFeatureStatus> {
+  return command("get_pro_feature_status", undefined, async () => {
+    throw new Error("Atmospeak Pro required");
+  });
+}
+
+export function setAirplaneMode(enabled: boolean): Promise<{
+  enabled: boolean;
+  updatedAt: string;
+}> {
+  return command("set_airplane_mode", { enabled }, async () => {
+    throw new Error("Atmospeak Pro required");
+  });
+}
+
+export function exportNetworkLedger(): Promise<string> {
+  return command("export_network_ledger", undefined, async () => {
+    throw new Error("Atmospeak Pro required");
+  });
+}
+
+export function checkProUpdate(): Promise<{
+  available: boolean;
+  version?: string;
+  body?: string | null;
+  date?: string | null;
+}> {
+  return command("check_pro_update", undefined, async () => ({ available: false }));
+}
+
+export async function openProCheckout(): Promise<void> {
+  if (hasTauriRuntime()) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(polarCheckoutUrl);
+    return;
+  }
+  window.open(polarCheckoutUrl, "_blank", "noopener,noreferrer");
+}

@@ -10,9 +10,14 @@ edition = "2024"
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+# This seems to be only an issue on Windows, see https://github.com/rust-lang.org/cargo/issues/8519
 name = "atmospeak_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+# Separate Pro binary: online Polar licence, gated updater, Pro modules from atmospeak-pro.
+pro = ["dep:atmospeak-pro"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -20,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 anyhow = "1"
 atmospeak-asr-protocol = { path = "../src-asr-protocol" }
+atmospeak-pro = { path = "../src-pro", optional = true }
 arboard = "3"
 chrono = { version = "0.4", features = ["serde"] }
 cpal = "0.16"
