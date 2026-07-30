@@ -57,7 +57,16 @@ impl NetworkLedger {
             .lock()
             .map_err(|_| NetworkLedgerError::LockPoisoned)?;
         let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
+        // If a prior crash left a partial line, start the next record on a new line.
+        let len = file.metadata()?.len();
+        if len > 0 {
+            let raw = fs::read(&self.path)?;
+            if raw.last().copied() != Some(b'\n') {
+                file.write_all(b"\n")?;
+            }
+        }
         writeln!(file, "{}", serde_json::to_string(entry)?)?;
+        file.flush()?;
         Ok(())
     }
 
@@ -87,7 +96,11 @@ impl NetworkLedger {
             if line.is_empty() {
                 continue;
             }
-            entries.push(serde_json::from_str(line)?);
+            // Skip corrupt / truncated lines from a mid-write crash.
+            let Ok(entry) = serde_json::from_str(line) else {
+                continue;
+            };
+            entries.push(entry);
             if entries.len() >= limit {
                 break;
             }
@@ -130,5 +143,21 @@ mod tests {
             .unwrap();
         let again = NetworkLedger::open(dir.path()).unwrap();
         assert_eq!(again.list_recent(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn skips_truncated_tail_and_recovers() {
+        let dir = tempdir().unwrap();
+        let path = NetworkLedger::path(dir.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{\"at\":\"2020-01-01T00:00:00Z\",\"kind\":\"a\",\"target\":\"t\",\"allowed\":true}\n{\"partial").unwrap();
+        let ledger = NetworkLedger::open(dir.path()).unwrap();
+        ledger
+            .record("update_check", "updates.novpax.org", true, None)
+            .unwrap();
+        let recent = ledger.list_recent(10).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].kind, "a");
+        assert_eq!(recent[1].kind, "update_check");
     }
 }

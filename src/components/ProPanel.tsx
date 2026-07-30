@@ -51,7 +51,16 @@ export function ProPanel({ onNotice }: ProPanelProps) {
     setBusy(true);
     try {
       await action();
-      await refresh();
+      try {
+        await refresh();
+      } catch (error) {
+        onNotice(
+          "error",
+          `Action succeeded, but refreshing status failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     } catch (error) {
       onNotice("error", error instanceof Error ? error.message : String(error));
     } finally {
@@ -169,7 +178,7 @@ export function ProPanel({ onNotice }: ProPanelProps) {
           <button
             type="button"
             className="button"
-            disabled={busy || !licence?.valid}
+            disabled={busy || !licence?.valid || features == null}
             onClick={() =>
               void run(async () => {
                 const enabled = !features?.airplaneMode.enabled;
@@ -188,7 +197,7 @@ export function ProPanel({ onNotice }: ProPanelProps) {
           <button
             type="button"
             className="button"
-            disabled={busy || !licence?.valid}
+            disabled={busy || !licence?.valid || features == null}
             onClick={() =>
               void run(async () => {
                 const jsonl = await exportNetworkLedger();

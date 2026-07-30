@@ -137,17 +137,15 @@ fn store_secrets(key: &str, activation_id: &str) -> Result<(), String> {
 }
 
 fn clear_secrets() -> Result<(), String> {
-    if let Ok(entry) = keyring_entry(KEY_USER) {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(err) => return Err(format!("failed to clear licence key: {err}")),
-        }
+    let key_entry = keyring_entry(KEY_USER)?;
+    match key_entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(err) => return Err(format!("failed to clear licence key: {err}")),
     }
-    if let Ok(entry) = keyring_entry(ACTIVATION_USER) {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(err) => return Err(format!("failed to clear activation id: {err}")),
-        }
+    let activation_entry = keyring_entry(ACTIVATION_USER)?;
+    match activation_entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(err) => return Err(format!("failed to clear activation id: {err}")),
     }
     Ok(())
 }
@@ -210,7 +208,12 @@ fn compute_updates_until(
 }
 
 fn within_grace(last: DateTime<Utc>, days: i64) -> bool {
-    Utc::now() <= last + Duration::days(days)
+    let now = Utc::now();
+    // Reject future-dated local state so editing licence_state.json cannot mint grace.
+    if last > now {
+        return false;
+    }
+    now <= last + Duration::days(days)
 }
 
 pub fn status(app_data_dir: &Path) -> LicenceStatus {
