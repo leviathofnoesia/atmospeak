@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.3 — Nothing blocks paste that paste does not use (2026-07-30)
+
+Follow-up to 1.0.2. The preview-paste fix shipped intact; this removes the
+paste-path costs that came in with the security and Settings work bundled into
+the same pull request, and re-arms a fallback gate that had become a no-op.
+
+### Fixed
+
+- Copy-only polish providers (OpenAI-compatible) are polished *after* inject.
+  Paste no longer waits up to 750 ms for a result it discards. Local providers
+  (Bundled, Ollama) still paste polished output and still wait for it.
+- Preview paste loads settings instead of the full `snapshot()` (dictionary,
+  snippets, 100 history rows, stats) between mic stop and Ctrl+V.
+- The "material streaming drops force Final" gate reads the live drop counter.
+  It was reading `streaming_frames_dropped`, which `finalize_capture` only
+  settles after preview paste has already injected — so it saw 0 every time.
+- Fallback-path stage `totalMs` stops at inject, matching the preview path.
+
+### Removed
+
+- `LivePasteSnapshot::covers_duration` / `PREVIEW_COVERAGE_SLACK_MS`, dead since
+  1.0.2 removed the coverage gate.
+
 ## 1.0.2 — Preview paste + deepsec hardening (2026-07-30)
 
 Hotfix for release→paste latency, plus the five deepsec hardening

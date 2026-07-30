@@ -759,8 +759,11 @@ impl Worker {
             }
         };
 
+        // Read the live counter: `streaming_frames_dropped` is still 0 here because
+        // it only settles in `finalize_capture`, which preview paste deliberately
+        // defers until after inject. Using the settled field made this gate dead.
         let drops_exceeded =
-            streaming_drop_exceeds_tolerance(captured.streaming_frames_dropped);
+            streaming_drop_exceeds_tolerance(captured.observed_frames_dropped());
         let preview_ready = preview_paste.as_ref().is_some_and(|preview| {
             preview.session_id == captured.id && !preview.paste_text.trim().is_empty()
         });
@@ -960,54 +963,67 @@ impl Worker {
                 };
                 timer.mark_cleanup(cleanup_started.elapsed().as_millis() as u64);
 
-                let mut polished_text: Option<String> = None;
+                // Remote OpenAI-compatible polish stays copy-only unless the user
+                // confirms paste-again, so only local providers can change what
+                // release pastes.
                 let trusted_auto_paste_polish = matches!(
                     snapshot.settings.polish_provider,
                     crate::models::PolishProvider::Bundled
                         | crate::models::PolishProvider::Ollama
                 );
-                let paste_text = match polish::polish_if_enabled(
-                    &app,
-                    &snapshot.settings,
-                    &cleaned_text,
-                    polish::AUTO_POLISH_TIMEOUT,
-                ) {
-                    Ok(Some(outcome)) => {
-                        metrics::emit_runtime(
-                            &app,
-                            "polish-ok",
-                            format!(
-                                "session={} elapsed_ms={}",
-                                finished.id, outcome.elapsed_ms
-                            ),
-                        );
-                        polished_text = Some(outcome.text.clone());
-                        // Remote OpenAI-compatible polish stays copy-only unless
-                        // the user confirms paste-again; auto-inject local ASR text.
-                        if trusted_auto_paste_polish {
-                            outcome.text
-                        } else {
-                            cleaned_text.clone()
+                let run_auto_polish = || {
+                    match polish::polish_if_enabled(
+                        &app,
+                        &snapshot.settings,
+                        &cleaned_text,
+                        polish::AUTO_POLISH_TIMEOUT,
+                    ) {
+                        Ok(Some(outcome)) => {
+                            metrics::emit_runtime(
+                                &app,
+                                "polish-ok",
+                                format!(
+                                    "session={} elapsed_ms={}",
+                                    finished.id, outcome.elapsed_ms
+                                ),
+                            );
+                            Some(outcome.text)
+                        }
+                        Ok(None) => None,
+                        Err(error) => {
+                            let kind = if polish::is_timeout_error(&error) {
+                                "polish-timeout"
+                            } else {
+                                "polish-fallback"
+                            };
+                            metrics::emit_runtime(
+                                &app,
+                                kind,
+                                format!(
+                                    "session={} {}",
+                                    finished.id,
+                                    polish::sanitize_message(&error.to_string())
+                                ),
+                            );
+                            None
                         }
                     }
-                    Ok(None) => cleaned_text.clone(),
-                    Err(error) => {
-                        let kind = if polish::is_timeout_error(&error) {
-                            "polish-timeout"
-                        } else {
-                            "polish-fallback"
-                        };
-                        metrics::emit_runtime(
-                            &app,
-                            kind,
-                            format!(
-                                "session={} {}",
-                                finished.id,
-                                polish::sanitize_message(&error.to_string())
-                            ),
-                        );
-                        cleaned_text.clone()
+                };
+
+                // Paste is never blocked by work it does not use: only wait on
+                // polish when its output is the text being injected. Copy-only
+                // providers polish after paste, for history.
+                let mut polished_text: Option<String> = None;
+                let paste_text = if trusted_auto_paste_polish {
+                    match run_auto_polish() {
+                        Some(text) => {
+                            polished_text = Some(text.clone());
+                            text
+                        }
+                        None => cleaned_text.clone(),
                     }
+                } else {
+                    cleaned_text.clone()
                 };
 
                 let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
@@ -1034,6 +1050,16 @@ impl Worker {
                 };
                 let paste_ms = inject_started.elapsed().as_millis() as u64;
                 timer.mark_inject(paste_ms);
+
+                // Stop the stage clock at paste, like the preview path does, so
+                // deferred polish cannot inflate the reported release→paste time.
+                let stage_metrics = timer.finish(finished.id.clone(), finished.duration_ms);
+
+                // Off the paste critical path: the transcript is already in the
+                // target app, so this only fills in history's AI-edited copy.
+                if !trusted_auto_paste_polish {
+                    polished_text = run_auto_polish();
+                }
 
                 let session = TranscriptSession {
                     id: finished.id.clone(),
@@ -1078,7 +1104,7 @@ impl Worker {
                         Some("streaming sidecar unavailable or disabled".to_string())
                     },
                 };
-                let metrics = timer.finish(finished.id, finished.duration_ms);
+                let metrics = stage_metrics;
                 Ok((
                     DictationResult {
                         session,
@@ -1110,17 +1136,21 @@ impl Worker {
         preview: crate::services::live_paste::LivePasteSnapshot,
         capture_stop_ms: u64,
     ) -> Result<DictationResult, String> {
+        // Settings only — `snapshot()` also loads dictionary, snippets, the last
+        // 100 history rows and their stats, and this runs between mic stop and
+        // Ctrl+V. The live hypothesis was already cleaned with the dictionary and
+        // snippets frozen at listen start, so none of that is needed here.
         let settings_load = {
             let state = self.app.state::<AppState>();
             state
                 .database
                 .lock()
-                .snapshot()
-                .map(|snapshot| {
+                .load_settings()
+                .map(|settings| {
                     (
-                        snapshot.settings.auto_inject,
-                        snapshot.settings.restore_clipboard,
-                        snapshot.settings.active_model_id.clone(),
+                        settings.auto_inject,
+                        settings.restore_clipboard,
+                        settings.active_model_id,
                         state.last_target_window(),
                     )
                 })

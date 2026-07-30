@@ -89,6 +89,19 @@ pub struct CapturedRecording {
     audio_prepared: bool,
 }
 
+impl CapturedRecording {
+    /// Frames the streaming writer has dropped so far. `streaming_frames_dropped`
+    /// only settles in `finalize_capture`, so any decision taken before finalize
+    /// (preview paste runs before it, on purpose) must read the live counter or
+    /// it always sees zero.
+    pub fn observed_frames_dropped(&self) -> u64 {
+        match self.streaming_dropped.as_ref() {
+            Some(dropped) => dropped.load(Ordering::Relaxed),
+            None => self.streaming_frames_dropped,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioAnalysis {
     pub active_speech_ms: u64,
@@ -1111,7 +1124,8 @@ mod tests {
     use super::{
         AudioAnalysis, CapturedRecording, StreamingFrameSender, StreamingResampler,
         TARGET_SAMPLE_RATE, analyze_samples, capture_input_streaming, finish_recording,
-        load_fixture_samples, normal_dictation_failure, prepare_for_dictation, resample_linear,
+        finalize_capture, load_fixture_samples, normal_dictation_failure, prepare_for_dictation,
+        resample_linear,
     };
     use parking_lot::Mutex;
     use std::sync::{
@@ -1285,5 +1299,33 @@ mod tests {
         assert!(mean.abs() < 0.001);
         assert!(peak <= 0.709);
         assert!(peak > 0.60);
+    }
+
+    /// Preview paste decides before `finalize_capture`, so the drop gate must see
+    /// the live counter instead of the not-yet-settled field.
+    #[test]
+    fn observed_drops_read_the_live_counter_before_finalize() {
+        let temp = tempdir().expect("tempdir");
+        let dropped = Arc::new(AtomicU64::new(31));
+        let mut captured = CapturedRecording {
+            id: "drops".to_string(),
+            path: temp.path().join("drops.wav"),
+            duration_ms: 2_000,
+            sample_rate: TARGET_SAMPLE_RATE,
+            samples: vec![0.0; 16],
+            streaming_host: None,
+            streaming_frames_dropped: 0,
+            pending_samples: None,
+            streaming_worker: None,
+            streaming_dropped: Some(dropped.clone()),
+            streaming_write_failed: None,
+            audio_prepared: true,
+        };
+        assert_eq!(captured.observed_frames_dropped(), 31);
+
+        // After finalize the atomic is gone and the settled field answers instead.
+        finalize_capture(&mut captured).expect("finalize");
+        assert_eq!(captured.streaming_frames_dropped, 31);
+        assert_eq!(captured.observed_frames_dropped(), 31);
     }
 }

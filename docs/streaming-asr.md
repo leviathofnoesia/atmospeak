@@ -58,10 +58,18 @@ MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
    off the inject critical path. When preview is missing or empty, stop falls
    back to finalize capture, quality gate, `StopSession` / `await_final` (or
    batch), cleanup, then paste.
+   Only settings are read on that path — the release→paste critical section
+   never loads history, dictionary, or snippets.
 6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop on
    the slow path leaves the full local recording available to the legacy batch
    path, which prefers the lazy resident `whisper-server` over a cold one-shot
-   `whisper-cli`.
+   `whisper-cli`. The preview decision reads the live drop counter, because the
+   settled `streaming_frames_dropped` field is only populated by
+   `finalize_capture`, which preview paste deliberately defers until after
+   inject.
+7. Auto-polish only blocks paste when its output is the text being pasted —
+   local providers (Bundled, Ollama). Copy-only providers
+   (OpenAI-compatible) are polished after inject, for history.
 
 IPC is versioned, length-prefixed MessagePack over stdin/stdout. Protocol
 frames are capped at 1 MiB; stdout is protocol-only and logs go to stderr.
