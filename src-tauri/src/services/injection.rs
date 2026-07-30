@@ -27,13 +27,16 @@ pub fn inject_text(
 
     if let Some(target) = preferred_target.as_ref() {
         match restore_foreground(target) {
-            Ok(true) => {
+            Ok(FocusRestore::Restored) => {
                 restored_target = true;
-                // Focus is restored; give the target a beat to place caret /
+                // Focus just moved; give the target a beat to place caret /
                 // activate its edit control before Ctrl+V.
                 thread::sleep(Duration::from_millis(40));
             }
-            Ok(false) => {}
+            Ok(FocusRestore::AlreadyForeground) => {
+                restored_target = true;
+            }
+            Ok(FocusRestore::Skipped) => {}
             Err(error) => {
                 eprintln!("atmospeak injection: restore failed: {error}");
             }
@@ -222,8 +225,16 @@ pub fn is_atmospeak_hwnd(hwnd: isize) -> bool {
     }
 }
 
-/// Returns Ok(true) if restore succeeded, Ok(false) if skipped (invalid), Err on API failure.
-pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusRestore {
+    AlreadyForeground,
+    Restored,
+    Skipped,
+}
+
+/// Restore focus to the dictation target. Distinguishes already-focused (no settle sleep)
+/// from a successful activation that needs a short caret settle.
+pub fn restore_foreground(target: &InjectionTarget) -> Result<FocusRestore> {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::HWND;
@@ -239,16 +250,16 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
         }
 
         if target.hwnd == 0 || !hwnd_is_valid(target.hwnd) {
-            return Ok(false);
+            return Ok(FocusRestore::Skipped);
         }
         let hwnd = HWND(target.hwnd as *mut _);
         if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
-            return Ok(false);
+            return Ok(FocusRestore::Skipped);
         }
 
         // Already foreground — paste can proceed without another activation cycle.
         if unsafe { GetForegroundWindow() } == hwnd {
-            return Ok(true);
+            return Ok(FocusRestore::AlreadyForeground);
         }
 
         let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
@@ -277,7 +288,7 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
                         AttachThreadInput(fg_thread, target_thread, 0);
                     }
                 }
-                return Ok(true);
+                return Ok(FocusRestore::Restored);
             }
             thread::sleep(Duration::from_millis(20));
         }
@@ -293,7 +304,7 @@ pub fn restore_foreground(target: &InjectionTarget) -> Result<bool> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = target;
-        Ok(false)
+        Ok(FocusRestore::Skipped)
     }
 }
 

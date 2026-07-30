@@ -15,8 +15,8 @@ use crate::{
     db::Database,
     models::{RuntimeEvent, ShortcutStatus, StageMetrics},
     services::{
-        asr_host::AsrHost, dictation_engine::EngineHandle, llama_host::LlamaHost,
-        recorder::RecorderService, streaming_asr::StreamingAsr,
+        asr_host::AsrHost, dictation_engine::EngineHandle, live_paste::LivePasteBuffer,
+        llama_host::LlamaHost, recorder::RecorderService, streaming_asr::StreamingAsr,
     },
 };
 
@@ -42,6 +42,7 @@ pub struct AppState {
     llama_host: Mutex<Option<Arc<LlamaHost>>>,
     streaming_asr: Mutex<Option<Arc<StreamingAsr>>>,
     streaming_asr_generation: AtomicU64,
+    pub live_paste: Arc<LivePasteBuffer>,
 }
 
 impl AppState {
@@ -87,6 +88,7 @@ impl AppState {
             llama_host: Mutex::new(None),
             streaming_asr: Mutex::new(None),
             streaming_asr_generation: AtomicU64::new(0),
+            live_paste: Arc::new(LivePasteBuffer::new()),
         })
     }
 

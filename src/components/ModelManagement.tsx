@@ -69,33 +69,33 @@ export function ModelManagement({
                 {!model.installed ? "not installed" : active ? "active" : model.bundled ? "bundled" : "installed"}
               </span>
               <small>{MODEL_DETAILS[model.id] ?? "Local whisper.cpp speech recognition model."}</small>
-              {!model.bundled ? (
-                <div className="model-pill__actions">
-                  {downloading ? (
-                    <button type="button" className="button button--ghost" onClick={() => void onCancelDownload()}>
-                      Cancel {download?.percent != null ? `${Math.round(download.percent)}%` : ""}
+              <div className="model-pill__actions">
+                {downloading ? (
+                  <button type="button" className="button button--ghost" onClick={() => void onCancelDownload()}>
+                    Cancel {download?.percent != null ? `${Math.round(download.percent)}%` : ""}
+                  </button>
+                ) : model.installed ? (
+                  <>
+                    <button type="button" className="button button--ghost" onClick={() => onSelect(model.id)}>
+                      {active ? "Selected" : "Use"}
                     </button>
-                  ) : model.installed ? (
-                    <>
-                      <button type="button" className="button button--ghost" onClick={() => onSelect(model.id)}>
-                        {active ? "Selected" : "Use"}
-                      </button>
+                    {!model.bundled ? (
                       <button type="button" className="button button--ghost" onClick={() => void onDelete(model.id)}>
                         Delete
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="button button--ghost"
-                      disabled={Boolean(download && ["starting", "downloading", "verifying"].includes(download.status))}
-                      onClick={() => void onDownload(model.id)}
-                    >
-                      Download
-                    </button>
-                  )}
-                </div>
-              ) : null}
+                    ) : null}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    disabled={Boolean(download && ["starting", "downloading", "verifying"].includes(download.status))}
+                    onClick={() => void onDownload(model.id)}
+                  >
+                    Download
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

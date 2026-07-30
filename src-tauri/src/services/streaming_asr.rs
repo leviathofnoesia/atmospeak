@@ -21,7 +21,7 @@ use tauri::{Manager, path::BaseDirectory};
 
 use crate::{
     models::LiveTranscriptEvent,
-    services::{asr_host, proc},
+    services::{app_state::AppState, asr_host, proc},
 };
 
 pub struct StreamingAsr {
@@ -122,8 +122,6 @@ impl StreamingAsr {
         thread::Builder::new()
             .name("atmospeak-asr-events".to_string())
             .spawn(move || {
-                let mut live_session = String::new();
-                let mut live_revision = 0_u64;
                 while let Ok(Some(event)) = read_frame::<AsrEvent>(&mut stdout) {
                     match &event {
                         AsrEvent::Partial {
@@ -132,11 +130,6 @@ impl StreamingAsr {
                             text,
                             covered_through_ms,
                         } => {
-                            if live_session != *session_id {
-                                live_session = session_id.clone();
-                                live_revision = 0;
-                            }
-                            live_revision = live_revision.saturating_add(1).max(*revision);
                             let latency = reader_session_started
                                 .lock()
                                 .as_ref()
@@ -154,14 +147,25 @@ impl StreamingAsr {
                                     0 => None,
                                     value => Some(value),
                                 };
-                            let payload = LiveTranscriptEvent {
-                                session_id: session_id.clone(),
-                                revision: live_revision,
-                                stable_text: String::new(),
-                                partial_text: text.clone(),
-                                covered_through_ms: *covered_through_ms,
-                                first_partial_latency_ms,
-                            };
+                            let payload = app
+                                .try_state::<AppState>()
+                                .and_then(|state| {
+                                    state.live_paste.apply_partial(
+                                        session_id,
+                                        text,
+                                        *covered_through_ms,
+                                        first_partial_latency_ms,
+                                        *revision,
+                                    )
+                                })
+                                .unwrap_or_else(|| LiveTranscriptEvent {
+                                    session_id: session_id.clone(),
+                                    revision: *revision,
+                                    stable_text: String::new(),
+                                    partial_text: text.clone(),
+                                    covered_through_ms: *covered_through_ms,
+                                    first_partial_latency_ms,
+                                });
                             let _ = app.emit("atmospeak://live-transcript", payload);
                         }
                         AsrEvent::StableSegment {
@@ -170,24 +174,29 @@ impl StreamingAsr {
                             end_ms,
                             ..
                         } => {
-                            if live_session != *session_id {
-                                live_session = session_id.clone();
-                                live_revision = 0;
-                            }
-                            live_revision = live_revision.saturating_add(1);
-                            let payload = LiveTranscriptEvent {
-                                session_id: session_id.clone(),
-                                revision: live_revision,
-                                stable_text: text.clone(),
-                                partial_text: String::new(),
-                                covered_through_ms: *end_ms,
-                                first_partial_latency_ms: match reader_first_partial_ms
-                                    .load(Ordering::Relaxed)
-                                {
+                            let first_partial_latency_ms =
+                                match reader_first_partial_ms.load(Ordering::Relaxed) {
                                     0 => None,
                                     value => Some(value),
-                                },
-                            };
+                                };
+                            let payload = app
+                                .try_state::<AppState>()
+                                .and_then(|state| {
+                                    state.live_paste.apply_stable(
+                                        session_id,
+                                        text,
+                                        *end_ms,
+                                        first_partial_latency_ms,
+                                    )
+                                })
+                                .unwrap_or_else(|| LiveTranscriptEvent {
+                                    session_id: session_id.clone(),
+                                    revision: 0,
+                                    stable_text: text.clone(),
+                                    partial_text: String::new(),
+                                    covered_through_ms: *end_ms,
+                                    first_partial_latency_ms,
+                                });
                             let _ = app.emit("atmospeak://live-transcript", payload);
                         }
                         _ => {}
