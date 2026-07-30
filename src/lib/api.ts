@@ -31,9 +31,12 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://github.com/leviathofnoesia/atmospeak/releases/latest/download";
-const releaseVersion = "0.3.1";
+const releaseBaseUrl = "https://www.novpax.org/downloads/atmospeak/free";
+const releaseVersion = "1.0.3";
 const mockInstalledModels = new Set(["base.en"]);
+const polarCheckoutUrl =
+  import.meta.env.VITE_ATMOSPEAK_POLAR_CHECKOUT_URL ??
+  "https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE";
 
 let mockSnapshot: AppSnapshot = {
   settings: defaultSettings(),
@@ -758,3 +761,21 @@ export function listReleaseArtifacts(): ReleaseArtifact[] {
 }
 
 export type { DownloadArtifact };
+
+export type AppEdition = "free" | "pro";
+
+/** Public free builds always report `"free"`. Pro is a separate private assemble. */
+export function getEdition(): Promise<AppEdition> {
+  return command("get_edition", undefined, async () => "free" as AppEdition).then((value) =>
+    value === "pro" ? "pro" : "free",
+  );
+}
+
+export async function openProCheckout(): Promise<void> {
+  if (hasTauriRuntime()) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(polarCheckoutUrl);
+    return;
+  }
+  window.open(polarCheckoutUrl, "_blank", "noopener,noreferrer");
+}

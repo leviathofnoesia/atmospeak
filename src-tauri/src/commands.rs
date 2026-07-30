@@ -17,6 +17,11 @@ use crate::{
 
 type CommandResult<T> = std::result::Result<T, String>;
 
+#[tauri::command]
+pub fn get_edition() -> String {
+    "free".to_string()
+}
+
 fn engine(state: &AppState) -> CommandResult<dictation_engine::EngineHandle> {
     state
         .engine()

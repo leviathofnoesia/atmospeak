@@ -96,7 +96,7 @@ import type {
 } from "./types/dictation";
 import { ONBOARDING_VERSION, sessionDisplayText } from "./types/dictation";
 
-const tabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
+const baseTabs: Array<{ id: HubTab; label: string; icon: typeof Radio }> = [
   { id: "home", label: "Home", icon: Home },
   { id: "history", label: "History", icon: History },
   { id: "dictionary", label: "Dictionary", icon: BookOpen },
@@ -1222,7 +1222,7 @@ function AppShell() {
           </span>
         </div>
         <nav aria-label="Atmospeak sections">
-          {tabs.map((tab) => {
+          {baseTabs.map((tab) => {
             const Icon = tab.icon;
             const count =
               tab.id === "history"

@@ -1,7 +1,12 @@
 import "./styles.css";
-import { APP_VERSION, RELEASE_DOWNLOAD_BASE } from "./version";
+import {
+  APP_VERSION,
+  FREE_CDN_BASE,
+  NOVPAX_PRODUCT_URL,
+  POLAR_CHECKOUT_URL,
+} from "./version";
 
-const releaseBaseUrl = RELEASE_DOWNLOAD_BASE;
+const releaseBaseUrl = FREE_CDN_BASE;
 const releaseArtifacts = {
   setup: `atmospeak_${APP_VERSION}_x64-setup.exe`,
   msi: `atmospeak_${APP_VERSION}_x64_en-US.msi`,
@@ -17,7 +22,15 @@ if (!app) {
 
 const shell = document.createElement("main");
 shell.className = "site-shell";
-shell.append(hero(), featureBand(), modelSection(), downloadSection(), docsSection(), footer());
+shell.append(
+  hero(),
+  featureBand(),
+  modelSection(),
+  downloadSection(),
+  proSection(),
+  docsSection(),
+  footer(),
+);
 app.appendChild(shell);
 
 function hero() {
@@ -33,8 +46,10 @@ function hero() {
   navItems.className = "nav-items";
   navItems.append(
     navLink("Models", "#models"),
-    navLink("Downloads", "#downloads"),
+    navLink("Free download", "#downloads"),
+    navLink("Pro", "#pro"),
     navLink("Docs", "#docs"),
+    navLink("novpax.org", NOVPAX_PRODUCT_URL),
   );
   nav.append(navItems);
   section.append(nav);
@@ -66,15 +81,19 @@ function hero() {
   const download = document.createElement("a");
   download.className = "button button-primary";
   download.href = releaseUrl(releaseArtifacts.setup);
-  download.textContent = `Download v${APP_VERSION}`;
-  actions.append(
-    download,
-    siteButton("Read install docs", "#docs"),
-  );
+  download.textContent = `Download free v${APP_VERSION}`;
+  const buy = document.createElement("a");
+  buy.className = "button";
+  buy.href = POLAR_CHECKOUT_URL;
+  buy.textContent = "Buy Pro — $69";
+  buy.rel = "noreferrer";
+  actions.append(download, buy, siteButton("Read install docs", "#docs"));
   content.append(actions);
 
   section.append(content);
-  section.append(specStrip(`v${APP_VERSION}`, "Windows x64", "Vulkan + CPU · fully local"));
+  section.append(
+    specStrip(`v${APP_VERSION}`, "Windows x64", "Free MIT · Pro gated separately"),
+  );
   return section;
 }
 
@@ -283,7 +302,7 @@ function downloadSection() {
   heading.textContent = `Atmospeak v${APP_VERSION}`;
   const copy = document.createElement("p");
   copy.textContent =
-    "Install the streaming local transcription release, use the portable build, or verify every file against the published checksums.";
+    "Free edition installers and updater metadata live at www.novpax.org/downloads/atmospeak/free/. Pro is a separate signed build sold through Polar — not these public links.";
   header.append(heading, copy);
   section.append(header);
 
@@ -323,6 +342,41 @@ function downloadSection() {
     ),
   );
   section.append(grid);
+  return section;
+}
+
+function proSection() {
+  const section = document.createElement("section");
+  section.id = "pro";
+  section.className = "docs";
+  section.setAttribute("aria-labelledby", "pro-title");
+
+  const header = document.createElement("div");
+  header.className = "section-head";
+  header.append(kicker("+ ATMOSPEAK PRO / SEPARATE BUILD"));
+  const heading = document.createElement("h2");
+  heading.id = "pro-title";
+  heading.textContent = "Pro — $69, three years of gated updates";
+  const copy = document.createElement("p");
+  copy.textContent =
+    "Atmospeak Pro is a separate binary with online Polar licensing, a private update channel, and Pro-only capabilities (airplane mode, network ledger; local meeting transcription planned). The free MIT dictation surface stays public forever. Atmos (meeting transcription) consolidates into Atmospeak Pro — not a second product.";
+  header.append(heading, copy);
+  section.append(header);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const buy = document.createElement("a");
+  buy.className = "button button-primary";
+  buy.href = POLAR_CHECKOUT_URL;
+  buy.textContent = "Buy on Polar";
+  buy.rel = "noreferrer";
+  const canon = document.createElement("a");
+  canon.className = "button";
+  canon.href = NOVPAX_PRODUCT_URL;
+  canon.textContent = "Canonical page on novpax.org";
+  canon.rel = "noreferrer";
+  actions.append(buy, canon);
+  section.append(actions);
   return section;
 }
 
@@ -426,7 +480,7 @@ function footer() {
   node.append(kicker("+ TRUST MODEL"));
   const copy = document.createElement("p");
   copy.textContent =
-    "Atmospeak remains fully local: preview text never enters the target app, and no recording or transcript is sent to a cloud service. Windows builds are unsigned, so verify release checksums if SmartScreen warns.";
+    "Free Atmospeak stays fully local. Canonical product and Pro checkout live on novpax.org; this GitHub Pages site is a transitional mirror. Pro is a separate licensed build with gated updates.";
   node.append(copy);
   return node;
 }

@@ -228,7 +228,7 @@ function Get-FreeTcpPort {
 
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
-  $InstallerPath = Get-ChildItem (Join-Path $Root "release") -Filter "*_x64-setup.exe" -File |
+  $InstallerPath = Get-ChildItem (Join-Path $Root "release") -Filter "*_x64-setup.exe" -File -Recurse |
     Sort-Object LastWriteTime -Descending |
     Select-Object -ExpandProperty FullName -First 1
 }

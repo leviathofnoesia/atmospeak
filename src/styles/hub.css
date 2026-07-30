@@ -129,6 +129,43 @@
   color: rgba(27,26,29,0.66);
 }
 
+.hub-shell .button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.hub-shell .settings-card {
+  margin-top: 1rem;
+  padding: 1rem 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.hub-shell .settings-card h3 {
+  margin: 0 0 0.35rem;
+}
+
+.hub-shell .panel-lede {
+  max-width: 42rem;
+  opacity: 0.85;
+}
+
+.hub-shell .field {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.hub-shell .field input {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  color: inherit;
+  border-radius: 0.35rem;
+}
+
 /* ── buttons ── */
 .hub-shell .button {
   display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
