@@ -61,14 +61,15 @@ remain in [`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
 
 ## Install
 
-Atmospeak currently supports **Windows 10/11 x64**.
+Atmospeak currently supports **Windows 10/11 x64**. Download free installers
+from [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak):
 
-| Package | Use it when | Download |
-| --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_1.0.3_x64-setup.exe](https://www.novpax.org/downloads/atmospeak/free/atmospeak_1.0.3_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_1.0.3_x64_en-US.msi](https://www.novpax.org/downloads/atmospeak/free/atmospeak_1.0.3_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_1.0.3_x64-portable.zip](https://www.novpax.org/downloads/atmospeak/free/atmospeak_1.0.3_x64-portable.zip) |
-| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://www.novpax.org/downloads/atmospeak/free/SHA256SUMS.txt) |
+| Package | Use it when |
+| --- | --- |
+| Setup EXE | Recommended installation |
+| MSI | Managed or MSI-based deployment |
+| Portable ZIP | Run without a system-wide install |
+| Checksums | Verify downloaded artifacts (`SHA256SUMS.txt`) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
 **Windows protected your PC**. Choose **More info**, verify the app name is
