@@ -71,6 +71,22 @@ MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
    local providers (Bundled, Ollama). Copy-only providers
    (OpenAI-compatible) are polished after inject, for history.
 
+There is one pipeline, not a fast one and a slow one. Release always runs the
+same sequence — resolve a transcript, inject it, settle the UI, tear down,
+persist — and the only thing that varies is which source answered:
+
+| Source | Answers with | Cost |
+| --- | --- | ---: |
+| Live hypothesis | Text already cleaned during the hold | ~0 ms |
+| Decode | Finalize capture, then streaming finalize or batch | 10^2–10^4 ms |
+
+The live source is the normal one; the decode source exists because a
+transcript that was never produced cannot be pasted, not because paste has two
+speeds. A source may hand over while capture is still open — the live one does,
+so the WAV join and host cancel land after the text — and the shared tail runs
+that deferred teardown in order. `inject_transcript` is the single point where
+text enters the machine, and the stage clock stops there for every source.
+
 IPC is versioned, length-prefixed MessagePack over stdin/stdout. Protocol
 frames are capped at 1 MiB; stdout is protocol-only and logs go to stderr.
 The protocol types live in `src-asr-protocol`. The reader/worker split is

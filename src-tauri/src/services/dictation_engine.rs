@@ -259,6 +259,50 @@ fn streaming_drop_exceeds_tolerance(dropped_frames: u64) -> bool {
     dropped_frames > STREAMING_DROP_TOLERANCE_FRAMES
 }
 
+/// The one place a transcript enters the user's machine. Every source goes
+/// through it, so auto-inject, clipboard fallback, target restore, and the paste
+/// clock cannot drift apart between them. Returns the injection outcome (`None`
+/// when auto-inject is off and the text was only copied) and the inject cost.
+fn inject_transcript(
+    app: &AppHandle,
+    session_id: &str,
+    paste_text: &str,
+    auto_inject: bool,
+    restore_clipboard: bool,
+    last_hwnd: Option<isize>,
+) -> Result<(Option<crate::models::InjectionResult>, u64), anyhow::Error> {
+    let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
+        hwnd,
+        process_name: injection::process_name_for(hwnd),
+    });
+    let inject_started = Instant::now();
+    let injected = if auto_inject {
+        Some(injection::inject_text(
+            paste_text,
+            restore_clipboard,
+            preferred,
+        )?)
+    } else {
+        if let Err(error) = injection::copy_text_to_clipboard(paste_text) {
+            metrics::emit_runtime(
+                app,
+                "clipboard-copy-error",
+                format!("session={session_id} {error}"),
+            );
+        }
+        None
+    };
+    Ok((injected, inject_started.elapsed().as_millis() as u64))
+}
+
+/// Capture a transcript source handed over while it was still open. The live
+/// hypothesis is pasteable the moment the mic stops, so that source keeps the
+/// WAV writer and streaming session alive and lets the shared tail close them
+/// after the text has landed. Sources that decode audio have nothing to defer.
+struct DeferredTeardown {
+    captured: recorder::CapturedRecording,
+}
+
 /// How long the worker may block before it must settle a terminal phase back to idle.
 /// `None` means nothing is pending and the worker can block indefinitely.
 fn settle_wait(state: EngineState, deadline: Option<Instant>, now: Instant) -> Option<Duration> {
@@ -1030,29 +1074,14 @@ impl Worker {
                     cleaned_text.clone()
                 };
 
-                let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
-                    hwnd,
-                    process_name: injection::process_name_for(hwnd),
-                });
-
-                let inject_started = Instant::now();
-                let injection_result = if snapshot.settings.auto_inject {
-                    Some(injection::inject_text(
-                        &paste_text,
-                        snapshot.settings.restore_clipboard,
-                        preferred,
-                    )?)
-                } else {
-                    if let Err(error) = injection::copy_text_to_clipboard(&paste_text) {
-                        metrics::emit_runtime(
-                            &app,
-                            "clipboard-copy-error",
-                            format!("session={} {error}", finished.id),
-                        );
-                    }
-                    None
-                };
-                let paste_ms = inject_started.elapsed().as_millis() as u64;
+                let (injection_result, paste_ms) = inject_transcript(
+                    &app,
+                    &finished.id,
+                    &paste_text,
+                    snapshot.settings.auto_inject,
+                    snapshot.settings.restore_clipboard,
+                    last_hwnd,
+                )?;
                 timer.mark_inject(paste_ms);
 
                 // Stop the stage clock at paste, like the preview path does, so
@@ -1183,11 +1212,6 @@ impl Worker {
             None => metrics::ASR_BACKEND_STREAMING_CPU,
         };
 
-        let preferred = last_hwnd.map(|hwnd| injection::InjectionTarget {
-            hwnd,
-            process_name: injection::process_name_for(hwnd),
-        });
-
         let mut timer = StageTimer::new();
         timer.mark_capture_stop(capture_stop_ms);
         timer.mark_write(0);
@@ -1195,36 +1219,27 @@ impl Worker {
         timer.mark_backend(backend);
         timer.mark_cleanup(0);
 
-        let inject_started = Instant::now();
-        let injection_result = if auto_inject {
-            match injection::inject_text(&paste_text, restore_clipboard, preferred) {
-                Ok(result) => Some(result),
-                Err(error) => {
-                    if let Some(host) = captured.streaming_host.take() {
-                        host.cancel_session(&session_id);
-                    }
-                    let _ = recorder::finalize_capture(&mut captured);
-                    let _ = std::fs::remove_file(&captured.path);
-                    self.app.state::<AppState>().live_paste.clear();
-                    return Err(error.to_string());
-                }
+        let (injection_result, paste_ms) = match inject_transcript(
+            &self.app,
+            &session_id,
+            &paste_text,
+            auto_inject,
+            restore_clipboard,
+            last_hwnd,
+        ) {
+            Ok(values) => values,
+            Err(error) => {
+                // Capture is still open on this source, so drop it here rather
+                // than leaving a half-written WAV and a live streaming session.
+                self.abandon_captured_recording(captured);
+                return Err(error.to_string());
             }
-        } else {
-            if let Err(error) = injection::copy_text_to_clipboard(&paste_text) {
-                metrics::emit_runtime(
-                    &self.app,
-                    "clipboard-copy-error",
-                    format!("session={session_id} {error}"),
-                );
-            }
-            None
         };
-        let paste_ms = inject_started.elapsed().as_millis() as u64;
         timer.mark_inject(paste_ms);
         // Stop the stage clock at paste — teardown must not inflate release→paste.
         let stage_metrics = timer.finish(session_id.clone(), duration_ms);
 
-        let mut session = TranscriptSession {
+        let session = TranscriptSession {
             id: session_id.clone(),
             raw_text,
             word_count: paste_text.split_whitespace().count(),
@@ -1244,59 +1259,9 @@ impl Worker {
         };
 
         let result = DictationResult {
-            session: session.clone(),
+            session,
             injection: injection_result,
         };
-
-        // Surface Pasted/Saved in the UI immediately, but keep EngineState::Processing
-        // until teardown finishes so a queued hotkey cannot start/stop an empty hold.
-        let injected = result
-            .injection
-            .as_ref()
-            .map(|injection| injection.injected)
-            .unwrap_or(false);
-        let message = result
-            .injection
-            .as_ref()
-            .map(|injection| injection.message.clone())
-            .unwrap_or_else(|| "Transcript saved to history.".to_string());
-        let terminal_phase = if injected {
-            DictationPhase::Pasted
-        } else if result.injection.is_some() {
-            DictationPhase::Error
-        } else {
-            DictationPhase::Saved
-        };
-        self.emit_phase(
-            terminal_phase.clone(),
-            recording,
-            message,
-            Some(result.clone()),
-            Some(stage_metrics.clone()),
-        );
-
-        // Deferred teardown: cancel finalize, retain WAV for history, persist session.
-        if let Some(host) = captured.streaming_host.take() {
-            host.cancel_session(&session_id);
-        }
-        let recording_path = captured.path.clone();
-        match recorder::finalize_capture(&mut captured)
-            .and_then(|_| recorder::finish_recording(captured))
-        {
-            Ok(finished) => {
-                session.audio_path = finished.path.to_string_lossy().to_string();
-            }
-            Err(error) => {
-                // Do not persist a history path that points at a missing/incomplete WAV.
-                metrics::emit_runtime(
-                    &self.app,
-                    "preview-paste-teardown-error",
-                    format!("session={session_id} {error}"),
-                );
-                let _ = std::fs::remove_file(&recording_path);
-                session.audio_path.clear();
-            }
-        }
 
         let streaming_backend = match backend {
             metrics::ASR_BACKEND_VULKAN => AsrBackend::Vulkan,
@@ -1318,26 +1283,14 @@ impl Worker {
             audio_frames_dropped: streaming_frames_dropped,
             fallback_reason: None,
         };
-        let state = self.app.state::<AppState>();
-        if let Err(error) = state.database.lock().insert_session(&session) {
-            metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
-        }
-        metrics::emit_stage_metrics(&self.app, &stage_metrics);
-        metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
-        state.live_paste.clear();
-        drop(state);
 
-        self.state = if matches!(terminal_phase, DictationPhase::Error) {
-            EngineState::Error
-        } else {
-            EngineState::Pasted
-        };
-        self.active_recording = None;
-        self.settle_from_terminal();
-        Ok(DictationResult {
-            session,
-            injection: result.injection,
-        })
+        // Same tail as every other source. The UI settles first, then the WAV
+        // join and host cancel this source deferred past paste, then persistence.
+        self.finish_pipeline_result_with_teardown(
+            recording,
+            Ok((result, stage_metrics, streaming_metrics)),
+            Some(DeferredTeardown { captured }),
+        )
     }
 
     fn finish_pipeline_result(
@@ -1345,15 +1298,24 @@ impl Worker {
         recording: Option<RecordingStarted>,
         pipeline: Result<(DictationResult, StageMetrics, StreamingMetrics), anyhow::Error>,
     ) -> Result<DictationResult, String> {
-        let state = self.app.state::<AppState>();
-        match pipeline {
-            Ok((result, metrics, streaming_metrics)) => {
-                if let Err(error) = state.database.lock().insert_session(&result.session) {
-                    metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
-                }
-                metrics::emit_stage_metrics(&self.app, &metrics);
-                metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
+        self.finish_pipeline_result_with_teardown(recording, pipeline, None)
+    }
 
+    /// The one tail every transcript source ends in: settle the UI, run whatever
+    /// teardown that source deferred past paste, persist, emit metrics.
+    ///
+    /// `deferred_teardown` exists because a source may hand over a transcript
+    /// while capture is still open — the live-preview source does, deliberately,
+    /// so WAV join and host cancel land after the text is in the target app. It
+    /// is not a second pipeline: it runs here, in order, for everyone.
+    fn finish_pipeline_result_with_teardown(
+        &mut self,
+        recording: Option<RecordingStarted>,
+        pipeline: Result<(DictationResult, StageMetrics, StreamingMetrics), anyhow::Error>,
+        deferred_teardown: Option<DeferredTeardown>,
+    ) -> Result<DictationResult, String> {
+        match pipeline {
+            Ok((mut result, metrics, streaming_metrics)) => {
                 let injected = result
                     .injection
                     .as_ref()
@@ -1364,36 +1326,40 @@ impl Worker {
                     .as_ref()
                     .map(|injection| injection.message.clone())
                     .unwrap_or_else(|| "Transcript saved to history.".to_string());
-
-                if injected {
-                    self.state = EngineState::Pasted;
-                    self.emit_phase(
-                        DictationPhase::Pasted,
-                        recording,
-                        message,
-                        Some(result.clone()),
-                        Some(metrics),
-                    );
+                let (phase, engine_state) = if injected {
+                    (DictationPhase::Pasted, EngineState::Pasted)
                 } else if result.injection.is_some() {
                     // Paste soft-failed but clipboard has text
-                    self.state = EngineState::Error;
-                    self.emit_phase(
-                        DictationPhase::Error,
-                        recording,
-                        message,
-                        Some(result.clone()),
-                        Some(metrics),
-                    );
+                    (DictationPhase::Error, EngineState::Error)
                 } else {
-                    self.state = EngineState::Pasted;
-                    self.emit_phase(
-                        DictationPhase::Saved,
-                        recording,
-                        message,
-                        Some(result.clone()),
-                        Some(metrics),
-                    );
+                    (DictationPhase::Saved, EngineState::Pasted)
+                };
+
+                // Surface the terminal phase before touching the database or the
+                // filesystem: nothing below changes what the user already has.
+                self.emit_phase(
+                    phase,
+                    recording,
+                    message,
+                    Some(result.clone()),
+                    Some(metrics.clone()),
+                );
+
+                if let Some(teardown) = deferred_teardown {
+                    // May clear the history audio path when the WAV did not survive.
+                    self.run_deferred_teardown(teardown, &mut result.session);
                 }
+
+                let state = self.app.state::<AppState>();
+                if let Err(error) = state.database.lock().insert_session(&result.session) {
+                    metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
+                }
+                state.live_paste.clear();
+                drop(state);
+                metrics::emit_stage_metrics(&self.app, &metrics);
+                metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
+
+                self.state = engine_state;
                 self.active_recording = None;
                 self.settle_from_terminal();
                 Ok(result)
@@ -1411,6 +1377,34 @@ impl Worker {
                     None,
                 );
                 Err(message)
+            }
+        }
+    }
+
+    /// Cancel the streaming session, join the WAV writer, and keep the history
+    /// audio path only if a complete recording survived.
+    fn run_deferred_teardown(&self, teardown: DeferredTeardown, session: &mut TranscriptSession) {
+        let DeferredTeardown { mut captured } = teardown;
+        let session_id = captured.id.clone();
+        if let Some(host) = captured.streaming_host.take() {
+            host.cancel_session(&session_id);
+        }
+        let recording_path = captured.path.clone();
+        match recorder::finalize_capture(&mut captured)
+            .and_then(|_| recorder::finish_recording(captured))
+        {
+            Ok(finished) => {
+                session.audio_path = finished.path.to_string_lossy().to_string();
+            }
+            Err(error) => {
+                // Do not persist a history path that points at a missing/incomplete WAV.
+                metrics::emit_runtime(
+                    &self.app,
+                    "preview-paste-teardown-error",
+                    format!("session={session_id} {error}"),
+                );
+                let _ = std::fs::remove_file(&recording_path);
+                session.audio_path.clear();
             }
         }
     }
