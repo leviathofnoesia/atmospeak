@@ -1,10 +1,9 @@
 # Changelog
 
-## 1.0.2 — Preview paste without coverage stall (2026-07-30)
+## 1.0.2 — Preview paste + deepsec hardening (2026-07-30)
 
-Hotfix for release→paste latency: trailing silence after speech made the
-preview coverage gate fail, so release fell through to Final and often a
-multi-second host batch even when the orb already showed the words.
+Hotfix for release→paste latency, plus the five deepsec hardening
+workstreams.
 
 ### Fixed
 
@@ -12,14 +11,19 @@ multi-second host batch even when the orb already showed the words.
   hold duration. Non-empty live preview for the active session pastes
   immediately (streaming drops still force Final).
 
-### Changed
+### Security
 
-- Polish endpoint validation: Ollama loopback-only; OpenAI-compatible requires
-  HTTPS. API keys are bound to an endpoint origin with rebinding confirmation.
-- Remote OpenAI-compatible auto-polish is copy-only on the Final path; paste of
-  AI-edited history text requires confirmation. Inject commands are scoped
-  (`inject_session` / `inject_onboarding_sample`).
-- Llama host / polish runtime hardening and Advanced polish settings UX updates.
+- Paste IPC: freeform `inject_text` replaced by `inject_session` /
+  `inject_onboarding_sample`; history pastes cleaned text by default;
+  polished paste requires confirm; control chars stripped at the inject
+  sink; remote OpenAI-compatible auto-polish no longer auto-injects.
+- Llama zip: pinned SHA-256 for the zip and `llama-server.exe`; downloads
+  use `write_verified_stream`; bootstrap script verifies the same hashes.
+- Polish secrets: Ollama limited to loopback; OpenAI-compatible requires
+  HTTPS; API keys bound to endpoint origin with reconfirm on change.
+- ASR override: overrides ignored/cleared in release; debug builds require
+  absolute trusted paths under resource/app-data; override UI hidden in prod.
+- Pages CI: job-scoped permissions; actions pinned to commit SHAs.
 
 ## 1.0.1 — Preview paste with polish on (2026-07-30)
 
