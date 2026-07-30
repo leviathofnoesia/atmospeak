@@ -11,6 +11,11 @@ workstreams.
   hold duration. Non-empty live preview for the active session pastes
   immediately (streaming drops still force Final).
 
+### Changed
+
+- Settings: sticky Save/Discard footer with dirty-state feedback, jumpable
+  sections, and no duplicate Advanced save.
+
 ### Security
 
 - Paste IPC: freeform `inject_text` replaced by `inject_session` /
