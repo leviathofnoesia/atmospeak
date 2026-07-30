@@ -12,6 +12,8 @@ and free — and tightens warm release→paste so the native PTT gate is honest 
 - Version bumped to 1.0.0 across the app, installer, and website.
 - README now presents Atmospeak as a complete free product rather than an
   increment, and states the free commitment explicitly.
+- Release pastes the cleaned live preview when coverage is good (no wait on
+  Final); Base English is selectable again in Settings after switching models.
 - Short clips no longer cancel streaming for the warm batch host by default;
   Vulkan streaming finalize is the warm release→paste path.
 - Streaming sidecar: reuse `WhisperState`, abort in-flight decode on stop,
