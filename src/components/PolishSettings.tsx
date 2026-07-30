@@ -56,11 +56,14 @@ export function PolishSettings({
     if (!apiKeyDraft.trim()) return;
     setApiKeyBusy(true);
     setApiKeyMessage("");
+    const endpoint = settings.polishEndpoint.trim();
     try {
-      await setPolishApiKey(apiKeyDraft.trim());
+      await setPolishApiKey(apiKeyDraft.trim(), endpoint);
+      const origin = new URL(endpoint).origin;
+      setSettings({ ...settings, polishApiKeyOrigin: origin });
       setApiKeyDraft("");
       setHasApiKey(true);
-      setApiKeyMessage("API key saved to the OS keyring.");
+      setApiKeyMessage("API key saved to the OS keyring and bound to this endpoint.");
     } catch (error: unknown) {
       setApiKeyMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -73,6 +76,7 @@ export function PolishSettings({
     setApiKeyMessage("");
     try {
       await clearPolishApiKey();
+      setSettings({ ...settings, polishApiKeyOrigin: "" });
       setHasApiKey(false);
       setApiKeyDraft("");
       setApiKeyMessage("API key cleared.");
@@ -90,9 +94,10 @@ export function PolishSettings({
         label="AI auto-edit before paste"
         checked={settings.autoPolish}
         onChange={onToggleAutoPolish}
+        disabled={apiKeyBusy}
       />
       {settings.autoPolish ? (
-        <div className="settings-polish">
+        <fieldset className="settings-polish" disabled={apiKeyBusy}>
           <p className="muted">
             Uses a small local model packaged with Atmospeak — no Ollama required. The first enable
             downloads ~470&nbsp;MB once, then rewrites stay on your machine.
@@ -138,7 +143,7 @@ export function PolishSettings({
             <button
               type="button"
               className="button button--ghost"
-              disabled={polishSetupBusy}
+              disabled={polishSetupBusy || apiKeyBusy}
               onClick={() => void onEnsurePolishRuntime()}
             >
               {polishSetupBusy
@@ -244,7 +249,7 @@ export function PolishSettings({
               cleaned text.
             </p>
           </details>
-        </div>
+        </fieldset>
       ) : null}
     </>
   );

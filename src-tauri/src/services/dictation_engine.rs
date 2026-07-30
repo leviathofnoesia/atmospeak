@@ -761,17 +761,15 @@ impl Worker {
 
         let drops_exceeded =
             streaming_drop_exceeds_tolerance(captured.streaming_frames_dropped);
-        let preview_covers = preview_paste
-            .as_ref()
-            .is_some_and(|preview| {
-                preview.session_id == captured.id && preview.covers_duration(captured.duration_ms)
-            });
-        // Preview paste stays aggressive even when auto-polish is enabled: paste the
-        // cleaned live hypothesis now. Auto-polish on the Final path was forcing a
-        // multi-second host fallback before paste for users with polish on.
-        // Material streaming drops still force Final/batch — the live hypothesis can
-        // look complete while missing overrun audio.
-        let take_preview = !drops_exceeded && preview_covers;
+        let preview_ready = preview_paste.as_ref().is_some_and(|preview| {
+            preview.session_id == captured.id && !preview.paste_text.trim().is_empty()
+        });
+        // Paste the cleaned live hypothesis whenever it is non-empty for this
+        // session. Wall-clock duration often includes trailing silence after the
+        // last spoken word, so a coverage gap does not mean missing speech —
+        // requiring coverage was forcing Final → host batch (multi-second paste).
+        // Material streaming drops still force Final/batch.
+        let take_preview = !drops_exceeded && preview_ready;
         if take_preview {
             if let Some(preview) = preview_paste {
                 match self.run_preview_paste_path(
@@ -963,6 +961,11 @@ impl Worker {
                 timer.mark_cleanup(cleanup_started.elapsed().as_millis() as u64);
 
                 let mut polished_text: Option<String> = None;
+                let trusted_auto_paste_polish = matches!(
+                    snapshot.settings.polish_provider,
+                    crate::models::PolishProvider::Bundled
+                        | crate::models::PolishProvider::Ollama
+                );
                 let paste_text = match polish::polish_if_enabled(
                     &app,
                     &snapshot.settings,
@@ -979,7 +982,13 @@ impl Worker {
                             ),
                         );
                         polished_text = Some(outcome.text.clone());
-                        outcome.text
+                        // Remote OpenAI-compatible polish stays copy-only unless
+                        // the user confirms paste-again; auto-inject local ASR text.
+                        if trusted_auto_paste_polish {
+                            outcome.text
+                        } else {
+                            cleaned_text.clone()
+                        }
                     }
                     Ok(None) => cleaned_text.clone(),
                     Err(error) => {

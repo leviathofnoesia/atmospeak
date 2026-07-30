@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "atmospeak"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -281,6 +281,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tempfile",
+ "url",
  "uuid",
  "windows 0.61.3",
 ]

@@ -41,6 +41,9 @@ pub struct AppSettings {
     pub polish_endpoint: String,
     pub polish_model: String,
     pub polish_provider: PolishProvider,
+    /// Canonical `scheme://host[:port]` the saved polish API key is bound to.
+    #[serde(default)]
+    pub polish_api_key_origin: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -153,6 +156,7 @@ impl Default for AppSettings {
             polish_endpoint: "http://127.0.0.1:11434/v1/chat/completions".to_string(),
             polish_model: "qwen2.5-0.5b".to_string(),
             polish_provider: PolishProvider::Bundled,
+            polish_api_key_origin: String::new(),
         }
     }
 }

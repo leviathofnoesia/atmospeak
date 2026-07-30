@@ -11,11 +11,20 @@ pub struct InjectionTarget {
     pub process_name: Option<String>,
 }
 
+/// Strip control characters that can hijack terminals or credential UIs.
+/// Keeps newline and tab; drops the rest (including `\r`, ESC, NUL).
+pub fn sanitize_for_paste(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_control() || *ch == '\n' || *ch == '\t')
+        .collect()
+}
+
 pub fn inject_text(
     text: &str,
     restore_clipboard: bool,
     preferred_target: Option<InjectionTarget>,
 ) -> Result<InjectionResult> {
+    let text = sanitize_for_paste(text);
     if text.trim().is_empty() {
         return Err(anyhow!("cannot inject an empty transcript"));
     }
@@ -46,7 +55,7 @@ pub fn inject_text(
     let mut clipboard = Clipboard::new().context("failed to open system clipboard")?;
     let previous_clipboard = clipboard.get_text().ok();
     clipboard
-        .set_text(text.to_string())
+        .set_text(text.clone())
         .context("failed to write transcript to clipboard")?;
 
     match send_paste_shortcut() {
@@ -78,7 +87,7 @@ pub fn inject_text(
         }
         Err(error) => {
             // Prefer leaving transcript on clipboard so the user is not empty-handed.
-            let _ = clipboard.set_text(text.to_string());
+            let _ = clipboard.set_text(text);
             if target_process_name.is_none() {
                 target_process_name = capture_foreground_target().and_then(|t| t.process_name);
             }
@@ -352,12 +361,13 @@ fn send_paste_shortcut() -> Result<()> {
 }
 
 pub fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    let text = sanitize_for_paste(text);
     if text.trim().is_empty() {
         return Err(anyhow!("cannot copy an empty transcript"));
     }
     Clipboard::new()
         .context("failed to open system clipboard")?
-        .set_text(text.to_string())
+        .set_text(text)
         .context("failed to write transcript to clipboard")
 }
 
@@ -366,4 +376,22 @@ fn send_paste_shortcut() -> Result<()> {
     Err(anyhow!(
         "system-wide paste injection is implemented for Windows in this prototype"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_for_paste;
+
+    #[test]
+    fn sanitize_keeps_newline_and_tab() {
+        assert_eq!(sanitize_for_paste("a\nb\tc"), "a\nb\tc");
+    }
+
+    #[test]
+    fn sanitize_strips_control_chars() {
+        assert_eq!(
+            sanitize_for_paste("hello\u{0000}\u{001b}\rworld"),
+            "helloworld"
+        );
+    }
 }

@@ -104,7 +104,7 @@
 
 /* ── form controls ── */
 .hub-shell label { display: flex; flex-direction: column; gap: 7px; }
-.hub-shell label > span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(27,26,29,0.5); }
+.hub-shell label > span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(27,26,29,0.62); }
 .hub-shell select,
 .hub-shell input[type="text"],
 .hub-shell input[type="search"],
@@ -121,7 +121,13 @@
 .hub-shell textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 14%, transparent); }
 .hub-shell input[type="range"] { accent-color: var(--accent); padding: 0; border: none; background: none; }
 .hub-shell input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
-.hub-shell small { color: rgba(27,26,29,0.5); font-size: 12px; }
+.hub-shell small { color: rgba(27,26,29,0.58); font-size: 12px; }
+.hub-shell .muted {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(27,26,29,0.66);
+}
 
 /* ── buttons ── */
 .hub-shell .button {
@@ -179,7 +185,99 @@
 }
 
 /* ── Settings / Advanced ── */
-.hub-shell .settings-panel { display: flex; flex-direction: column; gap: 18px; padding: 26px 34px 40px; max-width: 720px; }
+.hub-shell .settings-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.hub-shell .settings-view__body {
+  flex: 1 1 auto;
+  padding-bottom: 12px;
+}
+.hub-shell .settings-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 34px 0;
+}
+.hub-shell .settings-jump__chip {
+  border: 1px solid rgba(18,17,19,0.14);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: rgba(27,26,29,0.72);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+.hub-shell .settings-jump__chip:hover {
+  border-color: rgba(18,17,19,0.28);
+  color: var(--ink);
+  background: rgba(18,17,19,0.03);
+}
+.hub-shell .settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 18px 34px 28px;
+  max-width: 720px;
+}
+.hub-shell .settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-margin-top: 18px;
+}
+.hub-shell .settings-section > .panel-title {
+  padding: 8px 0 12px;
+  margin: 0;
+}
+.hub-shell .settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.hub-shell .settings-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: auto;
+  padding: 14px 34px;
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(18,17,19,0.08);
+  transition: background 0.2s, border-color 0.2s;
+}
+.hub-shell .settings-footer--dirty {
+  border-top-color: color-mix(in oklab, var(--accent) 35%, rgba(18,17,19,0.08));
+}
+.hub-shell .settings-footer__status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(27,26,29,0.58);
+  transition: color 0.2s;
+}
+.hub-shell .settings-footer--dirty .settings-footer__status {
+  color: var(--ink);
+}
+.hub-shell .settings-footer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
 .hub-shell .settings-polish { display: flex; flex-direction: column; gap: 12px; }
 .hub-shell .settings-polish__advanced { display: flex; flex-direction: column; gap: 12px; }
 .hub-shell .settings-polish__key-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
@@ -190,6 +288,7 @@
   font-size: 10px;
   letter-spacing: .12em;
   text-transform: uppercase;
+  color: rgba(27,26,29,0.62);
 }
 .hub-shell .settings-shortcut__recorder {
   display: flex;
@@ -339,6 +438,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hub-shell .button:hover { transform: none; }
+  .hub-shell .settings-jump__chip,
+  .hub-shell .settings-footer,
+  .hub-shell .settings-footer__status {
+    transition: none;
+  }
 }
 
 @media (max-width: 600px) {
@@ -399,6 +503,16 @@
   .hub-shell .list-panel {
     padding-left: 20px;
     padding-right: 20px;
+  }
+
+  .hub-shell .settings-jump,
+  .hub-shell .settings-footer {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .hub-shell .settings-footer {
+    flex-wrap: wrap;
   }
 
   .hub-hero {
@@ -490,6 +604,12 @@
   .hub-shell .panel-grid,
   .hub-shell .settings-panel,
   .hub-shell .list-panel {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .hub-shell .settings-jump,
+  .hub-shell .settings-footer {
     padding-left: 18px;
     padding-right: 18px;
   }

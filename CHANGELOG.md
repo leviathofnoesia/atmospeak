@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.2 — Preview paste + deepsec hardening (2026-07-30)
+
+Hotfix for release→paste latency, plus the five deepsec hardening
+workstreams.
+
+### Fixed
+
+- Preview paste no longer requires `covered_through_ms` to match wall-clock
+  hold duration. Non-empty live preview for the active session pastes
+  immediately (streaming drops still force Final).
+
+### Changed
+
+- Settings: sticky Save/Discard footer with dirty-state feedback, jumpable
+  sections, and no duplicate Advanced save.
+
+### Security
+
+- Paste IPC: freeform `inject_text` replaced by `inject_session` /
+  `inject_onboarding_sample`; history pastes cleaned text by default;
+  polished paste requires confirm; control chars stripped at the inject
+  sink; remote OpenAI-compatible auto-polish no longer auto-injects.
+- Llama zip: pinned SHA-256 for the zip and `llama-server.exe`; downloads
+  use `write_verified_stream`; bootstrap script verifies the same hashes.
+- Polish secrets: Ollama limited to loopback; OpenAI-compatible requires
+  HTTPS; API keys bound to endpoint origin with reconfirm on change.
+- ASR override: overrides ignored/cleared in release; debug builds require
+  absolute trusted paths under resource/app-data; override UI hidden in prod.
+- Pages CI: job-scoped permissions; actions pinned to commit SHAs.
+
 ## 1.0.1 — Preview paste with polish on (2026-07-30)
 
 Hotfix for two post-1.0.0 release issues: delayed paste when auto-polish is

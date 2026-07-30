@@ -10,16 +10,16 @@
 
 <p align="center">
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/leviathofnoesia/atmospeak?style=flat-square&color=5969a6"></a>
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.2/atmospeak_1.0.2_x64-setup.exe"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-171720?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-79966f?style=flat-square"></a>
 </p>
 
 <p align="center">
   <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe"><strong>Download v1.0.0</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.2/atmospeak_1.0.2_x64-setup.exe"><strong>Download v1.0.2</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.0"><strong>Release notes</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.2"><strong>Release notes</strong></a>
 </p>
 
 Atmospeak is a Windows desktop dictation app built around a local
@@ -54,9 +54,10 @@ unlimited and requires no account.
   edits, a personal dictionary, snippets, and local diagnostics — all on disk,
   on your machine.
 
-See [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md) for the full release
-note. Speed charts from 0.5.2 remain in
-[`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
+Latest patch notes: [`docs/releases/v1.0.2.md`](docs/releases/v1.0.2.md).
+The 1.0.0 product declaration remains in
+[`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md). Speed charts from 0.5.2
+remain in [`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
 
 ## Install
 
@@ -64,10 +65,10 @@ Atmospeak currently supports **Windows 10/11 x64**.
 
 | Package | Use it when | Download |
 | --- | --- | --- |
-| Setup EXE | Recommended installation | [atmospeak_1.0.0_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-setup.exe) |
-| MSI | Managed or MSI-based deployment | [atmospeak_1.0.0_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64_en-US.msi) |
-| Portable ZIP | Run without a system-wide install | [atmospeak_1.0.0_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/atmospeak_1.0.0_x64-portable.zip) |
-| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.0/SHA256SUMS.txt) |
+| Setup EXE | Recommended installation | [atmospeak_1.0.2_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.2/atmospeak_1.0.2_x64-setup.exe) |
+| MSI | Managed or MSI-based deployment | [atmospeak_1.0.2_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.2/atmospeak_1.0.2_x64_en-US.msi) |
+| Portable ZIP | Run without a system-wide install | [atmospeak_1.0.2_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.2/atmospeak_1.0.2_x64-portable.zip) |
+| Checksums | Verify downloaded artifacts | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.2/SHA256SUMS.txt) |
 
 The Windows installers are not Authenticode-signed yet. SmartScreen may show
 **Windows protected your PC**. Choose **More info**, verify the app name is

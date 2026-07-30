@@ -52,7 +52,8 @@ import {
   polishSession,
   setSessionPreferPolished,
   ensurePolishRuntime,
-  injectText,
+  injectOnboardingSample,
+  injectSession,
   listMicrophones,
   openWindowsSoundSettings,
   registerSetupShortcut,
@@ -297,6 +298,7 @@ function AppShell() {
   });
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [dictEntry, setDictEntry] = useState({
     id: null as string | null,
     phrase: "",
@@ -877,11 +879,44 @@ function AppShell() {
     }
   }, [refreshSnapshotOnly]);
 
+  const settingsDirty = useMemo(() => {
+    if (!snapshot || !settingsDraft) return false;
+    return JSON.stringify(settingsDraft) !== JSON.stringify(snapshot.settings);
+  }, [settingsDraft, snapshot]);
+
+  const onDiscardSettings = useCallback(() => {
+    if (!snapshot) return;
+    setSettingsDraft(snapshot.settings);
+  }, [snapshot]);
+
   const onSaveSettings = useCallback(async () => {
-    if (!settingsDraft) return;
+    if (!settingsDraft || settingsSaving) return;
     setBusyState(true);
+    setSettingsSaving(true);
     try {
-      const next = await saveSettings(settingsDraft);
+      let confirmKeyRebinding = false;
+      const bound = settingsDraft.polishApiKeyOrigin?.trim() ?? "";
+      if (bound && settingsDraft.polishProvider === "openaiCompatible") {
+        try {
+          const endpoint = settingsDraft.polishEndpoint.trim();
+          const origin = new URL(endpoint).origin;
+          if (origin && bound.toLowerCase() !== origin.toLowerCase()) {
+            confirmKeyRebinding = window.confirm(
+              `Send the saved polish API key to ${origin}?\n\nIt is currently bound to ${bound}.`,
+            );
+            if (!confirmKeyRebinding) {
+              setNotice({
+                tone: "error",
+                message: "Settings not saved. Clear the API key or confirm rebinding.",
+              });
+              return;
+            }
+          }
+        } catch {
+          // Native validation will surface a clearer error.
+        }
+      }
+      const next = await saveSettings(settingsDraft, { confirmKeyRebinding });
       setSnapshot(next);
       setSettingsDraft(next.settings);
       const shortcut = await getShortcutStatus();
@@ -890,9 +925,10 @@ function AppShell() {
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
     } finally {
+      setSettingsSaving(false);
       setBusyState(false);
     }
-  }, [setBusyState, settingsDraft]);
+  }, [setBusyState, settingsDraft, settingsSaving]);
 
   const onDownloadModel = useCallback(async (modelId: string) => {
     setModelDownload({
@@ -1130,7 +1166,7 @@ function AppShell() {
         onPasteTest={async () => {
           setPasteTest({ running: true, passed: false, message: "Pasting sample…" });
           try {
-            const result = await injectText("The porcelain moon hums over the studio.");
+            const result = await injectOnboardingSample();
             setPasteTest({
               running: false,
               passed: result.injected || result.message.includes("clipboard"),
@@ -1250,7 +1286,21 @@ function AppShell() {
               setNotice({ tone: "success", message });
             }}
             onInject={async (session) => {
-              const result = await injectText(sessionDisplayText(session));
+              const showingPolish = Boolean(
+                session.preferPolished && session.polishedText?.trim(),
+              );
+              if (showingPolish) {
+                const preview = session.polishedText!.trim();
+                const confirmed = window.confirm(
+                  `Paste the AI-edited text into the focused app?\n\n${preview.slice(0, 500)}${
+                    preview.length > 500 ? "…" : ""
+                  }`,
+                );
+                if (!confirmed) {
+                  return;
+                }
+              }
+              const result = await injectSession(session.id, showingPolish);
               setNotice({
                 tone: result.injected ? "success" : "error",
                 message: result.message,
@@ -1457,7 +1507,10 @@ function AppShell() {
               setSnapshot(next);
               setSettingsDraft(next.settings);
             }}
+            dirty={settingsDirty}
+            saving={settingsSaving}
             onSave={onSaveSettings}
+            onDiscard={onDiscardSettings}
             updateStatus={updateStatus}
             updateResult={updateResult}
             onCheckUpdates={async () => {
@@ -1519,7 +1572,6 @@ function AppShell() {
                   setSnapshot(next);
                   setSettingsDraft(next.settings);
                 }}
-                onSave={onSaveSettings}
               />
             }
             modelManagement={
