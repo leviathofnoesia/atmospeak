@@ -53,6 +53,7 @@ struct ActiveStreaming {
     worker: Option<thread::JoinHandle<()>>,
     fallback_samples: Arc<Mutex<Vec<f32>>>,
     dropped: Arc<AtomicU64>,
+    send_failed: Arc<AtomicBool>,
     write_failed: Arc<AtomicBool>,
 }
 
@@ -85,8 +86,38 @@ pub struct CapturedRecording {
     pending_samples: Option<Arc<Mutex<Vec<f32>>>>,
     streaming_worker: Option<thread::JoinHandle<()>>,
     streaming_dropped: Option<Arc<AtomicU64>>,
+    streaming_send_failed: Option<Arc<AtomicBool>>,
     streaming_write_failed: Option<Arc<AtomicBool>>,
     audio_prepared: bool,
+}
+
+impl CapturedRecording {
+    /// Frames dropped so far. `streaming_frames_dropped` only settles in
+    /// `finalize_capture`, so any decision taken before finalize (preview paste
+    /// runs before it, on purpose) must read the live counter or it always sees
+    /// zero.
+    ///
+    /// This is a **lower bound** before finalize: capture-side drops are settled
+    /// once `stop` has dropped the sender, but the worker can still add backlog
+    /// drops while it drains its queue. Tail loss — the case that actually
+    /// truncates a hypothesis — is reported separately and immediately by
+    /// [`Self::streaming_delivery_failed`], which does not depend on this count.
+    pub fn observed_frames_dropped(&self) -> u64 {
+        match self.streaming_dropped.as_ref() {
+            Some(dropped) => dropped.load(Ordering::Relaxed),
+            None => self.streaming_frames_dropped,
+        }
+    }
+
+    /// True once a frame has failed to reach the ASR host. The writer publishes
+    /// this at the instant of failure, before it drains and counts the frames
+    /// that died with it, so a decision taken without joining the worker still
+    /// sees it. Everything after that frame is missing from the hypothesis.
+    pub fn streaming_delivery_failed(&self) -> bool {
+        self.streaming_send_failed
+            .as_ref()
+            .is_some_and(|failed| failed.load(Ordering::Relaxed))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -405,6 +436,7 @@ impl RecorderService {
             streaming_host,
             streaming_worker,
             streaming_dropped,
+            streaming_send_failed,
             streaming_write_failed,
             pending_samples,
             samples,
@@ -413,6 +445,7 @@ impl RecorderService {
                 Some(streaming.host),
                 streaming.worker.take(),
                 Some(streaming.dropped),
+                Some(streaming.send_failed),
                 Some(streaming.write_failed),
                 Some(streaming.fallback_samples),
                 Vec::new(),
@@ -422,7 +455,7 @@ impl RecorderService {
                 Ok(samples) => samples.into_inner(),
                 Err(samples) => samples.lock().clone(),
             };
-            (None, None, None, None, None, samples)
+            (None, None, None, None, None, None, samples)
         };
         if samples.is_empty() && pending_samples.is_none() {
             return Err(anyhow!("microphone did not capture any samples"));
@@ -439,6 +472,7 @@ impl RecorderService {
             pending_samples,
             streaming_worker,
             streaming_dropped,
+            streaming_send_failed,
             streaming_write_failed,
             audio_prepared: false,
         })
@@ -868,6 +902,8 @@ fn start_streaming_worker(
     let dropped = Arc::new(AtomicU64::new(0));
     let worker_host = host.clone();
     let worker_dropped = dropped.clone();
+    let send_failed = Arc::new(AtomicBool::new(false));
+    let worker_send_failed = send_failed.clone();
     let write_failed = Arc::new(AtomicBool::new(false));
     let worker_write_failed = write_failed.clone();
     let worker = thread::Builder::new()
@@ -877,6 +913,7 @@ fn start_streaming_worker(
             let writer_host = worker_host.clone();
             let writer_session_id = session_id.clone();
             let writer_dropped = worker_dropped.clone();
+            let writer_send_failed = worker_send_failed.clone();
             let writer = thread::Builder::new()
                 .name("atmospeak-asr-writer".to_string())
                 .spawn(move || {
@@ -886,6 +923,11 @@ fn start_streaming_worker(
                             .send_audio(&writer_session_id, timestamp_ms, pcm)
                             .is_err()
                         {
+                            // Publish before draining: preview paste decides
+                            // without joining this thread, so a count that only
+                            // lands after the drain below would arrive too late
+                            // to stop a truncated hypothesis being pasted.
+                            writer_send_failed.store(true, Ordering::Relaxed);
                             send_failed = true;
                             break;
                         }
@@ -978,6 +1020,7 @@ fn start_streaming_worker(
         worker: Some(worker),
         fallback_samples,
         dropped,
+        send_failed,
         write_failed,
     })
 }
@@ -1111,12 +1154,13 @@ mod tests {
     use super::{
         AudioAnalysis, CapturedRecording, StreamingFrameSender, StreamingResampler,
         TARGET_SAMPLE_RATE, analyze_samples, capture_input_streaming, finish_recording,
-        load_fixture_samples, normal_dictation_failure, prepare_for_dictation, resample_linear,
+        finalize_capture, load_fixture_samples, normal_dictation_failure, prepare_for_dictation,
+        resample_linear,
     };
     use parking_lot::Mutex;
     use std::sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     };
     use tempfile::tempdir;
@@ -1140,6 +1184,7 @@ mod tests {
             pending_samples: None,
             streaming_worker: None,
             streaming_dropped: None,
+            streaming_send_failed: None,
             streaming_write_failed: None,
             audio_prepared: false,
         })
@@ -1271,6 +1316,7 @@ mod tests {
             pending_samples: None,
             streaming_worker: None,
             streaming_dropped: None,
+            streaming_send_failed: None,
             streaming_write_failed: None,
             audio_prepared: false,
         };
@@ -1285,5 +1331,65 @@ mod tests {
         assert!(mean.abs() < 0.001);
         assert!(peak <= 0.709);
         assert!(peak > 0.60);
+    }
+
+    /// Preview paste decides before `finalize_capture`, so the drop gate must see
+    /// the live counter instead of the not-yet-settled field.
+    #[test]
+    fn observed_drops_read_the_live_counter_before_finalize() {
+        let temp = tempdir().expect("tempdir");
+        let dropped = Arc::new(AtomicU64::new(31));
+        let mut captured = CapturedRecording {
+            id: "drops".to_string(),
+            path: temp.path().join("drops.wav"),
+            duration_ms: 2_000,
+            sample_rate: TARGET_SAMPLE_RATE,
+            samples: vec![0.0; 16],
+            streaming_host: None,
+            streaming_frames_dropped: 0,
+            pending_samples: None,
+            streaming_worker: None,
+            streaming_dropped: Some(dropped.clone()),
+            streaming_send_failed: None,
+            streaming_write_failed: None,
+            audio_prepared: true,
+        };
+        assert_eq!(captured.observed_frames_dropped(), 31);
+        assert!(!captured.streaming_delivery_failed());
+
+        // After finalize the atomic is gone and the settled field answers instead.
+        finalize_capture(&mut captured).expect("finalize");
+        assert_eq!(captured.streaming_frames_dropped, 31);
+        assert_eq!(captured.observed_frames_dropped(), 31);
+    }
+
+    /// Tail loss must be visible without joining the writer: the count that goes
+    /// with it is only added once the writer drains, which is after preview paste
+    /// has already decided.
+    #[test]
+    fn delivery_failure_is_visible_while_the_drop_count_is_still_zero() {
+        let temp = tempdir().expect("tempdir");
+        let send_failed = Arc::new(AtomicBool::new(false));
+        let captured = CapturedRecording {
+            id: "tail-loss".to_string(),
+            path: temp.path().join("tail-loss.wav"),
+            duration_ms: 2_000,
+            sample_rate: TARGET_SAMPLE_RATE,
+            samples: vec![0.0; 16],
+            streaming_host: None,
+            streaming_frames_dropped: 0,
+            pending_samples: None,
+            streaming_worker: None,
+            streaming_dropped: Some(Arc::new(AtomicU64::new(0))),
+            streaming_send_failed: Some(send_failed.clone()),
+            streaming_write_failed: None,
+            audio_prepared: true,
+        };
+        assert!(!captured.streaming_delivery_failed());
+
+        // What the writer thread does the instant `send_audio` fails.
+        send_failed.store(true, Ordering::Relaxed);
+        assert_eq!(captured.observed_frames_dropped(), 0);
+        assert!(captured.streaming_delivery_failed());
     }
 }
