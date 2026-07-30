@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://leviathofnoesia.github.io/atmospeak/"><strong>Website</strong></a>
+  <a href="https://www.novpax.org/projects/atmospeak"><strong>Website</strong></a>
   ·
   <a href="https://www.novpax.org/projects/atmospeak"><strong>Download v1.0.3</strong></a>
   ·
