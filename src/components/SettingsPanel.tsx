@@ -35,9 +35,7 @@ interface ShortcutCaptureState {
 
 interface SettingsPanelProps {
   settings: AppSettings;
-  setSettings: (
-    settings: AppSettings | ((prev: AppSettings) => AppSettings),
-  ) => void;
+  setSettings: (settings: AppSettings) => void;
   microphones: MicrophoneInfo[];
   shortcutStatus: ShortcutStatus | null;
   shortcutTest: ShortcutTestState;
