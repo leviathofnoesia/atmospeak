@@ -799,9 +799,8 @@ pub fn set_polish_api_key(
 
 #[tauri::command]
 pub fn clear_polish_api_key(state: State<'_, AppState>) -> CommandResult<()> {
-    let previous_key = polish::read_keyring_api_key();
-    polish::clear_keyring_api_key().map_err(|e| polish::sanitize_message(&e.to_string()))?;
-
+    // Persist unbound origin first, then clear the keyring. That way a failed
+    // DB write never leaves a deleted key while settings still point at an origin.
     let db = state.database.lock();
     let save_result = (|| -> Result<(), String> {
         let mut settings = db.load_settings().map_err(|e| e.to_string())?;
@@ -809,20 +808,8 @@ pub fn clear_polish_api_key(state: State<'_, AppState>) -> CommandResult<()> {
         db.save_settings(&settings).map_err(|e| e.to_string())
     })();
     drop(db);
-
-    if let Err(error) = save_result {
-        let rollback = match previous_key {
-            Some(previous) => polish::set_keyring_api_key(&previous),
-            None => Ok(()),
-        };
-        return Err(match rollback {
-            Ok(()) => error,
-            Err(rollback_err) => format!(
-                "{error}; also failed to restore keyring: {}",
-                polish::sanitize_message(&rollback_err.to_string())
-            ),
-        });
-    }
+    save_result?;
+    polish::clear_keyring_api_key().map_err(|e| polish::sanitize_message(&e.to_string()))?;
     Ok(())
 }
 
