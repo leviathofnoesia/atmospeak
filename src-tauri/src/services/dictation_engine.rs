@@ -1147,14 +1147,14 @@ impl Worker {
         // Stop the stage clock at paste — teardown must not inflate release→paste.
         let stage_metrics = timer.finish(session_id.clone(), duration_ms);
 
-        let session = TranscriptSession {
+        let mut session = TranscriptSession {
             id: session_id.clone(),
             raw_text,
             word_count: paste_text.split_whitespace().count(),
             cleaned_text: paste_text,
             polished_text: None,
             prefer_polished: true,
-            audio_path,
+            audio_path: audio_path.clone(),
             duration_ms,
             injected: injection_result
                 .as_ref()
@@ -1217,14 +1217,23 @@ impl Worker {
         if let Some(host) = captured.streaming_host.take() {
             host.cancel_session(&session_id);
         }
-        if let Err(error) = recorder::finalize_capture(&mut captured)
+        let recording_path = captured.path.clone();
+        match recorder::finalize_capture(&mut captured)
             .and_then(|_| recorder::finish_recording(captured))
         {
-            metrics::emit_runtime(
-                &self.app,
-                "preview-paste-teardown-error",
-                format!("session={session_id} {error}"),
-            );
+            Ok(finished) => {
+                session.audio_path = finished.path.to_string_lossy().to_string();
+            }
+            Err(error) => {
+                // Do not persist a history path that points at a missing/incomplete WAV.
+                metrics::emit_runtime(
+                    &self.app,
+                    "preview-paste-teardown-error",
+                    format!("session={session_id} {error}"),
+                );
+                let _ = std::fs::remove_file(&recording_path);
+                session.audio_path.clear();
+            }
         }
 
         let streaming_backend = match backend {
@@ -1254,7 +1263,10 @@ impl Worker {
         metrics::emit_stage_metrics(&self.app, &stage_metrics);
         metrics::emit_streaming_metrics(&self.app, &streaming_metrics);
         state.live_paste.clear();
-        Ok(result)
+        Ok(DictationResult {
+            session,
+            injection: result.injection,
+        })
     }
 
     fn finish_pipeline_result(
