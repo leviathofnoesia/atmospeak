@@ -202,7 +202,7 @@ pub async fn check_pro_update(app: AppHandle) -> CommandResult<serde_json::Value
                 &app,
                 "update_check",
                 "updates.novpax.org",
-                true,
+                false,
                 Some(err.to_string()),
             );
             Err(err.to_string())
