@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,6 +14,8 @@ pub enum NetworkLedgerError {
     Io(#[from] std::io::Error),
     #[error("failed to parse ledger entry: {0}")]
     Parse(#[from] serde_json::Error),
+    #[error("network ledger lock poisoned")]
+    LockPoisoned,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,6 +31,8 @@ pub struct LedgerEntry {
     pub detail: Option<String>,
 }
 
+static APPEND_LOCK: Mutex<()> = Mutex::new(());
+
 pub struct NetworkLedger {
     path: PathBuf,
 }
@@ -42,13 +47,15 @@ impl NetworkLedger {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        if !path.exists() {
-            fs::File::create(&path)?;
-        }
+        // create(true)+append(true) never truncates an existing ledger.
+        let _ = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self { path })
     }
 
     pub fn append(&self, entry: &LedgerEntry) -> Result<(), NetworkLedgerError> {
+        let _guard = APPEND_LOCK
+            .lock()
+            .map_err(|_| NetworkLedgerError::LockPoisoned)?;
         let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
         writeln!(file, "{}", serde_json::to_string(entry)?)?;
         Ok(())
@@ -112,5 +119,16 @@ mod tests {
         let recent = ledger.list_recent(10).unwrap();
         assert_eq!(recent.len(), 2);
         assert!(!recent[1].allowed);
+    }
+
+    #[test]
+    fn open_does_not_truncate() {
+        let dir = tempdir().unwrap();
+        let ledger = NetworkLedger::open(dir.path()).unwrap();
+        ledger
+            .record("update_check", "updates.novpax.org", true, None)
+            .unwrap();
+        let again = NetworkLedger::open(dir.path()).unwrap();
+        assert_eq!(again.list_recent(10).unwrap().len(), 1);
     }
 }

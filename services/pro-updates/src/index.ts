@@ -128,7 +128,6 @@ async function assertLicence(
   }
   if (
     env.POLAR_LICENSE_BENEFIT_ID &&
-    polar.benefit_id &&
     polar.benefit_id !== env.POLAR_LICENSE_BENEFIT_ID
   ) {
     throw new Response(JSON.stringify({ error: "wrong_benefit" }), {
@@ -140,8 +139,20 @@ async function assertLicence(
   const years = Number(env.UPDATE_WINDOW_YEARS ?? "3");
   const until = (() => {
     if (polar.expires_at) return new Date(polar.expires_at);
-    const created = polar.created_at ? new Date(polar.created_at) : new Date();
-    const d = new Date(created);
+    if (!polar.created_at) {
+      throw new Response(
+        JSON.stringify({
+          error: "missing_licence_timestamps",
+          detail:
+            "Polar response lacked expires_at and created_at; cannot compute update window",
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json", ...cors },
+        },
+      );
+    }
+    const d = new Date(polar.created_at);
     d.setFullYear(d.getFullYear() + years);
     return d;
   })();

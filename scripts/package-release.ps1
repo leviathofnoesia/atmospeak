@@ -159,11 +159,26 @@ if (-not $SkipTauriBuild) {
     if ($LASTEXITCODE -ne 0) {
       throw "Tauri build failed with exit code $LASTEXITCODE"
     }
+    $channelStamp = Join-Path $CargoTargetRoot "atmospeak-build-channel.txt"
+    [System.IO.File]::WriteAllText(
+      $channelStamp,
+      $Channel,
+      [System.Text.UTF8Encoding]::new($false)
+    )
   } finally {
     if ($unsignedConfigPath -and (Test-Path $unsignedConfigPath)) {
       Remove-Item $unsignedConfigPath -Force -ErrorAction SilentlyContinue
     }
     Pop-Location
+  }
+} else {
+  $channelStamp = Join-Path $CargoTargetRoot "atmospeak-build-channel.txt"
+  if (-not (Test-Path $channelStamp)) {
+    throw "SkipTauriBuild requires $channelStamp from a prior full build of channel '$Channel'."
+  }
+  $stamped = (Get-Content $channelStamp -Raw).Trim()
+  if ($stamped -ne $Channel) {
+    throw "SkipTauriBuild channel mismatch: stamp='$stamped' but -Channel $Channel. Rebuild without -SkipTauriBuild."
   }
 }
 

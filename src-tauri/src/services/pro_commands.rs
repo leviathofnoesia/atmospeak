@@ -22,6 +22,20 @@ fn hostname_label() -> String {
         .unwrap_or_else(|_| "Atmospeak-Pro".into())
 }
 
+fn require_outbound(app: &AppHandle, kind: &str, target: &str) -> CommandResult<()> {
+    if outbound_allowed(app) {
+        return Ok(());
+    }
+    record_outbound(
+        app,
+        kind,
+        target,
+        false,
+        Some("airplane_mode".into()),
+    );
+    Err("airplane mode is on — outbound network work is blocked".into())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProFeatureStatus {
@@ -45,6 +59,7 @@ pub fn get_license_status(app: AppHandle) -> CommandResult<polar_license::Licenc
 
 #[tauri::command]
 pub fn activate_license(app: AppHandle, key: String) -> CommandResult<polar_license::LicenceStatus> {
+    require_outbound(&app, "licence_activate", "api.polar.sh")?;
     let dir = app_data_dir(&app)?;
     polar_license::activate(&dir, &key, &hostname_label())
 }
@@ -57,6 +72,7 @@ pub fn deactivate_license(app: AppHandle) -> CommandResult<polar_license::Licenc
 
 #[tauri::command]
 pub fn validate_license(app: AppHandle) -> CommandResult<polar_license::LicenceStatus> {
+    require_outbound(&app, "licence_validate", "api.polar.sh")?;
     let dir = app_data_dir(&app)?;
     polar_license::validate_online(&dir)
 }
@@ -96,12 +112,14 @@ pub fn set_airplane_mode(
     let state =
         atmospeak_pro::AirplaneMode::set_enabled(&dir, enabled).map_err(|e| e.to_string())?;
     let ledger = atmospeak_pro::NetworkLedger::open(&dir).map_err(|e| e.to_string())?;
-    let _ = ledger.record(
-        "airplane_mode_toggle",
-        "local",
-        true,
-        Some(format!("enabled={enabled}")),
-    );
+    ledger
+        .record(
+            "airplane_mode_toggle",
+            "local",
+            true,
+            Some(format!("enabled={enabled}")),
+        )
+        .map_err(|e| e.to_string())?;
     Ok(state)
 }
 
@@ -116,13 +134,14 @@ pub fn export_network_ledger(app: AppHandle) -> CommandResult<String> {
 }
 
 /// Whether outbound network work is allowed under Pro airplane mode.
+/// Fail closed when airplane-mode state cannot be read.
 pub fn outbound_allowed(app: &AppHandle) -> bool {
     let Ok(dir) = app_data_dir(app) else {
-        return true;
+        return false;
     };
     match atmospeak_pro::AirplaneMode::load(&dir) {
         Ok(state) => state.allows_outbound(),
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 
@@ -147,16 +166,7 @@ pub async fn check_pro_update(app: AppHandle) -> CommandResult<serde_json::Value
     if !polar_license::entitlements_ok(&dir) {
         return Err("activate a valid Pro licence before checking updates".into());
     }
-    if !outbound_allowed(&app) {
-        record_outbound(
-            &app,
-            "update_check",
-            "updates.novpax.org",
-            false,
-            Some("airplane_mode".into()),
-        );
-        return Err("airplane mode is on — outbound update checks are blocked".into());
-    }
+    require_outbound(&app, "update_check", "updates.novpax.org")?;
     let (key, activation) = polar_license::updater_auth_headers()?;
     let updater = app
         .updater_builder()
@@ -192,7 +202,7 @@ pub async fn check_pro_update(app: AppHandle) -> CommandResult<serde_json::Value
                 &app,
                 "update_check",
                 "updates.novpax.org",
-                false,
+                true,
                 Some(err.to_string()),
             );
             Err(err.to_string())

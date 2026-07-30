@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   activateLicense,
   checkProUpdate,
@@ -21,6 +21,8 @@ export function ProPanel({ onNotice }: ProPanelProps) {
   const [busy, setBusy] = useState(false);
   const [licence, setLicence] = useState<LicenceStatus | null>(null);
   const [features, setFeatures] = useState<ProFeatureStatus | null>(null);
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
 
   const refresh = useCallback(async () => {
     const status = await getLicenseStatus();
@@ -38,9 +40,12 @@ export function ProPanel({ onNotice }: ProPanelProps) {
 
   useEffect(() => {
     void refresh().catch((error) => {
-      onNotice("error", error instanceof Error ? error.message : String(error));
+      onNoticeRef.current(
+        "error",
+        error instanceof Error ? error.message : String(error),
+      );
     });
-  }, [onNotice, refresh]);
+  }, [refresh]);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
