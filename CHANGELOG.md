@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.2 — Preview paste without coverage stall (2026-07-30)
+
+Hotfix for release→paste latency: trailing silence after speech made the
+preview coverage gate fail, so release fell through to Final and often a
+multi-second host batch even when the orb already showed the words.
+
+### Fixed
+
+- Preview paste no longer requires `covered_through_ms` to match wall-clock
+  hold duration. Non-empty live preview for the active session pastes
+  immediately (streaming drops still force Final).
+
 ## 1.0.1 — Preview paste with polish on (2026-07-30)
 
 Hotfix for two post-1.0.0 release issues: delayed paste when auto-polish is
