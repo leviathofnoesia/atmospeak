@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.1 — Preview paste with polish on (2026-07-30)
+
+Hotfix for two post-1.0.0 release issues: delayed paste when auto-polish is
+enabled, and short utterances sometimes pasting `"Provider mode: Bundled."`.
+
+### Fixed
+
+- Preview paste no longer waits on Final / auto-polish. When live coverage is
+  good, release pastes the cleaned hypothesis immediately even if polish is on.
+- Bundled polish prompt no longer injects `Provider mode: …`; leaked prompt
+  echoes are rejected so cleaned text pastes instead.
+
 ## 1.0.0 — The finished free product (2026-07-29)
 
 Atmospeak 1.0.0 is a stabilization and verification release. It ships no new

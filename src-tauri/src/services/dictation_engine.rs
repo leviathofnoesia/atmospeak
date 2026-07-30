@@ -759,21 +759,21 @@ impl Worker {
             }
         };
 
-        let auto_polish = self
-            .app
-            .state::<AppState>()
-            .database
-            .lock()
-            .load_settings()
-            .map(|settings| settings.auto_polish)
-            .unwrap_or(false);
-        // Auto-polish stays on the Final path so preview paste never skips or delays polish.
-        // Material streaming drops also force Final/batch — the live hypothesis can look
-        // complete while missing overrun audio.
-        if !auto_polish && !streaming_drop_exceeds_tolerance(captured.streaming_frames_dropped) {
-            if let Some(preview) = preview_paste.filter(|preview| {
+        let drops_exceeded =
+            streaming_drop_exceeds_tolerance(captured.streaming_frames_dropped);
+        let preview_covers = preview_paste
+            .as_ref()
+            .is_some_and(|preview| {
                 preview.session_id == captured.id && preview.covers_duration(captured.duration_ms)
-            }) {
+            });
+        // Preview paste stays aggressive even when auto-polish is enabled: paste the
+        // cleaned live hypothesis now. Auto-polish on the Final path was forcing a
+        // multi-second host fallback before paste for users with polish on.
+        // Material streaming drops still force Final/batch — the live hypothesis can
+        // look complete while missing overrun audio.
+        let take_preview = !drops_exceeded && preview_covers;
+        if take_preview {
+            if let Some(preview) = preview_paste {
                 match self.run_preview_paste_path(
                     recording.clone(),
                     captured,
