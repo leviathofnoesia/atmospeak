@@ -53,13 +53,23 @@ pub fn list_microphones(state: State<'_, AppState>) -> CommandResult<Vec<Microph
 }
 
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, settings: AppSettings) -> CommandResult<AppSnapshot> {
-    tauri::async_runtime::spawn_blocking(move || save_settings_blocking(app, settings))
-        .await
-        .map_err(|error| error.to_string())?
+pub async fn save_settings(
+    app: AppHandle,
+    settings: AppSettings,
+    confirm_key_rebinding: Option<bool>,
+) -> CommandResult<AppSnapshot> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_settings_blocking(app, settings, confirm_key_rebinding.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
-fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResult<AppSnapshot> {
+fn save_settings_blocking(
+    app: AppHandle,
+    mut settings: AppSettings,
+    confirm_key_rebinding: bool,
+) -> CommandResult<AppSnapshot> {
     let state = app.state::<AppState>();
     let previous_settings = state
         .database
@@ -94,6 +104,39 @@ fn save_settings_blocking(app: AppHandle, settings: AppSettings) -> CommandResul
                 .to_string(),
         );
     }
+
+    let validated_endpoint = polish::configured_endpoint_for_settings(&settings)
+        .map_err(|e| polish::sanitize_message(&e.to_string()))?;
+    if let Some(endpoint) = validated_endpoint.as_ref() {
+        let new_origin = polish::canonical_origin(endpoint)
+            .map_err(|e| polish::sanitize_message(&e.to_string()))?;
+        let bound = settings.polish_api_key_origin.trim();
+        if polish::has_keyring_api_key()
+            && !bound.is_empty()
+            && !bound.eq_ignore_ascii_case(&new_origin)
+        {
+            if confirm_key_rebinding {
+                settings.polish_api_key_origin = new_origin;
+            } else {
+                return Err(format!(
+                    "Polish endpoint origin changed to {new_origin} while an API key is bound to {bound}. Confirm rebinding or clear the key first."
+                ));
+            }
+        }
+    } else {
+        // Bundled provider: keep existing origin metadata until the key is cleared.
+    }
+
+    // Release builds never persist executable overrides from the renderer.
+    if !cfg!(debug_assertions) {
+        settings.advanced_runtime_enabled = false;
+        settings.advanced_whisper_cli_path.clear();
+        settings.advanced_model_path.clear();
+    } else if settings.advanced_runtime_enabled {
+        // Validate before persist so a bad path cannot restart ASR with Command::new.
+        runtime::resolve_runtime(&app, &settings).map_err(|e| e.to_string())?;
+    }
+
     let runtime_changed = previous_settings.active_model_id != settings.active_model_id
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
@@ -507,35 +550,67 @@ pub fn reset_overlay_position(app: AppHandle) -> CommandResult<()> {
     overlay_window::show_and_reset(&app).map_err(|error| error.to_string())
 }
 
+const ONBOARDING_PASTE_SAMPLE: &str = "The porcelain moon hums over the studio.";
+
+/// Paste a stored session transcript. Renderer cannot supply freeform text or HWND.
+/// Polished text is only used when `use_polished` is true and polished output exists.
 #[tauri::command]
-pub fn inject_text(
+pub fn inject_session(
     state: State<'_, AppState>,
-    text: String,
-    // Optional HWND as a decimal string so 64-bit handles survive JSON/JS Number.
-    target_hwnd: Option<String>,
+    id: String,
+    use_polished: bool,
 ) -> CommandResult<InjectionResult> {
     let settings = state
         .database
         .lock()
         .load_settings()
         .map_err(|e| e.to_string())?;
-    let preferred = target_hwnd
-        .as_deref()
-        .and_then(|value| value.trim().parse::<i64>().ok())
-        .filter(|hwnd| *hwnd != 0)
+    let session = state
+        .database
+        .lock()
+        .get_session(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("session not found: {id}"))?;
+    let text = if use_polished {
+        session
+            .polished_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or(session.cleaned_text)
+    } else {
+        session.cleaned_text
+    };
+    let preferred = state
+        .last_target_window()
         .map(|hwnd| injection::InjectionTarget {
-            hwnd: hwnd as isize,
-            process_name: injection::process_name_for(hwnd as isize),
-        })
-        .or_else(|| {
-            state
-                .last_target_window()
-                .map(|hwnd| injection::InjectionTarget {
-                    hwnd,
-                    process_name: injection::process_name_for(hwnd),
-                })
+            hwnd,
+            process_name: injection::process_name_for(hwnd),
         });
     injection::inject_text(&text, settings.restore_clipboard, preferred).map_err(|e| e.to_string())
+}
+
+/// Fixed onboarding paste sample — no caller-controlled text.
+#[tauri::command]
+pub fn inject_onboarding_sample(state: State<'_, AppState>) -> CommandResult<InjectionResult> {
+    let settings = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|e| e.to_string())?;
+    let preferred = state
+        .last_target_window()
+        .map(|hwnd| injection::InjectionTarget {
+            hwnd,
+            process_name: injection::process_name_for(hwnd),
+        });
+    injection::inject_text(
+        ONBOARDING_PASTE_SAMPLE,
+        settings.restore_clipboard,
+        preferred,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -676,13 +751,48 @@ pub async fn ensure_polish_runtime(app: AppHandle, model_id: String) -> CommandR
 }
 
 #[tauri::command]
-pub fn set_polish_api_key(api_key: String) -> CommandResult<()> {
-    polish::set_keyring_api_key(&api_key).map_err(|e| polish::sanitize_message(&e.to_string()))
+pub fn set_polish_api_key(
+    state: State<'_, AppState>,
+    api_key: String,
+    endpoint: String,
+) -> CommandResult<()> {
+    let validated = polish::validate_polish_endpoint(
+        crate::models::PolishProvider::OpenaiCompatible,
+        &endpoint,
+    )
+    .map_err(|e| polish::sanitize_message(&e.to_string()))?;
+    let origin = polish::canonical_origin(&validated)
+        .map_err(|e| polish::sanitize_message(&e.to_string()))?;
+    polish::set_keyring_api_key(&api_key).map_err(|e| polish::sanitize_message(&e.to_string()))?;
+    let mut settings = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|e| e.to_string())?;
+    settings.polish_api_key_origin = origin;
+    state
+        .database
+        .lock()
+        .save_settings(&settings)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
-pub fn clear_polish_api_key() -> CommandResult<()> {
-    polish::clear_keyring_api_key().map_err(|e| polish::sanitize_message(&e.to_string()))
+pub fn clear_polish_api_key(state: State<'_, AppState>) -> CommandResult<()> {
+    polish::clear_keyring_api_key().map_err(|e| polish::sanitize_message(&e.to_string()))?;
+    let mut settings = state
+        .database
+        .lock()
+        .load_settings()
+        .map_err(|e| e.to_string())?;
+    settings.polish_api_key_origin.clear();
+    state
+        .database
+        .lock()
+        .save_settings(&settings)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

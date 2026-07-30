@@ -43,36 +43,44 @@ export function AdvancedPanel({
           model warm, with automatic one-shot CLI fallback. Override paths only for custom builds.
         </p>
       </div>
-      <ToggleRow
-        icon={<Cpu size={18} />}
-        label="Use advanced runtime override"
-        checked={settings.advancedRuntimeEnabled}
-        onChange={(advancedRuntimeEnabled) =>
-          setSettings({ ...settings, advancedRuntimeEnabled })
-        }
-      />
-      <label>
-        <span>Advanced whisper-cli path</span>
-        <input
-          value={settings.advancedWhisperCliPath}
-          disabled={!settings.advancedRuntimeEnabled}
-          onChange={(event) =>
-            setSettings({ ...settings, advancedWhisperCliPath: event.currentTarget.value })
-          }
-          placeholder="C:\\path\\to\\whisper-cli.exe"
-        />
-      </label>
-      <label>
-        <span>Advanced model path</span>
-        <input
-          value={settings.advancedModelPath}
-          disabled={!settings.advancedRuntimeEnabled}
-          onChange={(event) =>
-            setSettings({ ...settings, advancedModelPath: event.currentTarget.value })
-          }
-          placeholder="C:\\path\\to\\ggml-base.en.bin"
-        />
-      </label>
+      {!import.meta.env.PROD ? (
+        <>
+          <ToggleRow
+            icon={<Cpu size={18} />}
+            label="Use advanced runtime override"
+            checked={settings.advancedRuntimeEnabled}
+            onChange={(advancedRuntimeEnabled) =>
+              setSettings({ ...settings, advancedRuntimeEnabled })
+            }
+          />
+          <label>
+            <span>Advanced whisper-cli path</span>
+            <input
+              value={settings.advancedWhisperCliPath}
+              disabled={!settings.advancedRuntimeEnabled}
+              onChange={(event) =>
+                setSettings({ ...settings, advancedWhisperCliPath: event.currentTarget.value })
+              }
+              placeholder="C:\\path\\to\\whisper-cli.exe"
+            />
+          </label>
+          <label>
+            <span>Advanced model path</span>
+            <input
+              value={settings.advancedModelPath}
+              disabled={!settings.advancedRuntimeEnabled}
+              onChange={(event) =>
+                setSettings({ ...settings, advancedModelPath: event.currentTarget.value })
+              }
+              placeholder="C:\\path\\to\\ggml-base.en.bin"
+            />
+          </label>
+        </>
+      ) : (
+        <p className="muted">
+          Executable runtime overrides are disabled in production builds.
+        </p>
+      )}
       {lastMetrics ? (
         <div className="instruction-card">
           <h3>Last stage metrics</h3>

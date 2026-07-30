@@ -961,6 +961,11 @@ impl Worker {
                 timer.mark_cleanup(cleanup_started.elapsed().as_millis() as u64);
 
                 let mut polished_text: Option<String> = None;
+                let trusted_auto_paste_polish = matches!(
+                    snapshot.settings.polish_provider,
+                    crate::models::PolishProvider::Bundled
+                        | crate::models::PolishProvider::Ollama
+                );
                 let paste_text = match polish::polish_if_enabled(
                     &app,
                     &snapshot.settings,
@@ -977,7 +982,13 @@ impl Worker {
                             ),
                         );
                         polished_text = Some(outcome.text.clone());
-                        outcome.text
+                        // Remote OpenAI-compatible polish stays copy-only unless
+                        // the user confirms paste-again; auto-inject local ASR text.
+                        if trusted_auto_paste_polish {
+                            outcome.text
+                        } else {
+                            cleaned_text.clone()
+                        }
                     }
                     Ok(None) => cleaned_text.clone(),
                     Err(error) => {

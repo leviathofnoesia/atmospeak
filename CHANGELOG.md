@@ -12,6 +12,15 @@ multi-second host batch even when the orb already showed the words.
   hold duration. Non-empty live preview for the active session pastes
   immediately (streaming drops still force Final).
 
+### Changed
+
+- Polish endpoint validation: Ollama loopback-only; OpenAI-compatible requires
+  HTTPS. API keys are bound to an endpoint origin with rebinding confirmation.
+- Remote OpenAI-compatible auto-polish is copy-only on the Final path; paste of
+  AI-edited history text requires confirmation. Inject commands are scoped
+  (`inject_session` / `inject_onboarding_sample`).
+- Llama host / polish runtime hardening and Advanced polish settings UX updates.
+
 ## 1.0.1 — Preview paste with polish on (2026-07-30)
 
 Hotfix for two post-1.0.0 release issues: delayed paste when auto-polish is

@@ -32,6 +32,8 @@ export interface AppSettings {
   polishEndpoint: string;
   polishModel: string;
   polishProvider: PolishProvider;
+  /** Canonical origin the OS-keyring API key is bound to (empty when unbound). */
+  polishApiKeyOrigin: string;
 }
 
 export type PolishStyle = "none" | "concise" | "formal" | "casual" | "excited";
@@ -357,5 +359,6 @@ export function defaultSettings(): AppSettings {
     polishEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
     polishModel: "qwen2.5-0.5b",
     polishProvider: "bundled",
+    polishApiKeyOrigin: "",
   };
 }

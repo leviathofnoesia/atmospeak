@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::json;
 use tauri::{AppHandle, Manager};
+use url::Url;
 
 use crate::{
     models::{AppSettings, PolishProvider, PolishStyle},
@@ -96,7 +97,7 @@ fn polish_text_inner(
         .header("Content-Type", "application/json")
         .json(&body);
 
-    if let Some(api_key) = api_key_for(settings) {
+    if let Some(api_key) = api_key_for_endpoint(settings, &endpoint)? {
         request = request.bearer_auth(api_key);
     }
 
@@ -168,6 +169,7 @@ fn resolve_endpoint_and_model(
             } else {
                 settings.polish_endpoint.trim().to_string()
             };
+            let endpoint = validate_polish_endpoint(PolishProvider::Ollama, &endpoint)?;
             let model = settings.polish_model.trim();
             if model.is_empty() {
                 bail!("polish model is not configured");
@@ -179,11 +181,95 @@ fn resolve_endpoint_and_model(
             if endpoint.is_empty() {
                 bail!("polish endpoint is not configured");
             }
+            let endpoint = validate_polish_endpoint(PolishProvider::OpenaiCompatible, endpoint)?;
             let model = settings.polish_model.trim();
             if model.is_empty() {
                 bail!("polish model is not configured");
             }
-            Ok((endpoint.to_string(), model.to_string()))
+            Ok((endpoint, model.to_string()))
+        }
+    }
+}
+
+/// Validate and return a normalized endpoint URL for the given provider.
+pub fn validate_polish_endpoint(provider: PolishProvider, endpoint: &str) -> Result<String> {
+    let trimmed = endpoint.trim();
+    if trimmed.is_empty() {
+        bail!("polish endpoint is not configured");
+    }
+    let parsed = Url::parse(trimmed).context("polish endpoint is not a valid URL")?;
+    match provider {
+        PolishProvider::Bundled => {
+            // Bundled host is always loopback and never taken from settings.
+            Ok(trimmed.to_string())
+        }
+        PolishProvider::Ollama => {
+            if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                bail!("Ollama polish endpoint must use http or https");
+            }
+            let host = parsed
+                .host_str()
+                .ok_or_else(|| anyhow::anyhow!("Ollama polish endpoint is missing a host"))?;
+            if !is_loopback_host(host) {
+                bail!("Ollama polish endpoint must target loopback (127.0.0.1, localhost, or ::1)");
+            }
+            Ok(trimmed.to_string())
+        }
+        PolishProvider::OpenaiCompatible => {
+            if parsed.scheme() != "https" {
+                bail!("OpenAI-compatible polish endpoint must use https");
+            }
+            if parsed.host_str().is_none() {
+                bail!("OpenAI-compatible polish endpoint is missing a host");
+            }
+            Ok(trimmed.to_string())
+        }
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    lower == "127.0.0.1" || lower == "localhost" || lower == "::1"
+}
+
+/// Canonical `scheme://host[:port]` used to bind API keys to an endpoint origin.
+pub fn canonical_origin(endpoint: &str) -> Result<String> {
+    let parsed = Url::parse(endpoint.trim()).context("polish endpoint is not a valid URL")?;
+    let scheme = parsed.scheme();
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("polish endpoint is missing a host"))?;
+    let origin = match parsed.port() {
+        Some(port) => format!("{scheme}://{host}:{port}"),
+        None => format!("{scheme}://{host}"),
+    };
+    Ok(origin)
+}
+
+/// Resolve the configured endpoint string for settings validation (no host startup).
+pub fn configured_endpoint_for_settings(settings: &AppSettings) -> Result<Option<String>> {
+    match settings.polish_provider {
+        PolishProvider::Bundled => Ok(None),
+        PolishProvider::Ollama => {
+            let endpoint = if settings.polish_endpoint.trim().is_empty() {
+                "http://127.0.0.1:11434/v1/chat/completions".to_string()
+            } else {
+                settings.polish_endpoint.trim().to_string()
+            };
+            Ok(Some(validate_polish_endpoint(
+                PolishProvider::Ollama,
+                &endpoint,
+            )?))
+        }
+        PolishProvider::OpenaiCompatible => {
+            let endpoint = settings.polish_endpoint.trim();
+            if endpoint.is_empty() {
+                bail!("polish endpoint is not configured");
+            }
+            Ok(Some(validate_polish_endpoint(
+                PolishProvider::OpenaiCompatible,
+                endpoint,
+            )?))
         }
     }
 }
@@ -218,24 +304,41 @@ Style guidance: {style}.{custom_block}"
     )
 }
 
-fn api_key_for(settings: &AppSettings) -> Option<String> {
-    read_keyring_api_key()
+/// Attach the keyring/env API key only when the request origin matches the bound origin.
+fn api_key_for_endpoint(settings: &AppSettings, endpoint: &str) -> Result<Option<String>> {
+    if !matches!(settings.polish_provider, PolishProvider::OpenaiCompatible) {
+        // Local providers do not send remote API keys.
+        return Ok(None);
+    }
+    let request_origin = canonical_origin(endpoint)?;
+    let bound = settings.polish_api_key_origin.trim();
+
+    if let Some(key) = read_keyring_api_key() {
+        if bound.is_empty() {
+            bail!(
+                "saved polish API key has no bound origin; re-save the key for {request_origin}"
+            );
+        }
+        if !bound.eq_ignore_ascii_case(&request_origin) {
+            bail!(
+                "saved polish API key is bound to {bound}, not {request_origin}; re-save the key or confirm rebinding"
+            );
+        }
+        return Ok(Some(key));
+    }
+
+    let env_key = std::env::var(API_KEY_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
         .or_else(|| {
-            std::env::var(API_KEY_ENV)
+            std::env::var("OPENAI_API_KEY")
                 .ok()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
-        })
-        .or_else(|| {
-            if matches!(settings.polish_provider, PolishProvider::OpenaiCompatible) {
-                std::env::var("OPENAI_API_KEY")
-                    .ok()
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-            } else {
-                None
-            }
-        })
+        });
+    // Env keys are operator-controlled; still require HTTPS via endpoint validation.
+    Ok(env_key)
 }
 
 pub fn read_keyring_api_key() -> Option<String> {
@@ -380,5 +483,53 @@ mod tests {
     fn strip_fences_removes_markdown_wrapper() {
         assert_eq!(strip_fences("```text\nHello.\n```"), "Hello.");
         assert_eq!(strip_fences("Just text."), "Just text.");
+    }
+
+    #[test]
+    fn ollama_rejects_non_loopback() {
+        assert!(
+            validate_polish_endpoint(
+                PolishProvider::Ollama,
+                "http://evil.example/v1/chat/completions"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_polish_endpoint(
+                PolishProvider::Ollama,
+                "http://127.0.0.1:11434/v1/chat/completions"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn openai_compatible_requires_https() {
+        assert!(
+            validate_polish_endpoint(
+                PolishProvider::OpenaiCompatible,
+                "http://api.openai.com/v1/chat/completions"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_polish_endpoint(
+                PolishProvider::OpenaiCompatible,
+                "https://api.openai.com/v1/chat/completions"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn canonical_origin_strips_path() {
+        assert_eq!(
+            canonical_origin("https://api.openai.com/v1/chat/completions").unwrap(),
+            "https://api.openai.com"
+        );
+        assert_eq!(
+            canonical_origin("http://127.0.0.1:11434/v1/chat/completions").unwrap(),
+            "http://127.0.0.1:11434"
+        );
     }
 }

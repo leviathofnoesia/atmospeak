@@ -183,11 +183,21 @@ export function listMicrophones(): Promise<MicrophoneInfo[]> {
   ]);
 }
 
-export function saveSettings(settings: AppSettings): Promise<AppSnapshot> {
-  return command("save_settings", { settings }, () => {
-    mockSnapshot = { ...mockSnapshot, settings };
-    return mockSnapshot;
-  });
+export function saveSettings(
+  settings: AppSettings,
+  options?: { confirmKeyRebinding?: boolean },
+): Promise<AppSnapshot> {
+  return command(
+    "save_settings",
+    {
+      settings,
+      confirmKeyRebinding: options?.confirmKeyRebinding ?? null,
+    },
+    () => {
+      mockSnapshot = { ...mockSnapshot, settings };
+      return mockSnapshot;
+    },
+  );
 }
 
 export function startRecording(): Promise<RecordingStarted> {
@@ -238,25 +248,37 @@ export function cancelRecording(): Promise<void> {
   return command("cancel_recording", undefined, () => undefined);
 }
 
-export function injectText(
-  text: string,
-  targetHwnd?: number | string | null,
+export function injectSession(
+  id: string,
+  usePolished = false,
 ): Promise<InjectionResult> {
   return command(
-    "inject_text",
-    {
-      text,
-      targetHwnd:
-        targetHwnd === undefined || targetHwnd === null ? null : String(targetHwnd),
+    "inject_session",
+    { id, usePolished },
+    () => {
+      const session = mockSnapshot.sessions.find((entry) => entry.id === id);
+      const text = usePolished
+        ? session?.polishedText?.trim() || session?.cleanedText || ""
+        : session?.cleanedText || "";
+      return {
+        injected: text.trim().length > 0,
+        restoredClipboard: mockSnapshot.settings.restoreClipboard,
+        restoredTarget: false,
+        targetProcessName: null,
+        message: "Mock transcript copied to the focused application.",
+      };
     },
-    () => ({
-      injected: text.trim().length > 0,
-      restoredClipboard: mockSnapshot.settings.restoreClipboard,
-      restoredTarget: false,
-      targetProcessName: null,
-      message: "Mock transcript copied to the focused application.",
-    }),
   );
+}
+
+export function injectOnboardingSample(): Promise<InjectionResult> {
+  return command("inject_onboarding_sample", undefined, () => ({
+    injected: true,
+    restoredClipboard: mockSnapshot.settings.restoreClipboard,
+    restoredTarget: false,
+    targetProcessName: null,
+    message: "Mock transcript pasted into the focused application.",
+  }));
 }
 
 export async function copyText(text: string): Promise<string> {
@@ -589,8 +611,8 @@ export function ensurePolishRuntime(modelId: string): Promise<void> {
   return command("ensure_polish_runtime", { modelId }, async () => undefined);
 }
 
-export function setPolishApiKey(apiKey: string): Promise<void> {
-  return command("set_polish_api_key", { apiKey }, async () => undefined);
+export function setPolishApiKey(apiKey: string, endpoint: string): Promise<void> {
+  return command("set_polish_api_key", { apiKey, endpoint }, async () => undefined);
 }
 
 export function clearPolishApiKey(): Promise<void> {

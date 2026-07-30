@@ -6,14 +6,17 @@
 
 use std::{
     fs,
+    io::Read,
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command},
+    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use parking_lot::Mutex;
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 
 use crate::services::{app_state::AppState, asr_host, model_downloader, proc};
@@ -26,6 +29,10 @@ const INFERENCE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Pinned llama.cpp Windows CPU build. Refresh via `scripts/bootstrap-llama.ps1`.
 pub const LLAMA_RUNTIME_ZIP_URL: &str =
     "https://github.com/ggml-org/llama.cpp/releases/download/b10178/llama-b10178-bin-win-cpu-x64.zip";
+pub const LLAMA_RUNTIME_ZIP_SHA256: &str =
+    "55e419591f9798e1ffe6ec3a088cf162a93c07f8a7c8e0fc5b8bf9948155e1b1";
+pub const LLAMA_SERVER_EXE_SHA256: &str =
+    "cfbed03a6f7a904ed06e385304dcffc9c64897c3057906b05b7fbd4b62956961";
 
 pub fn is_disabled() -> bool {
     matches!(
@@ -98,6 +105,7 @@ impl LlamaHost {
                 self.server_exe.display()
             );
         }
+        verify_server_exe(&self.server_exe)?;
         if !self.model_path.is_file() {
             bail!(
                 "polish model not found at {}. Download it from Settings → AI edit.",
@@ -212,17 +220,21 @@ pub fn resolve_server_exe(app: &AppHandle) -> Option<PathBuf> {
             .path()
             .resolve(relative, tauri::path::BaseDirectory::Resource)
         {
-            if path.is_file() {
+            if path.is_file() && verify_server_exe(&path).is_ok() {
                 return Some(path);
             }
         }
         let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
-        if dev.is_file() {
+        if dev.is_file() && verify_server_exe(&dev).is_ok() {
             return Some(dev);
         }
     }
     let managed = managed_server_path(&app.state::<AppState>().app_dir);
-    managed.is_file().then_some(managed)
+    if managed.is_file() && verify_server_exe(&managed).is_ok() {
+        Some(managed)
+    } else {
+        None
+    }
 }
 
 pub fn ensure_server_binary(app: &AppHandle) -> Result<PathBuf> {
@@ -239,6 +251,40 @@ pub fn ensure_server_binary(app: &AppHandle) -> Result<PathBuf> {
     {
         download_and_extract_server(app)
     }
+}
+
+fn file_sha256(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)
+        .with_context(|| format!("failed to open {} for checksum", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn verify_server_exe(path: &Path) -> Result<()> {
+    let actual = file_sha256(path)?;
+    if !actual.eq_ignore_ascii_case(LLAMA_SERVER_EXE_SHA256) {
+        bail!(
+            "llama-server checksum mismatch at {}: expected {}, got {}",
+            path.display(),
+            LLAMA_SERVER_EXE_SHA256,
+            actual
+        );
+    }
+    Ok(())
+}
+
+fn write_server_sha_sidecar(server: &Path) -> Result<()> {
+    let sidecar = server.with_extension("exe.sha256");
+    fs::write(&sidecar, format!("{LLAMA_SERVER_EXE_SHA256}\n"))
+        .with_context(|| format!("failed to write {}", sidecar.display()))
 }
 
 #[cfg(target_os = "windows")]
@@ -258,7 +304,17 @@ fn download_and_extract_server(app: &AppHandle) -> Result<PathBuf> {
         .send()
         .and_then(|response| response.error_for_status())
         .context("failed to download llama-server runtime zip")?;
-    model_downloader::write_stream_unchecked(response, &zip_path)?;
+    let cancel = AtomicBool::new(false);
+    if let Err(error) = model_downloader::write_verified_stream(
+        response,
+        &zip_path,
+        LLAMA_RUNTIME_ZIP_SHA256,
+        &cancel,
+        |_| {},
+    ) {
+        let _ = fs::remove_file(&zip_path);
+        return Err(error).context("llama-server runtime zip failed checksum verification");
+    }
 
     expand_archive_windows(&zip_path, &dest_dir)?;
     let _ = fs::remove_file(&zip_path);
@@ -274,6 +330,8 @@ fn download_and_extract_server(app: &AppHandle) -> Result<PathBuf> {
     if !server.is_file() {
         bail!("llama-server.exe missing after extracting the runtime zip");
     }
+    verify_server_exe(&server)?;
+    write_server_sha_sidecar(&server)?;
     Ok(server)
 }
 

@@ -139,4 +139,20 @@ describe("HistoryPanel", () => {
     expect(screen.getByText(/2 w · 4s/)).toBeVisible();
     expect(screen.getByText(/2 w · 1s/)).toBeVisible();
   });
+
+  it("calls onInject with the polished session when Paste again is used", () => {
+    const props = historyProps([
+      session({ polishedText: "Hello, world!", preferPolished: true }),
+    ]);
+    render(<HistoryPanel {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Hello, world!" }));
+    fireEvent.click(screen.getByRole("button", { name: /Paste again/ }));
+    expect(props.onInject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "session-1",
+        preferPolished: true,
+        polishedText: "Hello, world!",
+      }),
+    );
+  });
 });

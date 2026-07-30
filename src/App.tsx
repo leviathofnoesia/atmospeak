@@ -52,7 +52,8 @@ import {
   polishSession,
   setSessionPreferPolished,
   ensurePolishRuntime,
-  injectText,
+  injectOnboardingSample,
+  injectSession,
   listMicrophones,
   openWindowsSoundSettings,
   registerSetupShortcut,
@@ -881,7 +882,29 @@ function AppShell() {
     if (!settingsDraft) return;
     setBusyState(true);
     try {
-      const next = await saveSettings(settingsDraft);
+      let confirmKeyRebinding = false;
+      const bound = settingsDraft.polishApiKeyOrigin?.trim() ?? "";
+      if (bound && settingsDraft.polishProvider === "openaiCompatible") {
+        try {
+          const endpoint = settingsDraft.polishEndpoint.trim();
+          const origin = new URL(endpoint).origin;
+          if (origin && bound.toLowerCase() !== origin.toLowerCase()) {
+            confirmKeyRebinding = window.confirm(
+              `Send the saved polish API key to ${origin}?\n\nIt is currently bound to ${bound}.`,
+            );
+            if (!confirmKeyRebinding) {
+              setNotice({
+                tone: "error",
+                message: "Settings not saved. Clear the API key or confirm rebinding.",
+              });
+              return;
+            }
+          }
+        } catch {
+          // Native validation will surface a clearer error.
+        }
+      }
+      const next = await saveSettings(settingsDraft, { confirmKeyRebinding });
       setSnapshot(next);
       setSettingsDraft(next.settings);
       const shortcut = await getShortcutStatus();
@@ -1130,7 +1153,7 @@ function AppShell() {
         onPasteTest={async () => {
           setPasteTest({ running: true, passed: false, message: "Pasting sample…" });
           try {
-            const result = await injectText("The porcelain moon hums over the studio.");
+            const result = await injectOnboardingSample();
             setPasteTest({
               running: false,
               passed: result.injected || result.message.includes("clipboard"),
@@ -1250,7 +1273,21 @@ function AppShell() {
               setNotice({ tone: "success", message });
             }}
             onInject={async (session) => {
-              const result = await injectText(sessionDisplayText(session));
+              const showingPolish = Boolean(
+                session.preferPolished && session.polishedText?.trim(),
+              );
+              if (showingPolish) {
+                const preview = session.polishedText!.trim();
+                const confirmed = window.confirm(
+                  `Paste the AI-edited text into the focused app?\n\n${preview.slice(0, 500)}${
+                    preview.length > 500 ? "…" : ""
+                  }`,
+                );
+                if (!confirmed) {
+                  return;
+                }
+              }
+              const result = await injectSession(session.id, showingPolish);
               setNotice({
                 tone: result.injected ? "success" : "error",
                 message: result.message,
