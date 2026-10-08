@@ -1,9 +1,3 @@
-/* ════════════════════════════════════════════════════════════════
-   ATMOSPEAK — the companion dock (floating recorder overlay)
-   Onyx liquid-glass companion: tinted-glass Aura orb that morphs into a
-   neon listening capsule. Ported from the design handoff (base.css dock).
-   ════════════════════════════════════════════════════════════════ */
-
 /* The overlay window is transparent; fill it, centre the dock, and let clicks
    pass through the empty region (only the dock itself is interactive). */
 .dock-wrap {

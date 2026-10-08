@@ -66,7 +66,7 @@ h3 {
   letter-spacing: 0;
 }
 
-.boot {
+.boot-shell {
   min-height: 100vh;
   display: grid;
   place-items: center;
@@ -80,17 +80,7 @@ h3 {
   color: var(--ink);
 }
 
-.boot__mark {
-  width: 88px;
-  height: 88px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--onyx);
-  box-shadow: var(--shadow-lg);
-}
-
-.boot p {
+.boot-shell p {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -132,18 +122,6 @@ h3 {
   border-radius: 999px;
   background: var(--ink);
   color: var(--paper);
-}
-
-.error-boundary--overlay {
-  min-height: 100vh;
-  background: transparent;
-  color: var(--paper);
-  text-shadow: 0 1px 3px rgba(18, 17, 19, 0.55);
-}
-
-.error-boundary--overlay button {
-  border-color: rgba(247, 247, 242, 0.5);
-  background: rgba(18, 17, 19, 0.82);
 }
 
 @media (prefers-reduced-motion: reduce) {
