@@ -510,7 +510,6 @@ impl Worker {
             reason,
             acknowledged_at_ms: now_ms(),
         };
-        let _ = self.app.emit("atmospeak://shortcut-gesture", ack.clone());
         metrics::emit_runtime(
             &self.app,
             "shortcut-ack",
