@@ -115,7 +115,10 @@ impl LivePasteBuffer {
 }
 
 fn join_raw(stable: &str, partial: &str) -> String {
-    format!("{stable} {partial}").split_whitespace().collect::<Vec<_>>().join(" ")
+    format!("{stable} {partial}")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn recompute_and_event(

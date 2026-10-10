@@ -10,8 +10,9 @@ mod session;
 use std::{
     io::{self, Read},
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, mpsc,
+        mpsc,
     },
     thread,
 };

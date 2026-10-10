@@ -734,7 +734,9 @@ pub fn set_session_prefer_polished(
 }
 
 #[tauri::command]
-pub fn get_polish_inventory(state: State<'_, AppState>) -> CommandResult<Vec<crate::models::ModelInventoryItem>> {
+pub fn get_polish_inventory(
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<crate::models::ModelInventoryItem>> {
     Ok(crate::services::polish_models::inventory(&state.app_dir))
 }
 

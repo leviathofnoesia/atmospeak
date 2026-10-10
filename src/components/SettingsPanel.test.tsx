@@ -23,7 +23,7 @@ function settingsProps(overrides: Record<string, unknown> = {}) {
       message: "Shortcut active.",
     },
     shortcutTest: { active: false, detected: false, message: "" },
-    shortcutCapture: { arming: false, active: false, keys: [], message: "" },
+    shortcutCapture: { active: false, keys: [], message: "" },
     dirty: false,
     saving: false,
     onTestShortcut: vi.fn(),
@@ -62,7 +62,6 @@ describe("SettingsPanel shortcut controls", () => {
       <SettingsPanel
         {...settingsProps({
           shortcutCapture: {
-            arming: false,
             active: true,
             keys: ["Ctrl", "Alt", "K"],
             message: "Keep holding.",

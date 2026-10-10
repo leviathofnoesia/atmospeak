@@ -257,11 +257,7 @@ mod tests {
     #[test]
     fn restate_as_a_keeps_later_ending() {
         assert_eq!(
-            clean_text(
-                "I wanted to buy a record as a gift as a present",
-                &[],
-                &[],
-            ),
+            clean_text("I wanted to buy a record as a gift as a present", &[], &[],),
             "I wanted to buy a record as a present."
         );
     }

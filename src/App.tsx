@@ -124,7 +124,6 @@ interface MicCheckState {
 }
 
 interface ShortcutCaptureState {
-  arming: boolean;
   active: boolean;
   keys: string[];
   message: string;
@@ -267,7 +266,6 @@ function AppShell() {
   });
   const [recording, setRecording] = useState<RecordingStarted | null>(null);
   const [recorderPhase, setRecorderPhase] = useState<RecorderPhase>("idle");
-  const [, setElapsedSeconds] = useState(0);
   const [shortcutTest, setShortcutTest] = useState<ShortcutTestState>({
     active: false,
     detected: false,
@@ -280,12 +278,10 @@ function AppShell() {
     message: DEV_SHORTCUT_FIXTURE ? "Development shortcut fixture." : "",
   });
   const [shortcutCapture, setShortcutCapture] = useState<ShortcutCaptureState>({
-    arming: false,
     active: false,
     keys: [],
     message: "",
   });
-  const [, setMicLevel] = useState<MicLevel | null>(null);
   const [soundCheck, setSoundCheck] = useState<SoundCheckState>({
     active: false,
     result: null,
@@ -350,7 +346,6 @@ function AppShell() {
       ? `${label} recorded. Save settings to activate it.`
       : `${label} recorded. Test the same chord once to continue.`;
     shortcutCaptureRef.current = {
-      arming: false,
       active: false,
       keys: [],
       message,
@@ -483,7 +478,6 @@ function AppShell() {
         return;
       }
       shortcutCaptureRef.current = {
-        arming: false,
         active: false,
         keys: [],
         message: "Recording cancelled when Atmospeak lost focus. Click Record shortcut and retry.",
@@ -542,18 +536,6 @@ function AppShell() {
       setNotice({ tone: "error", message: stringifyError(error) });
     });
   }, [refresh]);
-
-  useEffect(() => {
-    if (recording === null) {
-      setElapsedSeconds(0);
-      return undefined;
-    }
-    const startedAt = new Date(recording.startedAt).getTime();
-    const interval = window.setInterval(() => {
-      setElapsedSeconds(Math.max(0, (Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [recording]);
 
   const applyNativeDictation = useCallback(
     (payload: NativeDictationEvent) => {
@@ -718,7 +700,6 @@ function AppShell() {
           "atmospeak://mic-level",
           (payload) => {
             const level = payload as MicLevel;
-            setMicLevel(level);
             setMicCheck((current) => {
               if (!current.active) return current;
               const healthy = level.rmsDbfs >= -48 && level.peakDbfs >= -30;
@@ -1045,7 +1026,7 @@ function AppShell() {
         onOpenWindowsSoundSettings={openWindowsSoundSettings}
         onTestShortcut={() => {
           void (async () => {
-            shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
+            shortcutCaptureRef.current = { active: false, keys: [], message: "" };
             setShortcutCapture(shortcutCaptureRef.current);
             shortcutPressedCodesRef.current.clear();
             focusedPressedKeysRef.current.clear();
@@ -1107,7 +1088,6 @@ function AppShell() {
           focusedPressedKeysRef.current.clear();
           focusedCapturedKeysRef.current.clear();
           shortcutCaptureRef.current = {
-            arming: false,
             active: true,
             keys: [],
             message: "Hold the keys you want together. They will light up immediately.",
@@ -1125,7 +1105,7 @@ function AppShell() {
             shortcutTestTimerRef.current = null;
           }
           void cancelShortcutCapture();
-          shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
+          shortcutCaptureRef.current = { active: false, keys: [], message: "" };
           setShortcutCapture(shortcutCaptureRef.current);
           shortcutPressedCodesRef.current.clear();
           focusedPressedKeysRef.current.clear();
@@ -1145,7 +1125,7 @@ function AppShell() {
             shortcutTestTimerRef.current = null;
           }
           void cancelShortcutCapture();
-          shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
+          shortcutCaptureRef.current = { active: false, keys: [], message: "" };
           setShortcutCapture(shortcutCaptureRef.current);
           shortcutPressedCodesRef.current.clear();
           focusedPressedKeysRef.current.clear();
@@ -1444,7 +1424,6 @@ function AppShell() {
               focusedPressedKeysRef.current.clear();
               focusedCapturedKeysRef.current.clear();
               shortcutCaptureRef.current = {
-                arming: false,
                 active: true,
                 keys: [],
                 message: "Hold any modifier chord together, then release every key to save it.",
@@ -1457,7 +1436,6 @@ function AppShell() {
               focusedPressedKeysRef.current.clear();
               focusedCapturedKeysRef.current.clear();
               shortcutCaptureRef.current = {
-                arming: false,
                 active: false,
                 keys: [],
                 message: "Shortcut recording cancelled.",
@@ -1472,7 +1450,7 @@ function AppShell() {
               void setShortcutTestActive(false);
               focusedPressedKeysRef.current.clear();
               focusedCapturedKeysRef.current.clear();
-              shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
+              shortcutCaptureRef.current = { active: false, keys: [], message: "" };
               setShortcutCapture(shortcutCaptureRef.current);
               setShortcutTest({
                 active: false,
@@ -1831,9 +1809,6 @@ function OverlayShell() {
       notice={dragDiagnostic || message}
       liveTranscript={liveTranscript}
       inputLevel={level}
-      inputBands={[]}
-      bubbleSize="medium"
-      bubbleOpacity={1}
       hostApp={hostApp}
       hotkeyLabel={settings?.hotkey ?? "your shortcut"}
       shortcutArmed={shortcutArmed}

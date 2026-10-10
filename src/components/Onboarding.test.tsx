@@ -60,7 +60,7 @@ function onboardingProps(overrides: Record<string, unknown> = {}) {
     modelDownload: null,
     shortcutStatus: null,
     shortcutTest: { active: false, detected: false, message: "" },
-    shortcutCapture: { arming: false, active: false, keys: [], message: "" },
+    shortcutCapture: { active: false, keys: [], message: "" },
     micCheck: { active: false, passed: true, level: 0.7, message: "Healthy signal" },
     soundCheck: { active: false, result: passingSoundCheck, message: "Heard clearly" },
     onStartMicCheck: vi.fn(async () => undefined),
@@ -150,7 +150,6 @@ describe("Onboarding", () => {
     const user = userEvent.setup();
     const props = onboardingProps({
       shortcutCapture: {
-        arming: false,
         active: true,
         keys: ["Ctrl", "Shift", "K"],
         message: "Hold the keys you want together.",

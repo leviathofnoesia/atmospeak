@@ -643,7 +643,9 @@ fn feed_fixture_through_sender(
             }
             Err(TrySendError::Disconnected(_)) => {
                 sender.dropped.fetch_add(1, Ordering::Relaxed);
-                return Err(anyhow!("fixture streaming worker exited while feeding audio"));
+                return Err(anyhow!(
+                    "fixture streaming worker exited while feeding audio"
+                ));
             }
         }
         let elapsed = frame_started.elapsed();
@@ -1153,8 +1155,8 @@ fn write_wav(path: &PathBuf, samples: &[f32]) -> Result<()> {
 mod tests {
     use super::{
         AudioAnalysis, CapturedRecording, StreamingFrameSender, StreamingResampler,
-        TARGET_SAMPLE_RATE, analyze_samples, capture_input_streaming, finish_recording,
-        finalize_capture, load_fixture_samples, normal_dictation_failure, prepare_for_dictation,
+        TARGET_SAMPLE_RATE, analyze_samples, capture_input_streaming, finalize_capture,
+        finish_recording, load_fixture_samples, normal_dictation_failure, prepare_for_dictation,
         resample_linear,
     };
     use parking_lot::Mutex;

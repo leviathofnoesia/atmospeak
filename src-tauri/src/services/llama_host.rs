@@ -27,8 +27,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(180);
 const INFERENCE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Pinned llama.cpp Windows CPU build. Refresh via `scripts/bootstrap-llama.ps1`.
-pub const LLAMA_RUNTIME_ZIP_URL: &str =
-    "https://github.com/ggml-org/llama.cpp/releases/download/b10178/llama-b10178-bin-win-cpu-x64.zip";
+pub const LLAMA_RUNTIME_ZIP_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b10178/llama-b10178-bin-win-cpu-x64.zip";
 pub const LLAMA_RUNTIME_ZIP_SHA256: &str =
     "55e419591f9798e1ffe6ec3a088cf162a93c07f8a7c8e0fc5b8bf9948155e1b1";
 pub const LLAMA_SERVER_EXE_SHA256: &str =
@@ -324,8 +323,9 @@ fn download_and_extract_server(app: &AppHandle) -> Result<PathBuf> {
     if server.is_file() {
         let _ = fs::remove_file(&server);
     }
-    let found = find_file_named(&dest_dir, "llama-server.exe")
-        .ok_or_else(|| anyhow::anyhow!("llama-server.exe missing after extracting the runtime zip"))?;
+    let found = find_file_named(&dest_dir, "llama-server.exe").ok_or_else(|| {
+        anyhow::anyhow!("llama-server.exe missing after extracting the runtime zip")
+    })?;
     if found != server {
         fs::copy(&found, &server).context("failed to place llama-server.exe")?;
     }

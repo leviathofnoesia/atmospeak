@@ -101,7 +101,10 @@ impl Database {
             .prepare("pragma table_info(transcript_sessions)")?
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        if !session_columns.iter().any(|column| column == "polished_text") {
+        if !session_columns
+            .iter()
+            .any(|column| column == "polished_text")
+        {
             self.connection.execute(
                 "alter table transcript_sessions add column polished_text text",
                 [],

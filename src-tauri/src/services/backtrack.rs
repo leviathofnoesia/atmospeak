@@ -10,10 +10,9 @@ pub fn apply_backtrack(value: &str) -> String {
 }
 
 fn apply_correction_commands(value: &str) -> String {
-    let correction_pattern = Regex::new(
-        r"(?i)\b(scratch that|delete that|never mind|nevermind|go back|forget that)\b",
-    )
-    .expect("correction command regex");
+    let correction_pattern =
+        Regex::new(r"(?i)\b(scratch that|delete that|never mind|nevermind|go back|forget that)\b")
+            .expect("correction command regex");
     correction_pattern
         .split(value)
         .last()
@@ -247,9 +246,7 @@ fn short_phrase_restate_pair(first: &[&str], second: &[&str]) -> bool {
     }
     let left_last = normalize_token(first[last]);
     let right_last = normalize_token(second[last]);
-    !left_last.is_empty()
-        && !right_last.is_empty()
-        && left_last != right_last
+    !left_last.is_empty() && !right_last.is_empty() && left_last != right_last
 }
 
 fn tokenize_words(value: &str) -> Vec<String> {

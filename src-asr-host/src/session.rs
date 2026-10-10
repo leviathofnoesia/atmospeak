@@ -6,9 +6,9 @@
 use std::{
     io::Write,
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, RecvTimeoutError, TryRecvError},
-        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -89,12 +89,7 @@ struct Session {
 }
 
 impl Session {
-    fn new(
-        id: String,
-        language: String,
-        prompt: String,
-        profile: TranscriptionProfile,
-    ) -> Self {
+    fn new(id: String, language: String, prompt: String, profile: TranscriptionProfile) -> Self {
         Self {
             id,
             language,
@@ -211,13 +206,7 @@ pub fn run_worker(
                 abort.store(false, Ordering::Release);
                 continue;
             }
-            finalize_stopped_session(
-                &mut model,
-                &mut session,
-                &abort,
-                &active_session_id,
-                output,
-            )?;
+            finalize_stopped_session(&mut model, &mut session, &abort, &active_session_id, output)?;
             stop_requested = false;
             continue;
         }
@@ -264,7 +253,9 @@ pub fn run_worker(
                     Err(TryRecvError::Empty) => {
                         let mut active = session.take().expect("session checked above");
                         emit_preview(
-                            model.as_mut().ok_or_else(|| anyhow!("model is not loaded"))?,
+                            model
+                                .as_mut()
+                                .ok_or_else(|| anyhow!("model is not loaded"))?,
                             &mut active,
                             output,
                         )?;
@@ -471,7 +462,12 @@ fn append_frame(
         .as_mut()
         .filter(|active| active.id == frame.session_id)
     else {
-        write_error(output, Some(frame.session_id), "session is not active", true)?;
+        write_error(
+            output,
+            Some(frame.session_id),
+            "session is not active",
+            true,
+        )?;
         return Ok(());
     };
     if let Some(previous) = active.sequence
@@ -494,7 +490,8 @@ fn append_frame(
         .started
         .elapsed()
         .as_millis()
-        .saturating_sub(u128::from(frame.timestamp_ms.saturating_add(20))) as u64;
+        .saturating_sub(u128::from(frame.timestamp_ms.saturating_add(20)))
+        as u64;
     active.max_backlog_ms = active.max_backlog_ms.max(backlog_ms);
     let samples = inference::pcm_bytes_to_f32(&frame.pcm_s16le)?;
     active.total_samples_received += samples.len() as u64;
@@ -524,8 +521,8 @@ fn run_vad_pass(
     let last_speech_end =
         inference::vad_last_speech_end(&mut model_mut.vad, &active.audio[window_start..])?
             .map(|end| window_start + end);
-    let speech_active = last_speech_end
-        .is_some_and(|end| active.audio.len().saturating_sub(end) < SILENCE_SAMPLES);
+    let speech_active =
+        last_speech_end.is_some_and(|end| active.audio.len().saturating_sub(end) < SILENCE_SAMPLES);
     if speech_active != active.speech_active {
         active.speech_active = speech_active;
         write_event(
@@ -788,7 +785,10 @@ mod tests {
 
     #[test]
     fn silence_hallucination_keeps_real_filler_words() {
-        assert!(silence_hallucination("[BLANK_AUDIO]", "hello there friend again"));
+        assert!(silence_hallucination(
+            "[BLANK_AUDIO]",
+            "hello there friend again"
+        ));
         assert!(silence_hallucination(".", "hello there friend again"));
         assert!(!silence_hallucination("the", "hello there friend again"));
         assert!(!silence_hallucination("you", "hello there friend again"));
