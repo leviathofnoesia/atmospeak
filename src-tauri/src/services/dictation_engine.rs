@@ -510,7 +510,6 @@ impl Worker {
             reason,
             acknowledged_at_ms: now_ms(),
         };
-        let _ = self.app.emit("atmospeak://shortcut-gesture", ack.clone());
         metrics::emit_runtime(
             &self.app,
             "shortcut-ack",
@@ -809,9 +808,8 @@ impl Worker {
         // The count is a lower bound before the worker drains, so tail loss is
         // taken from the sticky delivery flag the writer publishes on failure
         // rather than from the frames it counts afterwards.
-        let drops_exceeded =
-            streaming_drop_exceeds_tolerance(captured.observed_frames_dropped())
-                || captured.streaming_delivery_failed();
+        let drops_exceeded = streaming_drop_exceeds_tolerance(captured.observed_frames_dropped())
+            || captured.streaming_delivery_failed();
         let preview_ready = preview_paste.as_ref().is_some_and(|preview| {
             preview.session_id == captured.id && !preview.paste_text.trim().is_empty()
         });
@@ -1016,45 +1014,39 @@ impl Worker {
                 // release pastes.
                 let trusted_auto_paste_polish = matches!(
                     snapshot.settings.polish_provider,
-                    crate::models::PolishProvider::Bundled
-                        | crate::models::PolishProvider::Ollama
+                    crate::models::PolishProvider::Bundled | crate::models::PolishProvider::Ollama
                 );
-                let run_auto_polish = || {
-                    match polish::polish_if_enabled(
-                        &app,
-                        &snapshot.settings,
-                        &cleaned_text,
-                        polish::AUTO_POLISH_TIMEOUT,
-                    ) {
-                        Ok(Some(outcome)) => {
-                            metrics::emit_runtime(
-                                &app,
-                                "polish-ok",
-                                format!(
-                                    "session={} elapsed_ms={}",
-                                    finished.id, outcome.elapsed_ms
-                                ),
-                            );
-                            Some(outcome.text)
-                        }
-                        Ok(None) => None,
-                        Err(error) => {
-                            let kind = if polish::is_timeout_error(&error) {
-                                "polish-timeout"
-                            } else {
-                                "polish-fallback"
-                            };
-                            metrics::emit_runtime(
-                                &app,
-                                kind,
-                                format!(
-                                    "session={} {}",
-                                    finished.id,
-                                    polish::sanitize_message(&error.to_string())
-                                ),
-                            );
-                            None
-                        }
+                let run_auto_polish = || match polish::polish_if_enabled(
+                    &app,
+                    &snapshot.settings,
+                    &cleaned_text,
+                    polish::AUTO_POLISH_TIMEOUT,
+                ) {
+                    Ok(Some(outcome)) => {
+                        metrics::emit_runtime(
+                            &app,
+                            "polish-ok",
+                            format!("session={} elapsed_ms={}", finished.id, outcome.elapsed_ms),
+                        );
+                        Some(outcome.text)
+                    }
+                    Ok(None) => None,
+                    Err(error) => {
+                        let kind = if polish::is_timeout_error(&error) {
+                            "polish-timeout"
+                        } else {
+                            "polish-fallback"
+                        };
+                        metrics::emit_runtime(
+                            &app,
+                            kind,
+                            format!(
+                                "session={} {}",
+                                finished.id,
+                                polish::sanitize_message(&error.to_string())
+                            ),
+                        );
+                        None
                     }
                 };
 
@@ -1613,8 +1605,12 @@ mod tests {
     #[test]
     fn streaming_drop_tolerance_bounds_fallback() {
         assert!(!streaming_drop_exceeds_tolerance(0));
-        assert!(!streaming_drop_exceeds_tolerance(STREAMING_DROP_TOLERANCE_FRAMES));
-        assert!(streaming_drop_exceeds_tolerance(STREAMING_DROP_TOLERANCE_FRAMES + 1));
+        assert!(!streaming_drop_exceeds_tolerance(
+            STREAMING_DROP_TOLERANCE_FRAMES
+        ));
+        assert!(streaming_drop_exceeds_tolerance(
+            STREAMING_DROP_TOLERANCE_FRAMES + 1
+        ));
     }
 
     /// The worker must not block indefinitely while a settle is pending, or the

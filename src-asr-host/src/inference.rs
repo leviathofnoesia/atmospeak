@@ -5,16 +5,14 @@
 use std::{
     io::Write,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use anyhow::{Result, anyhow, bail};
 use atmospeak_asr_protocol::{AsrBackend, AsrEvent, MAX_FRAME_SIZE, TranscriptionProfile};
-use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperState, WhisperVadContext, WhisperVadParams,
-};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperState, WhisperVadContext, WhisperVadParams};
 
 pub const SAMPLE_RATE: usize = 16_000;
 
@@ -34,7 +32,9 @@ pub const VAD_WINDOW_SAMPLES: usize = SAMPLE_RATE * 3;
 
 /// First sample of the slice worth VAD-scanning within the current chunk.
 pub fn vad_window_start(chunk_start: usize, audio_len: usize) -> usize {
-    audio_len.saturating_sub(VAD_WINDOW_SAMPLES).max(chunk_start)
+    audio_len
+        .saturating_sub(VAD_WINDOW_SAMPLES)
+        .max(chunk_start)
 }
 
 pub struct DecodedText {
@@ -130,7 +130,7 @@ pub fn transcribe(
         unsafe {
             params.set_abort_callback(Some(abort_callback_trampoline));
             params.set_abort_callback_user_data(
-                Arc::as_ptr(flag) as *const AtomicBool as *mut std::ffi::c_void,
+                Arc::as_ptr(flag) as *const AtomicBool as *mut std::ffi::c_void
             );
         }
     }
@@ -257,10 +257,7 @@ mod tests {
             "very very very good"
         );
         // Confirmed >= 1: soft-extend to the longest matching boundary.
-        assert_eq!(
-            merge_overlap("very very", "very good", 1),
-            "very very good"
-        );
+        assert_eq!(merge_overlap("very very", "very good", 1), "very very good");
         assert_eq!(
             merge_overlap("very very", "very very good", 1),
             "very very good"
@@ -289,7 +286,10 @@ mod tests {
         let chunk_start = 10_000;
         let audio_len = chunk_start + VAD_WINDOW_SAMPLES * 3;
         // Chunk longer than the window: only the trailing 3 s are scanned.
-        assert_eq!(vad_window_start(chunk_start, audio_len), audio_len - VAD_WINDOW_SAMPLES);
+        assert_eq!(
+            vad_window_start(chunk_start, audio_len),
+            audio_len - VAD_WINDOW_SAMPLES
+        );
         // The window never starts before the chunk itself.
         assert_eq!(
             vad_window_start(audio_len - SAMPLE_RATE, audio_len),

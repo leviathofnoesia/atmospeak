@@ -241,8 +241,7 @@ pub fn start_level_events(app: &AppHandle) {
                     break;
                 }
                 let level = state.recorder.mic_level();
-                let _ = app.emit("atmospeak://mic-level", level.clone());
-                let _ = app.emit("wind-speak://mic-level", level);
+                let _ = app.emit("atmospeak://mic-level", level);
                 std::thread::sleep(Duration::from_millis(50));
             }
         });
@@ -250,7 +249,6 @@ pub fn start_level_events(app: &AppHandle) {
 
 fn emit_result(app: &AppHandle, result: SoundCheckResult) -> SoundCheckResult {
     let _ = app.emit("atmospeak://sound-check", result.clone());
-    let _ = app.emit("wind-speak://sound-check", result.clone());
     metrics::emit_runtime(
         app,
         if result.passed {

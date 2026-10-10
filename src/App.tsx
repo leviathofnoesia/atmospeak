@@ -678,10 +678,6 @@ function AppShell() {
           },
         ],
         [
-          "wind-speak://native-dictation",
-          (payload) => applyNativeDictation(payload as NativeDictationEvent),
-        ],
-        [
           "atmospeak://native-dictation",
           (payload) => applyNativeDictation(payload as NativeDictationEvent),
         ],
