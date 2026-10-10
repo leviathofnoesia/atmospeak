@@ -1,0 +1,110 @@
+name: Temporary Atmospeak History baseline capture
+
+# Scoped capture only. Do not merge this workflow into a product branch.
+on:
+  push:
+    branches: [validation/atmospeak-frontend-20261010]
+    paths: [.github/workflows/temporary-history-capture.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Windows / deterministic History baseline
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CI: "true"
+      GIT_LFS_SKIP_SMUDGE: "1"
+      PLAYWRIGHT_HTML_OPEN: never
+    steps:
+      - name: Check out pinned main without LFS
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: leviathofnoesia/atmospeak
+          ref: 1f0a66495992da320919af185ad84990f6c03c6d
+          lfs: false
+          persist-credentials: false
+
+      - name: Install pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Install pinned Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+
+      - name: Apply only deterministic locale and timezone to the test configuration
+        run: |
+          if ((git rev-parse HEAD) -ne '1f0a66495992da320919af185ad84990f6c03c6d') { throw 'Unexpected source' }
+          @'
+          const fs = require('node:fs');
+          const path = 'playwright.config.ts';
+          const text = fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+          const anchor = '    trace: "on-first-retry",\n';
+          if (text.split(anchor).length !== 2) throw new Error('Unexpected Playwright config');
+          fs.writeFileSync(path, text.replace(anchor, anchor + '    locale: "en-US",\n    timezoneId: "America/New_York",\n'));
+          '@ | node
+          if ($LASTEXITCODE -ne 0) { throw 'Configuration patch failed' }
+          git diff -- playwright.config.ts
+
+      - name: Install frozen dependencies and the locked Chromium
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen dependency installation failed' }
+          node node_modules/@playwright/test/cli.js install chromium
+
+      - name: Capture the old History baseline failure in the intended timezone
+        id: before
+        continue-on-error: true
+        run: bun run e2e --grep "History matches the checked-in visual baseline and exposes real actions" --workers=1 --output=baseline-before-update --trace=retain-on-failure --reporter=line
+
+      - name: Require genuine before-update actual, expected, and diff images
+        run: |
+          if ('${{ steps.before.outcome }}' -ne 'failure') { throw 'The expected stale baseline did not fail; investigate instead of updating it' }
+          foreach ($suffix in @('actual', 'expected', 'diff')) {
+            $files = @(Get-ChildItem baseline-before-update -Recurse -Filter "hub-history-1000x660-$suffix.png")
+            if ($files.Count -ne 1) { throw "Missing or ambiguous $suffix screenshot" }
+          }
+
+      - name: Regenerate only the History screenshot on Windows
+        run: bun run e2e --grep "History matches the checked-in visual baseline and exposes real actions" --update-snapshots=changed --workers=1 --output=baseline-update --reporter=line
+
+      - name: Run all 12 tests with unchanged thresholds and no snapshot updates
+        id: full
+        run: bun run e2e --workers=1 --output=final-tests --trace=retain-on-failure --reporter=line,html
+
+      - name: Verify the two-file scope and source-image provenance
+        run: |
+          $expected = @('playwright.config.ts', 'tests/atmospeak.spec.ts-snapshots/hub-history-1000x660-win32.png') | Sort-Object
+          $changed = @(git diff --name-only) | Sort-Object
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect changed source' }
+          if (Compare-Object $expected $changed) { throw ('Unexpected changed paths: ' + ($changed -join ', ')) }
+          $actual = @(Get-ChildItem baseline-before-update -Recurse -Filter 'hub-history-1000x660-actual.png')[0]
+          $new = 'tests/atmospeak.spec.ts-snapshots/hub-history-1000x660-win32.png'
+          $actualHash = (Get-FileHash -Algorithm SHA256 $actual.FullName).Hash
+          $newHash = (Get-FileHash -Algorithm SHA256 $new).Hash
+          if ($actualHash -ne $newHash) { throw 'New baseline differs from the independently captured actual image' }
+          "Source: 1f0a66495992da320919af185ad84990f6c03c6d`nLocale: en-US`nTimezone: America/New_York`nHistory SHA-256: $newHash`nAll 12 tests passed without updating snapshots." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Preserve capture evidence and the single regenerated PNG
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deterministic-history-baseline
+          path: |
+            baseline-before-update/
+            final-tests/
+            playwright-report/
+            playwright.config.ts
+            tests/atmospeak.spec.ts-snapshots/hub-history-1000x660-win32.png
+          if-no-files-found: error
+          retention-days: 1
