@@ -1,6 +1,6 @@
-name: Temporary Atmospeak baseline-repair integration validation
+name: Temporary Atmospeak cumulative frontend validation
 
-# Validate exact cleanup heads integrated with the reviewed-scope baseline repair.
+# Validate the two cumulative trees needed for serial frontend cleanup merges.
 # Do not merge this workflow into main or a product PR.
 on:
   push:
@@ -24,30 +24,13 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - label: repaired-main
-            sha: 52bfa6333150215693582e1010e37b3b8bcf5502
+          - label: cumulative-through-pr27
+            sha: fb70c7eaf80c04e59d593eda5e35e070f3a47a97
+            merge_shas: 6a73b13e70b8a4b908633f9edaf6e9bb161a4a90 c777cec80898ec36edcf08afbc43716e0e68fa7d
             depth: 0
-          - label: pr23-with-pr29
-            sha: 6fb5c35ab59194afcf36c58874123b41b12c1f6c
-            depth: 0
-          - label: pr24-with-pr29
-            sha: 4a9ad3e5cbcd04943371a683d1de5ae522c7858a
-            depth: 0
-          - label: pr25-with-pr29
-            sha: ae80c3d85a4577d1cf3d8cb76fda03b940d6ca22
-            depth: 0
-          - label: pr26-with-pr29
-            sha: 6a73b13e70b8a4b908633f9edaf6e9bb161a4a90
-            depth: 0
-          - label: pr27-with-pr29
-            sha: c777cec80898ec36edcf08afbc43716e0e68fa7d
-            depth: 0
-          - label: pr28-with-pr29
-            sha: d4e0a4dd8f14517e62d10337b32cf45728937bfb
-            depth: 0
-          - label: pr25-plus-pr26-with-pr29
-            sha: 6a73b13e70b8a4b908633f9edaf6e9bb161a4a90
-            merge_sha: ae80c3d85a4577d1cf3d8cb76fda03b940d6ca22
+          - label: cumulative-through-pr28
+            sha: fb70c7eaf80c04e59d593eda5e35e070f3a47a97
+            merge_shas: 6a73b13e70b8a4b908633f9edaf6e9bb161a4a90 c777cec80898ec36edcf08afbc43716e0e68fa7d d4e0a4dd8f14517e62d10337b32cf45728937bfb
             depth: 0
     defaults:
       run:
@@ -57,8 +40,7 @@ jobs:
       GIT_LFS_SKIP_SMUDGE: "1"
       PLAYWRIGHT_HTML_OPEN: never
       HEAD_SHA: ${{ matrix.sha }}
-      MERGE_SHA: ${{ matrix.merge_sha }}
-      REPAIR_SHA: 52bfa6333150215693582e1010e37b3b8bcf5502
+      MERGE_SHAS: ${{ matrix.merge_shas }}
 
     steps:
       - name: Check out immutable frontend source without LFS
@@ -76,9 +58,7 @@ jobs:
         run: |
           if ((git rev-parse HEAD) -ne $env:HEAD_SHA) { throw "Unexpected source commit" }
           if ($LASTEXITCODE -ne 0) { throw "Cannot identify source" }
-          $mergeHeads = @()
-          if ($env:MERGE_SHA) { $mergeHeads += $env:MERGE_SHA }
-          if ($env:HEAD_SHA -ne $env:REPAIR_SHA) { $mergeHeads += $env:REPAIR_SHA }
+          $mergeHeads = @($env:MERGE_SHAS -split ' ' | Where-Object { $_ })
           foreach ($parent in $mergeHeads) {
             git cat-file -e "$parent^{commit}"
             if ($LASTEXITCODE -ne 0) { throw "Pinned integration parent is missing: $parent" }
