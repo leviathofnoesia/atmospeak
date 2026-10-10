@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import App, { markOverlayDocument } from "./App";
-
-const appStyles = readFileSync("src/App.css", "utf8");
+import appStyles from "./App.css?raw";
 
 describe("boot shell before effects run", () => {
   let style: HTMLStyleElement;
