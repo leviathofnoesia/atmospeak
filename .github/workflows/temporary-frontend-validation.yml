@@ -1,6 +1,6 @@
-name: Temporary Atmospeak frontend exact-head validation
+name: Temporary Atmospeak baseline-repair integration validation
 
-# Isolated exact-head validation for the current PR batch.
+# Validate exact cleanup heads integrated with the reviewed-scope baseline repair.
 # Do not merge this workflow into main or a product PR.
 on:
   push:
@@ -24,28 +24,28 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - label: main-baseline
-            sha: 1f0a66495992da320919af185ad84990f6c03c6d
-            depth: 1
-          - label: pr23
+          - label: repaired-main
+            sha: 52bfa6333150215693582e1010e37b3b8bcf5502
+            depth: 0
+          - label: pr23-with-pr29
             sha: 6fb5c35ab59194afcf36c58874123b41b12c1f6c
-            depth: 1
-          - label: pr24
+            depth: 0
+          - label: pr24-with-pr29
             sha: 4a9ad3e5cbcd04943371a683d1de5ae522c7858a
-            depth: 1
-          - label: pr25
+            depth: 0
+          - label: pr25-with-pr29
             sha: ae80c3d85a4577d1cf3d8cb76fda03b940d6ca22
-            depth: 1
-          - label: pr26
+            depth: 0
+          - label: pr26-with-pr29
             sha: 6a73b13e70b8a4b908633f9edaf6e9bb161a4a90
-            depth: 1
-          - label: pr27
+            depth: 0
+          - label: pr27-with-pr29
             sha: c777cec80898ec36edcf08afbc43716e0e68fa7d
-            depth: 1
-          - label: pr28
+            depth: 0
+          - label: pr28-with-pr29
             sha: d4e0a4dd8f14517e62d10337b32cf45728937bfb
-            depth: 1
-          - label: pr25-plus-pr26
+            depth: 0
+          - label: pr25-plus-pr26-with-pr29
             sha: 6a73b13e70b8a4b908633f9edaf6e9bb161a4a90
             merge_sha: ae80c3d85a4577d1cf3d8cb76fda03b940d6ca22
             depth: 0
@@ -58,6 +58,7 @@ jobs:
       PLAYWRIGHT_HTML_OPEN: never
       HEAD_SHA: ${{ matrix.sha }}
       MERGE_SHA: ${{ matrix.merge_sha }}
+      REPAIR_SHA: 52bfa6333150215693582e1010e37b3b8bcf5502
 
     steps:
       - name: Check out immutable frontend source without LFS
@@ -75,16 +76,21 @@ jobs:
         run: |
           if ((git rev-parse HEAD) -ne $env:HEAD_SHA) { throw "Unexpected source commit" }
           if ($LASTEXITCODE -ne 0) { throw "Cannot identify source" }
-          if ($env:MERGE_SHA) {
-            git cat-file -e "$($env:MERGE_SHA)^{commit}"
-            if ($LASTEXITCODE -ne 0) { throw "Pinned integration parent is missing" }
-            git -c user.name="Atmospeak validation" -c user.email="validation@invalid" merge --no-commit --no-ff $env:MERGE_SHA
+          $mergeHeads = @()
+          if ($env:MERGE_SHA) { $mergeHeads += $env:MERGE_SHA }
+          if ($env:HEAD_SHA -ne $env:REPAIR_SHA) { $mergeHeads += $env:REPAIR_SHA }
+          foreach ($parent in $mergeHeads) {
+            git cat-file -e "$parent^{commit}"
+            if ($LASTEXITCODE -ne 0) { throw "Pinned integration parent is missing: $parent" }
+          }
+          if ($mergeHeads.Count) {
+            git -c user.name="Atmospeak validation" -c user.email="validation@invalid" merge --no-commit --no-ff @mergeHeads
             if ($LASTEXITCODE -ne 0) { throw "Pinned integration has a merge conflict" }
           }
           $tree = git write-tree
           if ($LASTEXITCODE -ne 0) { throw "Cannot identify validation tree" }
           "SOURCE_TREE=$tree" >> $env:GITHUB_ENV
-          "Head: $env:HEAD_SHA`nMerge parent: $env:MERGE_SHA`nTree: $tree" >> $env:GITHUB_STEP_SUMMARY
+          "Head: $env:HEAD_SHA`nMerge parents: $($mergeHeads -join ", ")`nTree: $tree" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Install pinned Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6, GitHub
