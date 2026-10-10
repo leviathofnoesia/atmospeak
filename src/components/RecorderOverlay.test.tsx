@@ -39,7 +39,7 @@ describe("RecorderOverlay", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("maps saved bubble appearance settings onto the redesigned dock", () => {
+  it("renders the medium dock with full opacity", () => {
     render(
       <RecorderOverlay
         recording={null}
@@ -47,8 +47,6 @@ describe("RecorderOverlay", () => {
         busy={false}
         phase="idle"
         modelStatus={readyModel}
-        bubbleSize="large"
-        bubbleOpacity={0.55}
         onToggle={vi.fn()}
         onCancel={vi.fn()}
       />,
@@ -56,8 +54,8 @@ describe("RecorderOverlay", () => {
 
     const dock = screen.getByRole("button", { name: /Atmospeak companion/i });
     expect(dock).toHaveAttribute("data-shape", "orb");
-    expect(dock).toHaveAttribute("data-size", "large");
-    expect(dock.parentElement).toHaveStyle({ opacity: "0.55" });
+    expect(dock).toHaveAttribute("data-size", "medium");
+    expect(dock.parentElement).toHaveStyle({ opacity: "1" });
   });
 
   it("exposes Insert and Discard while listening", async () => {
