@@ -10,17 +10,16 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use commands::{
     cancel_model_download, cancel_recording, cancel_shortcut_capture, cancel_sound_check,
-    clear_polish_api_key, complete_onboarding, delete_dictionary_entry, delete_model,
-    delete_session, delete_snippet, download_model, download_polish_model, ensure_polish_runtime,
-    finish_sound_check, get_app_snapshot, get_edition, get_last_stage_metrics, get_model_inventory,
-    get_model_status, get_polish_inventory, get_recording_level, get_runtime_events,
-    get_shortcut_status, handle_dictation_action, has_polish_api_key, inject_onboarding_sample,
-    inject_session, list_microphones, mic_check_start, mic_check_stop, open_windows_sound_settings,
-    polish_session, register_setup_shortcut, reset_overlay_position, save_overlay_position,
-    save_settings, set_polish_api_key, set_session_prefer_polished, set_shortcut_test_active,
-    set_shortcuts_paused, show_main_window, show_overlay_window, start_recording,
-    start_shortcut_capture, start_sound_check, stop_recording, streaming_asr_available,
-    upsert_dictionary_entry, upsert_snippet,
+    clear_polish_api_key, complete_onboarding, delete_dictionary_entry, delete_model, delete_session,
+    delete_snippet, download_model, download_polish_model, ensure_polish_runtime, finish_sound_check,
+    get_app_snapshot, get_edition, get_last_stage_metrics, get_model_inventory, get_model_status,
+    get_polish_inventory, get_runtime_events, get_shortcut_status,
+    handle_dictation_action, has_polish_api_key, inject_onboarding_sample, inject_session,
+    list_microphones, mic_check_start, mic_check_stop, open_windows_sound_settings, polish_session,
+    register_setup_shortcut, reset_overlay_position, save_overlay_position, save_settings,
+    set_polish_api_key, set_session_prefer_polished, set_shortcut_test_active, set_shortcuts_paused,
+    show_main_window, show_overlay_window, start_recording, start_shortcut_capture, start_sound_check,
+    stop_recording, streaming_asr_available, upsert_dictionary_entry, upsert_snippet,
 };
 use services::{
     app_state::AppState, asr_host, dictation_engine, metrics, runtime, shortcuts, streaming_asr,
@@ -192,9 +191,6 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
         .expect("failed to spawn streaming ASR warmup thread");
 }
 
-/// Bring up the resident ASR host in the background: loading the model takes
-/// seconds and must not delay the window. Dictation works off the CLI backend
-/// until the host is warm, and keeps working if it never comes up at all.
 /// Publish the resident batch host in its lazy form alongside streaming: the
 /// `whisper-server` process spawns on first use and then stays resident (v0.4
 /// behavior). Without this, a streaming fallback pays a cold one-shot
@@ -419,7 +415,6 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
         get_edition,
         get_app_snapshot,
         get_shortcut_status,
-        get_recording_level,
         list_microphones,
         save_settings,
         set_shortcuts_paused,

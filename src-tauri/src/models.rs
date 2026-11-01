@@ -21,10 +21,6 @@ pub struct AppSettings {
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
     pub advanced_whisper_cli_path: String,
-    // Companion appearance. Phase A locked settings to the 12 fields above; these
-    // five were promoted from the design prototype's tweak panel into real,
-    // persisted settings. Container-level `serde(default)` keeps older setting
-    // blobs loadable.
     pub accent: Accent,
     pub dock_shape: DockShape,
     pub wave_style: WaveStyle,

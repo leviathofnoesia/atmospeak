@@ -39,11 +39,6 @@ pub fn get_shortcut_status(state: State<'_, AppState>) -> CommandResult<Shortcut
 }
 
 #[tauri::command]
-pub fn get_recording_level(state: State<'_, AppState>) -> f32 {
-    state.recorder.level()
-}
-
-#[tauri::command]
 pub fn list_microphones(state: State<'_, AppState>) -> CommandResult<Vec<MicrophoneInfo>> {
     let selected = state
         .database

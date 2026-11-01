@@ -20,7 +20,6 @@ use crate::{
     },
 };
 
-/// The application's data plane: every long-lived piece of state lives here.
 pub struct AppState {
     pub app_dir: PathBuf,
     pub database: Mutex<Database>,
@@ -32,7 +31,6 @@ pub struct AppState {
     pub shortcut_capture_active: Arc<Mutex<bool>>,
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
-    pub retention_sweeper_cancel: Arc<AtomicBool>,
     pub model_download_cancel: Arc<AtomicBool>,
     level_stream_generation: AtomicU64,
     model_download_active: Mutex<Option<String>>,
@@ -78,7 +76,6 @@ impl AppState {
             shortcut_capture_active: Arc::new(Mutex::new(false)),
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(runtime_events)),
-            retention_sweeper_cancel: Arc::new(AtomicBool::new(false)),
             model_download_cancel: Arc::new(AtomicBool::new(false)),
             level_stream_generation: AtomicU64::new(0),
             model_download_active: Mutex::new(None),
@@ -170,12 +167,6 @@ impl AppState {
         true
     }
 
-    pub fn set_streaming_asr(&self, host: Arc<StreamingAsr>) {
-        if let Some(previous) = self.streaming_asr.lock().replace(host) {
-            previous.shutdown();
-        }
-    }
-
     /// Invalidates every in-flight warmup and returns the generation owned by
     /// the caller about to create a new host.
     pub fn begin_streaming_asr_warmup(&self) -> u64 {
@@ -264,11 +255,6 @@ impl AppState {
             .take(limit)
             .cloned()
             .collect()
-    }
-
-    pub fn cancel_retention_sweeper(&self) {
-        self.retention_sweeper_cancel
-            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn begin_model_download(&self, model_id: &str) -> Result<()> {
@@ -440,7 +426,6 @@ mod tests {
         assert!(!state.shortcut_test_active());
         assert!(state.last_target_window().is_none());
         assert!(state.recent_events(10).is_empty());
-        assert!(!state.retention_sweeper_cancel.load(Ordering::Relaxed));
 
         let new_value = state.set_shortcuts_paused(true);
         assert!(new_value);
@@ -466,9 +451,6 @@ mod tests {
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].message, "event-4");
         assert_eq!(events[2].message, "event-2");
-
-        state.cancel_retention_sweeper();
-        assert!(state.retention_sweeper_cancel.load(Ordering::Relaxed));
 
         match previous {
             Some(value) => unsafe {
