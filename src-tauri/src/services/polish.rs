@@ -146,9 +146,7 @@ fn resolve_endpoint_and_model(
                 polish_models::ensure_runtime(app, model_id)?;
             } else {
                 if !polish_models::runtime_ready(app, model_id) {
-                    bail!(
-                        "bundled polish runtime not ready; download it from Settings → AI edit"
-                    );
+                    bail!("bundled polish runtime not ready; download it from Settings → AI edit");
                 }
                 polish_models::attach_ready_runtime(app, model_id)?;
             }
@@ -315,9 +313,7 @@ fn api_key_for_endpoint(settings: &AppSettings, endpoint: &str) -> Result<Option
 
     if let Some(key) = read_keyring_api_key() {
         if bound.is_empty() {
-            bail!(
-                "saved polish API key has no bound origin; re-save the key for {request_origin}"
-            );
+            bail!("saved polish API key has no bound origin; re-save the key for {request_origin}");
         }
         if !bound.eq_ignore_ascii_case(&request_origin) {
             bail!(
@@ -355,8 +351,8 @@ pub fn set_keyring_api_key(api_key: &str) -> Result<()> {
     if trimmed.is_empty() {
         bail!("API key cannot be empty");
     }
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .context("failed to open OS keyring")?;
+    let entry =
+        keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).context("failed to open OS keyring")?;
     entry
         .set_password(trimmed)
         .context("failed to store polish API key in the OS keyring")?;
@@ -364,8 +360,8 @@ pub fn set_keyring_api_key(api_key: &str) -> Result<()> {
 }
 
 pub fn clear_keyring_api_key() -> Result<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .context("failed to open OS keyring")?;
+    let entry =
+        keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).context("failed to open OS keyring")?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
@@ -412,7 +408,9 @@ fn sanitize_reqwest_error(error: reqwest::Error) -> anyhow::Error {
 
 pub fn is_timeout_error(error: &anyhow::Error) -> bool {
     let message = error.to_string().to_ascii_lowercase();
-    message.contains("polish-timeout") || message.contains("timed out") || message.contains("timeout")
+    message.contains("polish-timeout")
+        || message.contains("timed out")
+        || message.contains("timeout")
 }
 
 /// Strip likely API key material from provider error strings.

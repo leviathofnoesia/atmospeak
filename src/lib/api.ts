@@ -6,17 +6,13 @@ import { check } from "@tauri-apps/plugin-updater";
 import type {
   AppSettings,
   AppSnapshot,
-  DictationResult,
   DictionaryEntry,
-  DownloadArtifact,
   InjectionResult,
   MicrophoneInfo,
   ModelInventory,
   ModelInventoryItem,
   ModelStatus,
   SoundCheckResult,
-  RecordingStarted,
-  ReleaseArtifact,
   RuntimeEvent,
   ShortcutStatus,
   Snippet,
@@ -31,12 +27,8 @@ interface WindowWithTauri extends Window {
   __TAURI_INTERNALS__?: unknown;
 }
 
-const releaseBaseUrl = "https://www.novpax.org/downloads/atmospeak/free";
 const releaseVersion = "1.0.3";
 const mockInstalledModels = new Set(["base.en"]);
-const polarCheckoutUrl =
-  import.meta.env.VITE_ATMOSPEAK_POLAR_CHECKOUT_URL ??
-  "https://buy.polar.sh/polar_cl_a4ccEACEPXCGN3mZk0JDyDVXzeob3K8CSpYeB34qQsE";
 
 let mockSnapshot: AppSnapshot = {
   settings: defaultSettings(),
@@ -201,54 +193,6 @@ export function saveSettings(
       return mockSnapshot;
     },
   );
-}
-
-export function startRecording(): Promise<RecordingStarted> {
-  return command("start_recording", undefined, () => ({
-    id: crypto.randomUUID(),
-    startedAt: new Date().toISOString(),
-    microphoneName: mockSnapshot.settings.microphoneName ?? "System default microphone",
-  }));
-}
-
-export function stopRecording(): Promise<DictationResult> {
-  return command("stop_recording", undefined, () => {
-    const cleanedText =
-      "Atmospeak captured this offline prototype transcript and pasted it into the active window.";
-    const session = {
-      id: crypto.randomUUID(),
-      rawText: cleanedText,
-      cleanedText,
-      polishedText: null as string | null,
-      preferPolished: true,
-      audioPath: "mock://recording.wav",
-      durationMs: 4200,
-      wordCount: cleanedText.split(/\s+/).length,
-      injected: mockSnapshot.settings.autoInject,
-      sourceApplication: "Browser preview",
-      createdAt: new Date().toISOString(),
-    };
-    mockSnapshot = recalculateStats({
-      ...mockSnapshot,
-      sessions: [session, ...mockSnapshot.sessions],
-    });
-    return {
-      session,
-      injection: mockSnapshot.settings.autoInject
-        ? {
-            injected: true,
-            restoredClipboard: mockSnapshot.settings.restoreClipboard,
-            restoredTarget: false,
-            targetProcessName: null,
-            message: "Mock transcript pasted into the focused application.",
-          }
-        : null,
-    };
-  });
-}
-
-export function cancelRecording(): Promise<void> {
-  return command("cancel_recording", undefined, () => undefined);
 }
 
 export function injectSession(
@@ -606,10 +550,6 @@ export function getPolishInventory(): Promise<ModelInventoryItem[]> {
   ]);
 }
 
-export function downloadPolishModel(modelId: string): Promise<void> {
-  return command("download_polish_model", { modelId }, async () => undefined);
-}
-
 export function ensurePolishRuntime(modelId: string): Promise<void> {
   return command("ensure_polish_runtime", { modelId }, async () => undefined);
 }
@@ -635,15 +575,6 @@ export function registerSetupShortcut(hotkey: string): Promise<ShortcutStatus> {
   }));
 }
 
-export function startShortcutCapture(currentHotkey: string): Promise<ShortcutStatus> {
-  return command("start_shortcut_capture", { currentHotkey }, () => ({
-    registered: true,
-    hotkey: currentHotkey,
-    paused: false,
-    message: "Keyboard capture ready.",
-  }));
-}
-
 export function cancelShortcutCapture(): Promise<void> {
   return command("cancel_shortcut_capture", undefined, () => undefined);
 }
@@ -657,14 +588,6 @@ export function saveOverlayPosition(
   y: number,
 ): Promise<[number, number]> {
   return command("save_overlay_position", { x, y }, () => [x, y] as [number, number]);
-}
-
-export function micCheckStart(): Promise<void> {
-  return command("mic_check_start", undefined, () => undefined);
-}
-
-export function micCheckStop(): Promise<void> {
-  return command("mic_check_stop", undefined, () => undefined);
 }
 
 export function startSoundCheck(deviceName: string): Promise<void> {
@@ -729,53 +652,4 @@ export function completeOnboarding(settings: AppSettings): Promise<AppSnapshot> 
 
 export function resetOverlayPosition(): Promise<void> {
   return command("reset_overlay_position", undefined, () => undefined);
-}
-
-export function listReleaseArtifacts(): ReleaseArtifact[] {
-  return [
-    {
-      id: "nsis",
-      label: "Windows installer (NSIS)",
-      fileName: `atmospeak_${releaseVersion}_x64-setup.exe`,
-      kind: "installer",
-      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-setup.exe`,
-      recommended: true,
-    },
-    {
-      id: "msi",
-      label: "Windows installer (MSI)",
-      fileName: `atmospeak_${releaseVersion}_x64_en-US.msi`,
-      kind: "msi",
-      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64_en-US.msi`,
-      recommended: false,
-    },
-    {
-      id: "portable",
-      label: "Portable zip",
-      fileName: `atmospeak_${releaseVersion}_x64-portable.zip`,
-      kind: "portable",
-      url: `${releaseBaseUrl}/atmospeak_${releaseVersion}_x64-portable.zip`,
-      recommended: false,
-    },
-  ];
-}
-
-export type { DownloadArtifact };
-
-export type AppEdition = "free" | "pro";
-
-/** Public free builds always report `"free"`. Pro is a separate private assemble. */
-export function getEdition(): Promise<AppEdition> {
-  return command("get_edition", undefined, async () => "free" as AppEdition).then((value) =>
-    value === "pro" ? "pro" : "free",
-  );
-}
-
-export async function openProCheckout(): Promise<void> {
-  if (hasTauriRuntime()) {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(polarCheckoutUrl);
-    return;
-  }
-  window.open(polarCheckoutUrl, "_blank", "noopener,noreferrer");
 }

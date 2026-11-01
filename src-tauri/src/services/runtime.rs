@@ -31,7 +31,8 @@ pub fn resolve_runtime(app: &AppHandle, settings: &AppSettings) -> Result<Resolv
         if cfg!(debug_assertions) {
             let whisper_cli_path =
                 validate_advanced_whisper_cli(app, settings.advanced_whisper_cli_path.trim())?;
-            let model_path = validate_advanced_model_path(app, settings.advanced_model_path.trim())?;
+            let model_path =
+                validate_advanced_model_path(app, settings.advanced_model_path.trim())?;
             return Ok(ResolvedRuntime {
                 source: RuntimeSource::AdvancedOverride,
                 whisper_cli_path,

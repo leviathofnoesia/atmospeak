@@ -278,7 +278,6 @@ fn progress(
 }
 
 fn emit(app: &AppHandle, payload: ModelDownloadProgress) {
-    let _ = app.emit("wind-speak://model-download", payload.clone());
     let _ = app.emit("atmospeak://model-download", payload);
 }
 

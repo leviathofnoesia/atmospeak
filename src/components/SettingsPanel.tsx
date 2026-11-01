@@ -29,7 +29,6 @@ interface ShortcutTestState {
 }
 
 interface ShortcutCaptureState {
-  arming: boolean;
   active: boolean;
   keys: string[];
   message: string;

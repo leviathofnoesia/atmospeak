@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
+    // Keep the real stylesheet for pre-effect boot-paint regression tests.
+    css: { include: /App\.css\?raw$/ },
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["src/test/setup.ts"],
     globals: true,

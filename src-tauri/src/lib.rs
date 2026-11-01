@@ -210,7 +210,8 @@ fn publish_lazy_asr_host(app: &tauri::AppHandle) {
         return;
     };
     if let Ok(host) = asr_host::AsrHost::new(server_exe, resolved.model_path) {
-        app.state::<AppState>().set_asr_host(std::sync::Arc::new(host));
+        app.state::<AppState>()
+            .set_asr_host(std::sync::Arc::new(host));
     }
 }
 
