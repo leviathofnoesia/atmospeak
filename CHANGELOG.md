@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.4 - Parakeet and recoverable dictation (2026-11-24)
 
 ### Changed
 

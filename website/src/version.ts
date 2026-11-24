@@ -1,7 +1,6 @@
-export const APP_VERSION = "1.0.3";
+export const APP_VERSION = "1.0.4";
 
-/** Public free download base on novpax.org (Vercel public/downloads/, not a subdomain). */
-export const FREE_CDN_BASE = "https://www.novpax.org/downloads/atmospeak/free";
+export const GITHUB_RELEASE_BASE = `https://github.com/leviathofnoesia/atmospeak/releases/download/v${APP_VERSION}`;
 
 /** Canonical product / buy page on the Nov Pax storefront. */
 export const NOVPAX_PRODUCT_URL = "https://www.novpax.org/projects/atmospeak";

@@ -17,9 +17,9 @@
 <p align="center">
   <a href="https://www.novpax.org/projects/atmospeak"><strong>Website</strong></a>
   ·
-  <a href="https://www.novpax.org/projects/atmospeak"><strong>Download v1.0.3</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.4"><strong>Download v1.0.4</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.3"><strong>Release notes</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.4"><strong>Release notes</strong></a>
 </p>
 
 Atmospeak is a Windows desktop dictation app built around the bundled
@@ -51,14 +51,14 @@ Free dictation is unlimited and works without an account.
   recovery, export, undo / redo for AI edits, a personal dictionary, snippets,
   and local diagnostics — all on disk, on your machine.
 
-Latest patch notes: [`docs/releases/v1.0.3.md`](docs/releases/v1.0.3.md).
+Latest patch notes: [`docs/releases/v1.0.4.md`](docs/releases/v1.0.4.md).
 The 1.0.0 product declaration remains in
 [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md).
 
 ## Install
 
 Atmospeak currently supports **Windows 10/11 x64**. Download free installers
-from [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak):
+from [GitHub Releases](https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.4).
 
 | Package | Use it when |
 | --- | --- |
@@ -278,7 +278,7 @@ capability lives in a **separate Atmospeak Pro build** (online Polar licence,
 gated updates, Pro-only modules such as airplane mode and the network ledger).
 See [`docs/PRO_BUILD.md`](docs/PRO_BUILD.md) and [`docs/POLAR.md`](docs/POLAR.md).
 
-Canonical download and buy links: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
+Nov Pax product page: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
 Free updater feed: `https://www.novpax.org/downloads/atmospeak/free/latest.json`.
 
 ## Project

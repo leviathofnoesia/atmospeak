@@ -1,12 +1,12 @@
 import "./styles.css";
 import {
   APP_VERSION,
-  FREE_CDN_BASE,
+  GITHUB_RELEASE_BASE,
   NOVPAX_PRODUCT_URL,
   POLAR_CHECKOUT_URL,
 } from "./version";
 
-const releaseBaseUrl = FREE_CDN_BASE;
+const releaseBaseUrl = GITHUB_RELEASE_BASE;
 const releaseArtifacts = {
   setup: `atmospeak_${APP_VERSION}_x64-setup.exe`,
   msi: `atmospeak_${APP_VERSION}_x64_en-US.msi`,
@@ -248,7 +248,7 @@ function downloadSection() {
   heading.textContent = `Atmospeak v${APP_VERSION}`;
   const copy = document.createElement("p");
   copy.textContent =
-    "Free edition installers and updater metadata live at www.novpax.org/downloads/atmospeak/free/. Pro is a separate signed build sold through Polar — not these public links.";
+    "Download the Free Windows installers and SHA-256 checksums from this GitHub release.";
   header.append(heading, copy);
   section.append(header);
 
