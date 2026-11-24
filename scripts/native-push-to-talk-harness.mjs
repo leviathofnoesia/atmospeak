@@ -26,9 +26,9 @@ const customHotkey = hotkeyFlag?.slice("--hotkey=".length) || "Ctrl+Alt+F12";
 const TOTAL_MS_BUDGET = 500;
 /** Inject-visible budget (clipboard + Ctrl+V; clipboard restore is async). */
 const INJECT_MS_BUDGET = 150;
-const STREAMING_BACKENDS = new Set(["cpu", "vulkan"]);
+const STREAMING_BACKENDS = new Set(["cpu"]);
 /** Warm short-clip path may intentionally use the resident host when faster. */
-const ALLOWED_BACKENDS = new Set(["cpu", "vulkan", "host"]);
+const ALLOWED_BACKENDS = new Set(["cpu", "host"]);
 writeFileSync(targetPath, "", "utf8");
 
 function failLatency(label, details) {
@@ -99,7 +99,7 @@ try {
     mode: "pushToTalk",
     autoInject: true,
     restoreClipboard: false,
-    activeModelId: "base.en",
+    activeModelId: "parakeet-unified-en",
     startAtLogin: false,
     onboardingComplete: false,
     onboardingVersion: "",

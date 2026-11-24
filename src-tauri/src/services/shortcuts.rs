@@ -956,11 +956,6 @@ mod windows_keyboard_hook {
             } else {
                 "pressed"
             };
-            crate::services::metrics::emit_runtime(
-                &app,
-                "shortcut-gesture",
-                format!("source=registered-hotkey signal={payload} generation={generation}"),
-            );
             crate::services::dictation_engine::route_shortcut_payload_from(
                 &app,
                 payload,
@@ -1002,11 +997,6 @@ mod windows_keyboard_hook {
             let _ = tx.send(HookUiEvent::Signal("released"));
         }
         if !testing_only {
-            crate::services::metrics::emit_runtime(
-                &app,
-                "shortcut-gesture",
-                format!("source={source:?} signal=released generation={generation}"),
-            );
             crate::services::dictation_engine::route_shortcut_payload_from(
                 &app, "released", source, generation,
             );
@@ -1128,7 +1118,11 @@ mod windows_keyboard_hook {
             }));
         }
         if context.system_hotkey_registered {
+            let released = key_up && context.runtime.active && hotkey.is_relevant(event_vk);
             drop(context);
+            if released {
+                handle_registered_hotkey_released(event_vk, ShortcutSource::LowLevelHook);
+            }
             return false;
         }
         let outcome = context

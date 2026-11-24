@@ -4,15 +4,18 @@
 
 ### Changed
 
-- **One dictation pipeline.** Release used to run two parallel implementations —
-  a preview path and a fallback path — each with its own inject call, stage
-  clock, terminal-phase emit, session persistence, and teardown order. Every
-  paste bug fixed in 1.0.3 was a place where the two had drifted. There is now
-  one tail (`finish_pipeline_result_with_teardown`) and one inject
-  (`inject_transcript`); the only thing that varies is which transcript source
-  answered and whether it deferred teardown past paste. No user-visible change
-  except that the terminal phase now reaches the UI before the database write on
-  the decode source, as it already did on the live one.
+- Windows push-to-talk shortcuts such as Ctrl+CapsLock respond directly to key release. Duplicate keyboard notifications still submit the recording once.
+
+- Free uses bundled Parakeet Unified English 0.6B for offline streaming dictation. Settings shows model size, accuracy, and reference speed. It replaces
+  the legacy Whisper model picker.
+- Dictation saves audio and available preview text to History before delivery.
+  It can replay the WAV when streaming misses audio, and interrupted
+  recordings are recoverable from History.
+- Add per-app dictation profiles, spoken lists, and local voice edits to the
+  current selection. History can compare and copy transcript versions, and the
+  floating control can hide when idle.
+- Paste preserves newer clipboard contents. Optional remote AI edits update
+  History after delivery.
 
 ## 1.0.3 — Nothing blocks paste that paste does not use (2026-07-30)
 

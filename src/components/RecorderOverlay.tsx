@@ -1,5 +1,6 @@
 import clsx from "clsx";
-import { memo, useEffect, useRef } from "react";
+import { Copy, Square, X, ChevronDown, MoreHorizontal, History, Settings } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { DictationMode, ModelStatus, RecordingStarted } from "../types/dictation";
 import { Aura } from "./Aura";
@@ -36,6 +37,7 @@ interface RecorderOverlayProps {
   shortcutArmed?: boolean;
   mode?: DictationMode;
   notice?: string;
+  actionNotice?: string;
   liveTranscript?: LiveTranscript;
   inputLevel?: number;
   hostApp?: string;
@@ -54,6 +56,12 @@ interface RecorderOverlayProps {
   onToggle: () => void;
   onCancel: () => void;
   onOpenHub?: () => void;
+  onCopyTranscript?: () => void;
+  onOpenHistory?: () => void;
+  hasRecovery?: boolean;
+  onDismissError?: () => void;
+  onRetryState?: () => void;
+  onHideIdle?: () => void;
 }
 
 const ACCENTS: Record<RecorderAccent, { accent: string; soft: string; deep: string; glow: string; neon: string }> = {
@@ -62,22 +70,8 @@ const ACCENTS: Record<RecorderAccent, { accent: string; soft: string; deep: stri
   lilac: { accent: "#be95c4", soft: "#d8bcdc", deep: "#7a5586", glow: "rgba(190,149,196,0.50)", neon: "#eaa6ff" },
 };
 
-function InsertGlyph({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3v10M8.5 9.5L12 13l3.5-3.5M5 20h14" />
-    </svg>
-  );
-}
-function UndoGlyph({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-1" />
-    </svg>
-  );
-}
+
+// ── inline glyphs (match the design's custom marks) ──────────────────
 function CheckGlyph({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
@@ -257,13 +251,53 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     onCancel,
     onMoveStart,
     onOpenHub,
+    onCopyTranscript,
+    onOpenHistory,
+    hasRecovery = false,
+    onDismissError,
+    onRetryState,
+    onHideIdle,
     notice,
+    actionNotice,
   } = props;
 
   const isRecording = recording !== null;
   const resolvedPhase: RecorderPhase = phase ?? (isRecording ? "listening" : busy ? "finalizing" : "idle");
   const state = dockStateFromPhase(resolvedPhase);
   const listening = state === "listening";
+  const [revealed, setRevealed] = useState(false);
+  const [errorExpired, setErrorExpired] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const enter = () => { clearTimeout(leaveTimer.current); setRevealed(true); };
+  const leave = () => {
+    clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => {
+      if (document.hasFocus() && document.activeElement?.closest(".dock-wrap")) return;
+      setRevealed(false); setMenuOpen(false);
+    }, 300);
+  };
+  useEffect(() => {
+    const collapse = () => {
+      clearTimeout(leaveTimer.current);
+      setRevealed(false);
+      setMenuOpen(false);
+    };
+    window.addEventListener("blur", collapse);
+    return () => {
+      clearTimeout(leaveTimer.current);
+      window.removeEventListener("blur", collapse);
+    };
+  }, []);
+  useEffect(() => { setMenuOpen(false); setRevealed(false); }, [state]);
+
+  useEffect(() => {
+    setErrorExpired(false);
+    if (state !== "error") return;
+    const timer = setTimeout(() => setErrorExpired(true), 6000);
+    return () => clearTimeout(timer);
+  }, [state]);
+  const compactError = state === "error" && errorExpired && !revealed;
 
   const pigment = ACCENTS[accent] ?? ACCENTS.dusk;
   const dockRef = useRef<HTMLDivElement>(null);
@@ -355,13 +389,19 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   const modelReady = modelStatus?.ready ?? true;
 
   return (
-    <div className={clsx("dock-wrap", theme === "dark" && "dark-bg")} style={wrapStyle}>
+    <div className={clsx("dock-wrap", theme === "dark" && "dark-bg")} style={wrapStyle}
+      data-revealed={revealed || menuOpen} onPointerEnter={enter} onPointerLeave={leave}
+      onFocusCapture={enter} onBlurCapture={leave}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { setMenuOpen(false); dockRef.current?.focus(); setRevealed(false); }
+      }}>
       <div
         className="dock"
         ref={dockRef}
-        data-state={state}
+        data-state={compactError ? "rest" : state}
         data-shape={dockShape}
         data-size="medium"
+        data-recovery={compactError || undefined}
         data-theme={theme}
         data-tauri-drag-region
         onPointerDown={onPointerDown}
@@ -369,8 +409,13 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         onPointerUp={onPointerUp}
         onDoubleClick={onOpenHub}
         title={state === "rest" ? "Tap to dictate · drag to move · double-click for hub" : "Drag to move"}
-        role="button"
+        role={state === "rest" ? "button" : "group"}
         tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget && state === "rest" && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault(); onToggle();
+          }
+        }}
         aria-label="Atmospeak companion — tap to dictate, drag to move"
       >
         <span className="dock__mark" data-tauri-drag-region>
@@ -381,7 +426,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
           <span className="dock__restlabel" data-tauri-drag-region>{modelReady ? tip : "runtime offline"}</span>
         )}
 
-        {state !== "rest" && (
+        {state !== "rest" && !compactError && (
           <div className="dock__core" data-tauri-drag-region>
             {state === "processing" ? (
               <div className="dock__transcript proc">
@@ -430,10 +475,10 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={onCancel}
-              title="Discard"
-              aria-label="Discard this dictation"
+              title="Cancel recording"
+              aria-label="Cancel recording"
             >
-              <UndoGlyph size={16} />
+              <X size={18} aria-hidden="true" />
             </button>
             <button
               className="dock__insert"
@@ -441,11 +486,11 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
               onPointerDown={(e) => e.stopPropagation()}
               onClick={onToggle}
               disabled={busy}
-              title="Insert at cursor"
-              aria-label="Insert text at the cursor"
+              title="Stop and insert"
+              aria-label="Stop and insert"
             >
-              <InsertGlyph size={16} />
-              <span className="lbl">Insert</span>
+              <Square size={18} aria-hidden="true" />
+              <span className="lbl">Stop</span>
             </button>
           </div>
         )}
@@ -462,7 +507,25 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
       {state === "rest" && dockShape === "orb" && (
         <div className={clsx("dock-tip", !modelReady && "dock-tip--warn")}>{modelReady ? tip : "runtime offline"}</div>
       )}
-      {notice && <div className="dock-alert" role="status">{notice}</div>}
+      {((state === "rest" && revealed) || (state === "error" && !compactError) || state === "delivered") && (
+        <div className="dock-recovery" role="group" aria-label="Transcript recovery">
+          {onCopyTranscript && (state !== "error" || hasRecovery) && (
+            <button type="button" title="Copy last transcript" aria-label={state === "error" ? "Copy transcript" : "Copy last transcript"} onClick={onCopyTranscript}><Copy size={18} aria-hidden="true" /></button>
+          )}
+          {state === "error" && onOpenHistory && <button type="button" onClick={onOpenHistory}><History size={18} aria-hidden="true" />{hasRecovery ? "Open saved recording" : "Open History"}</button>}
+          {state === "error" && onDismissError && <button type="button" title="Collapse" aria-label="Dismiss" onClick={onDismissError}><ChevronDown size={18} aria-hidden="true" /></button>}
+          {state === "rest" && <>
+            <button type="button" aria-label="More options" title="More options" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={18} aria-hidden="true" /></button>
+            {onHideIdle && <button type="button" title="Only show while recording" aria-label="Only show while recording" onClick={onHideIdle}><ChevronDown size={18} aria-hidden="true" /></button>}
+          </>}
+        </div>
+      )}
+      {state === "rest" && menuOpen && <div className="dock-menu" role="group" aria-label="More options">
+        {onOpenHistory && <button type="button" onClick={onOpenHistory}><History size={18} aria-hidden="true" />History</button>}
+        {onOpenHub && <button type="button" onClick={onOpenHub}><Settings size={18} aria-hidden="true" />Settings & microphone</button>}
+      </div>}
+      {actionNotice && <div className="dock-alert" role="status">{actionNotice}</div>}
+      {!actionNotice && ((state === "error" && !compactError) || onRetryState) && notice && <div className="dock-alert" role="status">{notice}{onRetryState && <button type="button" onClick={onRetryState}>Retry</button>}</div>}
     </div>
   );
 }

@@ -1,268 +1,229 @@
+use std::sync::LazyLock;
+
 use regex::Regex;
 
-/// Apply Wispr-style deterministic Backtrack: correction commands, triggered
-/// replaces, stutter collapse, and conservative restatement cleanup.
+static COMMAND: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:scratch that|delete that|forget that|never mind|nevermind)\b").unwrap()
+});
+static TRIGGER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(?:actually|i mean|wait[, ]+no|no[, ]+wait)\b").unwrap());
+static WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\p{L}\p{N}_]+(?:['’:.@/-][\p{L}\p{N}_]+)*").unwrap());
+
+/// Corrections affect only the current sentence, never completed paragraphs.
+/// Ambiguous uses of "actually" remain speech unless a replacement is explicit.
 pub fn apply_backtrack(value: &str) -> String {
-    let mut text = apply_correction_commands(value);
-    text = apply_triggered_backtrack(&text);
-    text = collapse_stutter_repeats(&text);
-    apply_restate_heuristic(&text)
-}
-
-fn apply_correction_commands(value: &str) -> String {
-    let correction_pattern =
-        Regex::new(r"(?i)\b(scratch that|delete that|never mind|nevermind|go back|forget that)\b")
-            .expect("correction command regex");
-    correction_pattern
-        .split(value)
-        .last()
-        .unwrap_or(value)
-        .trim_start_matches(|character: char| {
-            character.is_whitespace() || [',', '.', '!', '?', ';', ':'].contains(&character)
-        })
-        .to_string()
-}
-
-/// Keep prefix + replacement after markers like "actually", "I mean", "wait no".
-fn apply_triggered_backtrack(value: &str) -> String {
-    let trigger = Regex::new(r"(?i)\b(?:actually|i mean|wait[, ]+no|no[, ]+wait)\b")
-        .expect("backtrack trigger regex");
-    let mut text = value.to_string();
-    let mut guard = 0;
-    while guard < 8 {
-        guard += 1;
-        let Some(found) = trigger.find(&text) else {
-            break;
-        };
-        let before = text[..found.start()].trim_end();
-        let after = text[found.end()..]
-            .trim_start()
-            .trim_start_matches(|c: char| {
-                c.is_whitespace() || [',', '.', '!', '?', ';', ':'].contains(&c)
-            });
-        if after.is_empty() {
-            break;
-        }
-        if !looks_like_self_correction(before, after) {
-            let skip_from = found.end();
-            let head = text[..skip_from].to_string();
-            let tail = apply_triggered_backtrack(&text[skip_from..]);
-            return format!("{head}{tail}");
-        }
-        let prefix = strip_replaced_tail(before, after);
-        text = if prefix.is_empty() {
-            after.to_string()
-        } else {
-            format!("{prefix} {after}")
-        };
-    }
-    text
-}
-
-fn looks_like_self_correction(before: &str, after: &str) -> bool {
-    if before.is_empty() || after.is_empty() {
-        return false;
-    }
-    let before_tokens = tokenize_words(before);
-    let after_tokens = tokenize_words(after);
-    if before_tokens.is_empty() || after_tokens.is_empty() {
-        return false;
-    }
-    let last_before = before_tokens.last().map(String::as_str).unwrap_or("");
-    let first_after = after_tokens.first().map(String::as_str).unwrap_or("");
-
-    if last_before.chars().all(|c| c.is_ascii_digit())
-        || first_after.chars().all(|c| c.is_ascii_digit())
-    {
-        return true;
-    }
-    if after_tokens.len() == 1 && !before_tokens.is_empty() {
-        return true;
-    }
-    if after_tokens.len() <= 3 && before_tokens.len() >= 2 {
-        return true;
-    }
-    false
-}
-
-fn strip_replaced_tail(before: &str, after: &str) -> String {
-    let before_tokens = tokenize_words(before);
-    let after_tokens = tokenize_words(after);
-    if before_tokens.is_empty() {
-        return before.trim_end().to_string();
-    }
-    let drop = if after_tokens.len() == 1 {
-        1
-    } else if after_tokens.len() <= 3 {
-        after_tokens.len().min(before_tokens.len()).min(2)
-    } else {
-        1
-    };
-    let keep = before_tokens.len().saturating_sub(drop);
-    reconstruct_prefix(before, keep)
-}
-
-fn reconstruct_prefix(original: &str, keep_word_count: usize) -> String {
-    if keep_word_count == 0 {
-        return String::new();
-    }
-    let mut kept = 0usize;
-    let mut end = 0usize;
-    let mut in_word = false;
-    for (idx, ch) in original.char_indices() {
-        let is_word = ch.is_alphanumeric() || ch == '\'';
-        if is_word {
-            if !in_word {
-                in_word = true;
-            }
-            end = idx + ch.len_utf8();
-        } else if in_word {
-            kept += 1;
-            in_word = false;
-            if kept >= keep_word_count {
-                break;
-            }
-            end = idx;
-        } else {
-            end = idx + ch.len_utf8();
-        }
-    }
-    if in_word {
-        kept += 1;
-    }
-    if kept < keep_word_count {
-        return original.trim_end().to_string();
-    }
-    original[..end].trim_end().to_string()
-}
-
-fn collapse_stutter_repeats(value: &str) -> String {
-    let mut words: Vec<String> = value.split_whitespace().map(str::to_string).collect();
-    if words.len() < 2 {
-        return value.to_string();
-    }
-
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let mut i = 0;
-        while i < words.len() {
-            let mut collapsed_here = false;
-            let max_len = 4.min(words.len().saturating_sub(i) / 2);
-            for phrase_len in (1..=max_len).rev() {
-                if i + phrase_len * 2 > words.len() {
+    value
+        .lines()
+        .map(|line| {
+            let mut text = String::new();
+            let mut cursor = 0;
+            for found in COMMAND.find_iter(line) {
+                if quoted_at(line, found.start()) {
                     continue;
                 }
-                let left = &words[i..i + phrase_len];
-                let right = &words[i + phrase_len..i + phrase_len * 2];
-                if phrase_words_equal(left, right) {
-                    words.drain(i + phrase_len..i + phrase_len * 2);
-                    changed = true;
-                    collapsed_here = true;
-                    break;
+                text.push_str(&line[cursor..found.start()]);
+                text.truncate(sentence_start(&text));
+                if !text.is_empty() && !text.ends_with(char::is_whitespace) {
+                    text.push(' ');
+                }
+                cursor = found.end();
+                while let Some(ch) = line[cursor..].chars().next() {
+                    if !ch.is_whitespace() && !",.!?;:".contains(ch) {
+                        break;
+                    }
+                    cursor += ch.len_utf8();
                 }
             }
-            if !collapsed_here {
-                i += 1;
+            text.push_str(&line[cursor..]);
+            let start = crate::services::list_formatting::content_start(line);
+            if start > line.len() - line.trim_start().len() && text.trim() == line[..start].trim() {
+                String::new()
+            } else {
+                collapse_stutters(&apply_triggered_backtrack(&text))
             }
-        }
-    }
-
-    words.join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-fn phrase_words_equal(left: &[String], right: &[String]) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right.iter())
-            .all(|(a, b)| normalize_token(a) == normalize_token(b))
+fn quoted_at(value: &str, offset: usize) -> bool {
+    value[..offset]
+        .chars()
+        .filter(|ch| matches!(ch, '"' | '“' | '”'))
+        .count()
+        % 2
+        == 1
 }
 
-fn apply_restate_heuristic(value: &str) -> String {
-    let as_a = Regex::new(r"(?i)\bas a ([a-z]+)\b.*?\bas a ([a-z]+)\b").expect("restate regex");
-    if let Some(caps) = as_a.captures(&value.to_ascii_lowercase()) {
-        let first = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        let second = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        if !first.is_empty() && !second.is_empty() && first != second {
-            if let Some(full) = caps.get(0) {
-                let before = &value[..full.start()];
-                let second_pat =
-                    Regex::new(&format!(r"(?i)\bas a {}\b", regex::escape(second))).unwrap();
-                if let Some(second_m) = second_pat.find_iter(value).last() {
-                    let remainder = &value[second_m.end()..];
-                    return format!("{before}as a {second}{remainder}");
-                }
+fn sentence_start(value: &str) -> usize {
+    let trimmed = value.trim_end_matches(|ch: char| ch.is_whitespace() || ",.!?;:".contains(ch));
+    trimmed
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| {
+            (matches!(ch, '.' | '!' | '?' | '\n')
+                && value[idx + ch.len_utf8()..].starts_with(char::is_whitespace))
+            .then_some(idx + ch.len_utf8())
+        })
+        .unwrap_or_else(|| crate::services::list_formatting::content_start(value))
+}
+
+fn apply_triggered_backtrack(value: &str) -> String {
+    let mut output = String::new();
+    let mut cursor = 0;
+    for marker in TRIGGER.find_iter(value) {
+        output.push_str(&value[cursor..marker.start()]);
+        let after = value[marker.end()..]
+            .trim_start_matches(|ch: char| ch.is_whitespace() || ",.!?;:".contains(ch));
+        let scope = sentence_start(&output);
+        let before = &output[scope..];
+        let left: Vec<_> = WORD.find_iter(before).collect();
+        let right: Vec<_> = WORD.find_iter(after).take(4).collect();
+        let replacement = if quoted_at(value, marker.start())
+            || left.is_empty()
+            || right.is_empty()
+            || (marker.as_str().eq_ignore_ascii_case("i mean")
+                && matches!(
+                    right[0].as_str().to_ascii_lowercase().as_str(),
+                    "is" | "by" | "when"
+                )) {
+            None
+        } else {
+            // A repeated grammatical anchor identifies the span being replaced.
+            let anchor = left.iter().enumerate().rev().find_map(|(idx, word)| {
+                let same = word.as_str().eq_ignore_ascii_case(right[0].as_str());
+                let pair = idx + 1 < left.len()
+                    && right.len() > 1
+                    && left[idx + 1]
+                        .as_str()
+                        .eq_ignore_ascii_case(right[1].as_str());
+                let preposition = matches!(
+                    right[0].as_str().to_ascii_lowercase().as_str(),
+                    "at" | "on" | "in" | "to" | "for" | "as" | "with" | "by"
+                );
+                (same && (pair || preposition)).then_some(word.start())
+            });
+            let last = left.last().unwrap();
+            let numeric_start = left
+                .iter()
+                .rev()
+                .take(2)
+                .find(|word| word.as_str().starts_with(|ch: char| ch.is_ascii_digit()))
+                .filter(|word| {
+                    word.start() == last.start()
+                        || matches!(
+                            last.as_str().to_ascii_lowercase().trim_end_matches('.'),
+                            "am" | "pm" | "dollars" | "minutes" | "hours" | "days" | "percent"
+                        )
+                })
+                .map(|word| word.start());
+            let numeric = right[0]
+                .as_str()
+                .starts_with(|ch: char| ch.is_ascii_digit());
+            let explicit = !marker.as_str().eq_ignore_ascii_case("actually")
+                || before.trim_end().ends_with(',');
+            anchor
+                .or_else(|| numeric.then_some(numeric_start).flatten())
+                .or_else(|| explicit.then_some(last.start()))
+        };
+        if let Some(start) = replacement {
+            output.truncate(scope + start);
+            if !output.is_empty() && !output.ends_with(char::is_whitespace) {
+                output.push(' ');
             }
+            cursor = value.len() - after.len();
+        } else {
+            output.push_str(marker.as_str());
+            cursor = marker.end();
         }
     }
-    value.to_string()
-}
-
-/// Collapse restated 3–4 token phrases that share a prefix but change the ending
-/// (e.g. "I want coffee I want tea" → "I want tea").
-///
-/// Call after spoken-punctuation normalization so phrases like `at sign X at sign Y`
-/// are already `@ X @ Y` and are not mistaken for restates.
-pub fn apply_short_phrase_restate(value: &str) -> String {
-    let tokens: Vec<&str> = value.split_whitespace().collect();
-    if tokens.len() < 6 {
-        return value.to_string();
-    }
-
-    for len in (3..=4).rev() {
-        if tokens.len() < len * 2 {
-            continue;
-        }
-        for end in (len * 2..=tokens.len()).rev() {
-            let second = &tokens[end - len..end];
-            for start in 0..=end - len * 2 {
-                let first = &tokens[start..start + len];
-                if short_phrase_restate_pair(first, second) {
-                    let mut out = Vec::with_capacity(tokens.len() - len);
-                    out.extend_from_slice(&tokens[..start]);
-                    out.extend_from_slice(second);
-                    out.extend_from_slice(&tokens[end..]);
-                    return out.join(" ");
-                }
-            }
-        }
-    }
-    value.to_string()
-}
-
-fn short_phrase_restate_pair(first: &[&str], second: &[&str]) -> bool {
-    if first.len() != second.len() || first.len() < 3 {
-        return false;
-    }
-    let last = first.len() - 1;
-    for i in 0..last {
-        let left = normalize_token(first[i]);
-        let right = normalize_token(second[i]);
-        // Punctuation-only tokens normalize to "" and must not count as a shared prefix.
-        if left.is_empty() || right.is_empty() || left != right {
-            return false;
-        }
-    }
-    let left_last = normalize_token(first[last]);
-    let right_last = normalize_token(second[last]);
-    !left_last.is_empty() && !right_last.is_empty() && left_last != right_last
-}
-
-fn tokenize_words(value: &str) -> Vec<String> {
-    value
-        .split(|c: char| !c.is_alphanumeric() && c != '\'')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect()
+    output.push_str(&value[cursor..]);
+    output.trim().to_string()
 }
 
 fn normalize_token(token: &str) -> String {
-    token
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect()
+    if token.chars().any(char::is_alphanumeric) {
+        token.to_lowercase()
+    } else {
+        String::new()
+    }
+}
+
+fn has_boundary(tokens: &[&str]) -> bool {
+    tokens
+        .iter()
+        .any(|token| token.contains(['.', '!', '?', ',', ';', ':']))
+}
+
+fn collapse_stutters(value: &str) -> String {
+    let mut words: Vec<_> = value.split_whitespace().collect();
+    let mut idx = 0;
+    while idx < words.len() {
+        let mut changed = false;
+        for len in (1..=4.min((words.len() - idx) / 2)).rev() {
+            let left = &words[idx..idx + len];
+            let right = &words[idx + len..idx + len * 2];
+            let intentional = len == 1
+                && matches!(
+                    normalize_token(left[0]).as_str(),
+                    "had" | "that" | "very" | "really" | "so" | "no" | "bye"
+                );
+            if !intentional
+                && !has_boundary(left)
+                && !has_boundary(right)
+                && left.iter().zip(right).all(|(a, b)| {
+                    !normalize_token(a).is_empty() && normalize_token(a) == normalize_token(b)
+                })
+            {
+                words.drain(idx..idx + len);
+                changed = true;
+                break;
+            }
+        }
+        if !changed {
+            idx += 1;
+        }
+    }
+    words.join(" ")
+}
+
+/// Only adjacent restatements can supersede a phrase; intervening content survives.
+pub fn apply_short_phrase_restate(value: &str) -> String {
+    value
+        .lines()
+        .map(|line| {
+            let mut words: Vec<_> = line.split_whitespace().collect();
+            let mut idx = 0;
+            while idx < words.len() {
+                let mut changed = false;
+                for len in (3..=4).rev() {
+                    if idx + len * 2 > words.len() {
+                        continue;
+                    }
+                    let left = &words[idx..idx + len];
+                    let right = &words[idx + len..idx + len * 2];
+                    if !has_boundary(left)
+                        && !has_boundary(right)
+                        && left[..len - 1].iter().zip(&right[..len - 1]).all(|(a, b)| {
+                            !normalize_token(a).is_empty()
+                                && normalize_token(a) == normalize_token(b)
+                        })
+                        && normalize_token(left[len - 1]) != normalize_token(right[len - 1])
+                    {
+                        words.drain(idx..idx + len);
+                        changed = true;
+                        break;
+                    }
+                }
+                if !changed {
+                    idx += 1;
+                }
+            }
+            words.join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -271,10 +232,10 @@ mod tests {
 
     #[test]
     fn collapse_stutter_unit() {
-        assert_eq!(collapse_stutter_repeats("is not is not"), "is not");
+        assert_eq!(collapse_stutters("is not is not"), "is not");
         assert_eq!(
-            collapse_stutter_repeats("right there. Right there"),
-            "right there."
+            collapse_stutters("right there. Right there"),
+            "right there. Right there"
         );
     }
 
@@ -295,10 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn restate_as_a_keeps_second_role() {
+    fn unmarked_roles_remain_literal() {
         assert_eq!(
             apply_backtrack("Hire me as a doctor as a nurse please"),
-            "Hire me as a nurse please"
+            "Hire me as a doctor as a nurse please"
         );
     }
 
@@ -311,6 +272,37 @@ mod tests {
         assert_eq!(
             apply_short_phrase_restate("send it tomorrow send it Friday"),
             "send it Friday"
+        );
+    }
+    #[test]
+    fn corrections_preserve_completed_sentences_and_literal_speech() {
+        for (input, expected) in [
+            (
+                "Keep this. Send the old note scratch that send the new note",
+                "Keep this. send the new note",
+            ),
+            ("I don't actually agree", "I don't actually agree"),
+            ("What I mean is this", "What I mean is this"),
+            ("Use foo/bar foobar", "Use foo/bar foobar"),
+            ("This is actually very good", "This is actually very good"),
+            ("Say \"scratch that\" aloud", "Say \"scratch that\" aloud"),
+            ("We should go back home", "We should go back home"),
+            ("Meet at 2, actually at 3 tomorrow", "Meet at 3 tomorrow"),
+            ("Send to Alice, I mean Bob tomorrow", "Send to Bob tomorrow"),
+            ("At 2 actually 3 actually 4", "At 4"),
+            ("Meet at 2 pm, actually 3 pm", "Meet at 3 pm"),
+            ("I had had enough", "I had had enough"),
+            ("It's very very good", "It's very very good"),
+        ] {
+            assert_eq!(apply_backtrack(input), expected, "{input}");
+        }
+        assert_eq!(
+            apply_short_phrase_restate("I want coffee and a cake I want tea"),
+            "I want coffee and a cake I want tea"
+        );
+        assert_eq!(
+            apply_backtrack("first line\n\nsecond line"),
+            "first line\n\nsecond line"
         );
     }
 }

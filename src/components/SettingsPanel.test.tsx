@@ -133,3 +133,33 @@ describe("SettingsPanel save footer", () => {
     expect(screen.getByText("Saving…", { selector: ".settings-footer__status" })).toBeVisible();
   });
 });
+
+
+it("keeps everyday settings visible and exposes advanced controls on demand", () => {
+  render(<SettingsPanel {...settingsProps()} />);
+  expect(screen.getByRole("combobox", { name: "Microphone" })).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "Cleanup fillers and spoken punctuation" })).toBeVisible();
+  const summary = screen.getByText("More settings");
+  const disclosure = summary.closest("details");
+  expect(disclosure).not.toHaveAttribute("open");
+  fireEvent.click(summary);
+  expect(disclosure).toHaveAttribute("open");
+  expect(screen.getByText("Model management")).toBeVisible();
+  fireEvent.click(summary);
+  expect(disclosure).not.toHaveAttribute("open");
+});
+
+it("persists the recording-only orb preference and shows the orb on demand", () => {
+  const props = settingsProps();
+  render(<SettingsPanel {...props} />);
+
+  const toggle = screen.getByRole("checkbox", { name: "Show orb only while recording" });
+  expect(toggle).not.toBeChecked();
+
+  fireEvent.click(toggle);
+  expect(toggle).toBeChecked();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show floating control" }));
+  expect(toggle).not.toBeChecked();
+  expect(props.onShowFloatingControl).toHaveBeenCalledOnce();
+});

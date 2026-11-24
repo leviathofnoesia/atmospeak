@@ -10,7 +10,7 @@ use std::{
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command},
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -23,6 +23,7 @@ use crate::services::{app_state::AppState, asr_host, model_downloader, proc};
 
 const HOST_ENV: &str = "ATMOSPEAK_LLAMA_HOST";
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const CANCELLABLE_READY_REQUEST_TIMEOUT: Duration = Duration::from_millis(250);
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
 const INFERENCE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -81,6 +82,14 @@ impl LlamaHost {
         Ok(format!("http://127.0.0.1:{port}/v1/chat/completions"))
     }
 
+    /// Resolve the loopback endpoint while observing a dictation cancellation
+    /// signal. Startup owns the spawned server child, so cancellation can kill
+    /// only that child before the engine returns to its command loop.
+    pub fn endpoint_cancellable(&self, cancel: &AtomicBool) -> Result<String> {
+        let port = self.ensure_running_cancellable(cancel)?;
+        Ok(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+    }
+
     pub fn ensure_running(&self) -> Result<u16> {
         let mut guard = self.running.lock();
         if let Some(running) = guard.as_mut() {
@@ -97,7 +106,36 @@ impl LlamaHost {
         Ok(port)
     }
 
+    pub fn ensure_running_cancellable(&self, cancel: &AtomicBool) -> Result<u16> {
+        if cancel.load(Ordering::Acquire) {
+            return Err(anyhow!("dictation cancelled"));
+        }
+
+        let mut guard = self.running.lock();
+        if let Some(running) = guard.as_mut() {
+            match running.child.try_wait() {
+                Ok(None) => return Ok(running.port),
+                Ok(Some(_)) | Err(_) => {
+                    *guard = None;
+                }
+            }
+        }
+
+        let running = self.spawn_cancellable(cancel)?;
+        let port = running.port;
+        *guard = Some(running);
+        Ok(port)
+    }
+
     fn spawn(&self) -> Result<Running> {
+        self.spawn_with_cancel(None)
+    }
+
+    fn spawn_cancellable(&self, cancel: &AtomicBool) -> Result<Running> {
+        self.spawn_with_cancel(Some(cancel))
+    }
+
+    fn spawn_with_cancel(&self, cancel: Option<&AtomicBool>) -> Result<Running> {
         if !self.server_exe.is_file() {
             bail!(
                 "llama-server not found at {}. Enable AI edit to download it, or run scripts/bootstrap-llama.ps1.",
@@ -140,7 +178,15 @@ impl LlamaHost {
             .with_context(|| format!("failed to start {}", self.server_exe.display()))?;
 
         #[cfg(target_os = "windows")]
-        let job = asr_host::job::attach(&child)?;
+        let job = match asr_host::job::attach(&child) {
+            Ok(job) => job,
+            Err(error) => {
+                let mut child = child;
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error).context("failed to attach llama-server process job");
+            }
+        };
 
         let mut running = Running {
             child,
@@ -148,31 +194,53 @@ impl LlamaHost {
             #[cfg(target_os = "windows")]
             _job: job,
         };
-        self.wait_until_ready(&mut running)?;
+        self.wait_until_ready_with_cancel(&mut running, cancel)?;
         Ok(running)
     }
 
-    fn wait_until_ready(&self, running: &mut Running) -> Result<()> {
+    fn wait_until_ready_with_cancel(
+        &self,
+        running: &mut Running,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<()> {
         let health = format!("http://127.0.0.1:{}/health", running.port);
         let root = format!("http://127.0.0.1:{}/", running.port);
         let deadline = Instant::now() + READY_TIMEOUT;
 
         while Instant::now() < deadline {
+            if cancel.is_some_and(|signal| signal.load(Ordering::Acquire)) {
+                let _ = running.child.kill();
+                let _ = running.child.wait();
+                return Err(anyhow!("dictation cancelled"));
+            }
             if let Ok(Some(status)) = running.child.try_wait() {
                 return Err(anyhow!("llama-server exited during startup ({status})"));
             }
+            let request_timeout = if cancel.is_some() {
+                CANCELLABLE_READY_REQUEST_TIMEOUT
+            } else {
+                Duration::from_secs(2)
+            };
             if self
                 .client
                 .get(&health)
-                .timeout(Duration::from_secs(2))
+                .timeout(request_timeout)
                 .send()
                 .is_ok()
-                || self
-                    .client
-                    .get(&root)
-                    .timeout(Duration::from_secs(2))
-                    .send()
-                    .is_ok()
+            {
+                return Ok(());
+            }
+            if cancel.is_some_and(|signal| signal.load(Ordering::Acquire)) {
+                let _ = running.child.kill();
+                let _ = running.child.wait();
+                return Err(anyhow!("dictation cancelled"));
+            }
+            if self
+                .client
+                .get(&root)
+                .timeout(request_timeout)
+                .send()
+                .is_ok()
             {
                 return Ok(());
             }

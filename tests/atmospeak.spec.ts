@@ -38,7 +38,7 @@ test("shortcut step offers custom recording and visibly arms the exact test", as
   await page.getByRole("button", { name: /test selected/i }).click();
   await expect(page.getByRole("button", { name: /testing/i })).toBeDisabled();
   await page.getByRole("button", { name: /back/i }).click();
-  await expect(page.getByRole("heading", { name: /A voice model/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Speech stays on this device/i })).toBeVisible();
 });
 
 test.describe("canonical editorial hub", () => {
@@ -114,16 +114,13 @@ test.describe("canonical editorial hub", () => {
     ).toBeVisible();
   });
 
-  test("downloading a Settings model does not restart onboarding", async ({ page }) => {
+  test("Settings shows the bundled speech engine without restarting onboarding", async ({ page }) => {
     await page.goto("/?view=hub&fixture=hub");
     await page.getByRole("button", { name: "Settings" }).click();
-
-    const turbo = page.locator(".model-pill").filter({ hasText: "Large v3 Turbo q5" });
-    await turbo.getByRole("button", { name: "Download" }).click();
-
-    await expect(page.getByRole("heading", { name: "Quiet by default." })).toBeVisible();
-    await expect(turbo.getByRole("button", { name: "Use" })).toBeVisible();
-    await expect(page.getByText(/Choose Use, then save Settings/i)).toBeVisible();
+    await page.getByText("More settings", { exact: true }).click();
+    const engine = page.locator(".model-pill").filter({ hasText: "Parakeet Unified English 0.6B" });
+    await expect(engine).toBeVisible();
+    await expect(engine.getByRole("button", { name: "Download" })).toHaveCount(0);
     await expect(page.getByText("Welcome", { exact: true })).toHaveCount(0);
   });
 

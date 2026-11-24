@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+/// Version 3 replaces the directory-based model with a pinned Parakeet GGUF.
+pub const PROTOCOL_VERSION: u16 = 3;
 pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
+
+pub const PARAKEET_MODEL_ID: &str = "parakeet-unified-en";
+pub const PARAKEET_MODEL_FILE: &str = "parakeet-unified-en-0.6b-Q8_0.gguf";
+pub const PARAKEET_MODEL_BYTES: u64 = 731_357_568;
+pub const PARAKEET_MODEL_SHA256: &str =
+    "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +52,14 @@ pub enum AsrCommand {
     },
     StopSession {
         session_id: String,
+        /// Highest audio sequence the client attempted before stopping.
+        ///
+        /// The value is intentionally based on attempted frames rather than
+        /// only frames accepted by the bounded writer queue: the host uses it
+        /// to account for a dropped tail when no later frame can expose a
+        /// sequence gap.
+        #[serde(default)]
+        last_sequence: Option<u64>,
     },
     CancelSession {
         session_id: String,

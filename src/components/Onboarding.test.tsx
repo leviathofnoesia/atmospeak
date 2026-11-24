@@ -21,7 +21,7 @@ const passingSoundCheck: SoundCheckResult = {
   expectedPhrase: "The porcelain moon hums over the studio.",
   tokenSimilarity: 1,
   asrBackend: "host",
-  modelId: "base.en",
+  modelId: "parakeet-unified-en",
   captureMs: 20,
   asrMs: 340,
   totalMs: 360,
@@ -40,21 +40,25 @@ function onboardingProps(overrides: Record<string, unknown> = {}) {
       },
     ],
     modelStatus: {
-      whisperCliFound: true,
+      executableFound: true,
       modelFound: true,
       ready: true,
       message: "Ready",
       source: "bundled" as const,
-      whisperCliPath: "whisper-cli.exe",
-      modelPath: "ggml-base.en.bin",
+      executablePath: "atmospeak-asr-cpu.exe",
+      modelPath: "models/parakeet-unified-en-0.6b-Q8_0.gguf",
     },
     modelInventory: {
-      activeModelId: "base.en",
+      activeModelId: "parakeet-unified-en",
       models: [
-        { id: "tiny.en", label: "Swift", installed: false, bundled: false, path: null, sizeMb: 74 },
-        { id: "base.en", label: "Balanced", installed: true, bundled: true, path: "base", sizeMb: 142 },
-        { id: "small.en", label: "Faithful", installed: false, bundled: false, path: null, sizeMb: 466 },
-        { id: "medium.en", label: "Medium", installed: false, bundled: false, path: null, sizeMb: 1500 },
+        {
+          id: "parakeet-unified-en",
+          label: "Parakeet Unified English 0.6B",
+          installed: true,
+          bundled: true,
+          path: "bundled",
+          sizeMb: 269,
+        },
       ],
     },
     modelDownload: null,
@@ -83,7 +87,7 @@ function onboardingProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Onboarding", () => {
-  it("has no skip path and limits first-run model choices to the promised three", async () => {
+  it("has no skip path and uses the bundled speech engine", async () => {
     const user = userEvent.setup();
     render(<Onboarding {...onboardingProps()} />);
 
@@ -91,10 +95,8 @@ describe("Onboarding", () => {
     await user.click(screen.getByRole("button", { name: /begin/i }));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
-    expect(screen.getByText("Swift")).toBeVisible();
-    expect(screen.getByText("Balanced")).toBeVisible();
-    expect(screen.getByText("Faithful")).toBeVisible();
-    expect(screen.queryByText("Medium")).not.toBeInTheDocument();
+    expect(screen.getByText("Parakeet Unified English 0.6B")).toBeVisible();
+    expect(screen.queryByText("Swift")).not.toBeInTheDocument();
   });
 
   it("will not pass the shortcut step until the native chord is detected", async () => {
@@ -224,4 +226,22 @@ describe("Onboarding", () => {
     fireEvent.pointerUp(hold, { pointerId: 7 });
     expect(props.onFinishSoundCheck).toHaveBeenCalledOnce();
   });
+});
+
+
+it("lets a failed sound check change microphones in place and rejects an old device pass", async () => {
+  const user = userEvent.setup();
+  const props = onboardingProps({ shortcutTest: { active: false, detected: true, message: "Detected" }, microphones: [
+    { name: "Elgato Wave:3", isDefault: true, isSelected: true, available: true },
+    { name: "Headset", isDefault: false, isSelected: false, available: true },
+  ], soundCheck: { active: false, result: { ...passingSoundCheck, passed: false, failureCode: "too_quiet" }, message: "No speech heard" } });
+  const { rerender } = render(<Onboarding {...props} />);
+  await user.click(screen.getByRole("button", { name: /begin/i }));
+  for (let step = 0; step < 3; step++) await user.click(screen.getByRole("button", { name: /continue/i }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Sound-check microphone" }), "Headset");
+  expect(props.setSettings).toHaveBeenCalledWith(expect.objectContaining({ microphoneName: "Headset" }));
+  await user.click(screen.getByRole("button", { name: "Open microphone settings" }));
+  expect(props.onOpenWindowsSoundSettings).toHaveBeenCalledOnce();
+  rerender(<Onboarding {...props} settings={{ ...props.settings, microphoneName: "Headset" }} soundCheck={{ active: false, result: passingSoundCheck, message: "Earlier device passed" }} />);
+  expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
 });

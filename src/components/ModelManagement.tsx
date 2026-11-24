@@ -16,15 +16,23 @@ interface ModelManagementProps {
   onDelete: (modelId: string) => Promise<void>;
 }
 
-const MODEL_DETAILS: Record<string, string> = {
-  "tiny.en": "Fastest English option for short drafts.",
-  "base.en": "Bundled English default with the smallest no-download setup.",
-  "small.en": "More accurate English model for names, accents, and jargon.",
-  "medium.en": "Accuracy-first English model with a larger memory footprint.",
-  "distil-large-v3": "Previous-generation distilled English model; retained for existing installs.",
-  "large-v3-turbo-q5": "New: multilingual Large v3 Turbo, quantized to about 548 MB.",
-  "distil-large-v3.5": "New: latest distilled English model with stronger short-form robustness.",
-};
+const HANDY_BENCHMARK = "https://github.com/handy-computer/transcribe.cpp/blob/2778ae4bf5ca5f394d129a39467f4ad9552dc34f/catalog/parakeet-unified-en-0.6b.json";
+
+function ParakeetDetails() {
+  return (
+    <>
+      <small>English dictation with punctuation, capitalization, and live preview. Runs offline.</small>
+      <dl className="model-benchmarks">
+        <div><dt>English accuracy</dt><dd>A- (3.99% word error rate)</dd></div>
+        <div><dt>Reference speed</dt><dd>2.15 s CPU, 1.19 s GPU per 30 s of audio</dd></div>
+      </dl>
+      <small>
+        Handy reference benchmarks. Speed varies by hardware. This build uses the CPU.
+      </small>
+      <a href={HANDY_BENCHMARK} target="_blank" rel="noreferrer">Benchmark source</a>
+    </>
+  );
+}
 
 export function ModelManagement({
   settings,
@@ -38,22 +46,14 @@ export function ModelManagement({
   const selectedLabel =
     inventory?.models.find((model) => model.id === settings.activeModelId)?.label ??
     settings.activeModelId;
-  const accelerationLabel =
-    settings.accelerationPreference === "auto"
-      ? "Vulkan with CPU fallback"
-      : settings.accelerationPreference === "vulkan"
-        ? "Vulkan"
-        : "CPU";
   return (
     <>
       <PanelTitle icon={<Cpu size={22} />} title="Voice models" />
       <p className="muted">
-        Balanced is bundled. Large v3 Turbo q5 and Distil Large v3.5 are the newest optional
-        choices; every download stays on this device and is SHA-256 verified.
+        Parakeet Unified English comes with Atmospeak and runs on your device.
       </p>
       <p className="muted">
-        {settings.modelSelectionMode === "automatic" ? "Automatic" : "Manual"} ·{" "}
-        {selectedLabel} · {accelerationLabel}
+        {selectedLabel} · CPU
       </p>
       <div className="model-grid">
         {inventory?.models.map((model) => {
@@ -65,10 +65,10 @@ export function ModelManagement({
             <div key={model.id} className={`model-pill ${active ? "model-pill--active" : ""}`}>
               <strong>{model.label}</strong>
               <span>
-                {model.sizeMb ? `${model.sizeMb} MB · ` : ""}
+                {model.sizeMb ? `${model.sizeMb} MiB · ` : ""}
                 {!model.installed ? "not installed" : active ? "active" : model.bundled ? "bundled" : "installed"}
               </span>
-              <small>{MODEL_DETAILS[model.id] ?? "Local whisper.cpp speech recognition model."}</small>
+              {model.id === "parakeet-unified-en" && <ParakeetDetails />}
               <div className="model-pill__actions">
                 {downloading ? (
                   <button type="button" className="button button--ghost" onClick={() => void onCancelDownload()}>

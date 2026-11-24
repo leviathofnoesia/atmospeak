@@ -6,12 +6,12 @@ license = "MIT"
 
 [features]
 default = []
-vulkan = ["whisper-rs/vulkan"]
 
 [dependencies]
 anyhow = "1"
+hound = "3.5.1"
 atmospeak-asr-protocol = { path = "../src-asr-protocol" }
 rmp-serde = "1.3"
 serde = { version = "1", features = ["derive"] }
-whisper-rs = "0.16"
-
+sha2 = "0.10"
+transcribe-cpp-sys = { git = "https://github.com/handy-computer/transcribe.cpp", rev = "2778ae4bf5ca5f394d129a39467f4ad9552dc34f", default-features = false, features = ["dynamic-backends"] }

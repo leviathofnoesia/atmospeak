@@ -10,6 +10,33 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
+$PackageCacheRoot = if ($env:ATMOSPEAK_PACKAGE_BUILD_ROOT) { $env:ATMOSPEAK_PACKAGE_BUILD_ROOT } else { "E:\BuildCache\atmospeak-package-free" }
+function Assert-EPath {
+  param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Label)
+  $full = [System.IO.Path]::GetFullPath($Path)
+  if ($full -notmatch "^[Ee]:\\") {
+    throw "$Label must resolve under E: for release packaging: $full"
+  }
+  return $full
+}
+$PackageCacheRoot = Assert-EPath $PackageCacheRoot "Package build cache"
+$TempRoot = Assert-EPath (Join-Path $PackageCacheRoot "tmp") "Package TEMP"
+$CargoHome = Assert-EPath (Join-Path $PackageCacheRoot "cargo-home") "Package CARGO_HOME"
+$CargoTarget = Assert-EPath (Join-Path $PackageCacheRoot "cargo-target") "Package CARGO_TARGET_DIR"
+$NpmCache = Assert-EPath (Join-Path $PackageCacheRoot "npm-cache") "Package NPM_CONFIG_CACHE"
+$AsrBuildRoot = Assert-EPath (Join-Path $PackageCacheRoot "asr") "ASR build cache"
+$AsrTarget = Assert-EPath (Join-Path $PackageCacheRoot "asr-target") "ASR target"
+foreach ($directory in @($PackageCacheRoot, $TempRoot, $CargoHome, $CargoTarget, $NpmCache, $AsrBuildRoot, $AsrTarget)) {
+  New-Item -ItemType Directory -Force -Path $directory | Out-Null
+}
+$env:TEMP = $TempRoot
+$env:TMP = $TempRoot
+$env:CARGO_HOME = $CargoHome
+$env:CARGO_TARGET_DIR = $CargoTarget
+$env:NPM_CONFIG_CACHE = $NpmCache
+$env:ATMOSPEAK_BUILD_TEMP = $TempRoot
+$env:ATMOSPEAK_ASR_BUILD_ROOT = $AsrBuildRoot
+$env:ATMOSPEAK_ASR_TARGET_DIR = $AsrTarget
 if ([string]::IsNullOrWhiteSpace($ReleaseRepo)) {
   $ReleaseRepo = "leviathofnoesia/atmospeak"
 }
@@ -32,8 +59,8 @@ $CargoTargetRoot = if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR))
 }
 $BundleRoot = Join-Path $CargoTargetRoot "bundle"
 $ReleaseExe = Join-Path $CargoTargetRoot "atmospeak.exe"
-$SidecarExe = Join-Path $CargoTargetRoot "whisper-cli.exe"
-$ResourcesDir = Join-Path $CargoTargetRoot "resources"
+$ResourcesDir = Join-Path $Root "src-tauri\resources"
+$TauriConfig = Get-Content -LiteralPath (Join-Path $Root "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json
 $DefaultKey = Join-Path $env:USERPROFILE ".tauri\atmospeak\updater.key"
 $CargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $TauriCli = Join-Path $Root "node_modules\.bin\tauri.exe"
@@ -196,11 +223,16 @@ if ($HasUpdaterSigningKey) {
 if (Test-Path $StageDir) { Remove-Item -Recurse -Force $StageDir }
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 Copy-Item $ReleaseExe (Join-Path $StageDir "atmospeak.exe") -Force
-if (Test-Path $SidecarExe) {
-  Copy-Item $SidecarExe (Join-Path $StageDir "whisper-cli.exe") -Force
-}
-if (Test-Path $ResourcesDir) {
-  Copy-Item $ResourcesDir (Join-Path $StageDir "resources") -Recurse -Force
+foreach ($relative in $TauriConfig.bundle.resources) {
+  $folder = Split-Path -Parent $relative
+  $source = Join-Path (Join-Path $ResourcesDir '..') $relative
+  $matches = @(Get-ChildItem -Path $source -File)
+  if ($matches.Count -eq 0) { throw "Required bundle resource is missing: $relative" }
+  $destination = Join-Path $StageDir $folder
+  New-Item -ItemType Directory -Force -Path $destination | Out-Null
+  foreach ($file in $matches) {
+    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+  }
 }
 if (Test-Path $PortableDest) { Remove-Item $PortableDest -Force }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $PortableDest -CompressionLevel Optimal
@@ -233,5 +265,5 @@ if ($HasUpdaterSigningKey -and (Test-Path $UpdaterSignaturePath)) {
 }
 
 Write-Host "Free release artifacts in $ReleaseDir"
-Write-Host "Upload installers first, then latest.json last — see scripts/upload-free-cdn.md"
+Write-Host "Upload installers first, then latest.json last - see scripts/upload-free-cdn.md"
 Write-Host "Pro builds: private Nov-Pax-Web products/atmospeak-pro (scripts/package-pro.ps1)."

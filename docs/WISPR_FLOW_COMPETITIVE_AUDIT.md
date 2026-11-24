@@ -1,5 +1,7 @@
 # Wispr Flow competitive audit
 
+> Historical snapshot. The current Moonshine CPU engine and recovery contract are documented in [streaming-asr.md](streaming-asr.md).
+
 Checked against public product and technical material on 2026-07-27. This is a
 product benchmark, not a claim about Wispr's private implementation.
 

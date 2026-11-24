@@ -1,5 +1,7 @@
 # Phase A — Honest MVP for Atmospeak
 
+> Historical snapshot. The current Moonshine CPU engine and recovery contract are documented in [streaming-asr.md](streaming-asr.md).
+
 | Field | Value |
 |-------|-------|
 | **Document** | Phase A Honest MVP Design |

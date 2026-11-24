@@ -22,24 +22,21 @@
   <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.3"><strong>Release notes</strong></a>
 </p>
 
-Atmospeak is a Windows desktop dictation app built around a local
-[`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) runtime. It requires
-no account and sends no microphone audio to a transcription service.
+Atmospeak is a Windows desktop dictation app built around the bundled
+Parakeet Unified English 0.6B CPU engine. It requires no account and sends no
+microphone audio to a transcription service.
 
-## What ships in 1.0.0
+## Free dictation
 
-Version 1.0.0 is the complete Atmospeak dictation product. It is not a preview
-of something paid — it is the finished free application, and everything below is
-unlimited and requires no account.
+Free dictation is unlimited and works without an account.
 
 - **Speak and paste.** Hold or tap your hotkey, watch the live preview in the
-  dock, and get exactly one paste into whatever application had focus. Warm
-  short clips target under 500&nbsp;ms from key release to paste on the native
-  Vulkan streaming validation path; actual latency depends on machine and
-  utterance.
-- **Local Whisper, your choice of model.** A bundled model works immediately;
-  the downloader adds larger ones. Streaming ASR runs on Vulkan and falls back
-  to CPU on its own.
+  dock, and get exactly one paste into whatever application had focus. The
+  bundled speech engine runs locally on the CPU and is English-only.
+- **Bundled Parakeet speech.** English dictation with live preview and local
+  punctuation. The bundled Q8_0 model uses about 697 MiB of disk space.
+- **Control how each app receives dictation.** Set app-specific cleanup and
+  writing preferences. Use Ctrl+Alt+E to edit the current text selection by voice.
 - **Deterministic Backtrack.** Cleanup collapses stutters, applies
   `actually` / `I mean` / `wait no`, honors `go back` / `forget that`, and
   keeps the later ending on restates like `as a doctor…as a nurse`.
@@ -50,14 +47,13 @@ unlimited and requires no account.
 - **Paste never waits on setup.** If the local editor is not ready yet,
   Atmospeak pastes cleaned text immediately. Timeouts and errors fall back the
   same way.
-- **Your words stay yours.** Searchable history with export, undo / redo for AI
-  edits, a personal dictionary, snippets, and local diagnostics — all on disk,
-  on your machine.
+- **Your words stay yours.** Searchable history with captured-WAV replay and
+  recovery, export, undo / redo for AI edits, a personal dictionary, snippets,
+  and local diagnostics — all on disk, on your machine.
 
 Latest patch notes: [`docs/releases/v1.0.3.md`](docs/releases/v1.0.3.md).
 The 1.0.0 product declaration remains in
-[`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md). Speed charts from 0.5.2
-remain in [`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md).
+[`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md).
 
 ## Install
 
@@ -91,6 +87,17 @@ published SHA-256 manifest before opening it.
    remaining tail and pastes once at the cursor that was active when recording
    began.
 
+Use **Settings → Profiles & editing** to override cleanup, AI polish, style,
+and instructions for an executable such as `notepad.exe`. Unset options inherit
+your defaults; the recording keeps the policy selected when it started.
+
+To edit a selected passage in a supported Windows text control, select it,
+press `Ctrl+Alt+E`, speak the change, and press the same shortcut again.
+Uppercase/lowercase commands are immediate; other edits use the configured
+local AI runtime. Keep the original selection focused until replacement.
+Cancel on the floating control aborts the edit. If the selection changes,
+the replacement stays in History and the target is left unchanged.
+
 If Windows prevents a normal
 process from injecting into a higher-integrity application, Atmospeak leaves
 the transcript on the clipboard instead of discarding it.
@@ -101,8 +108,8 @@ Local application data lives under:
 %LOCALAPPDATA%\Atmospeak
 ```
 
-That directory contains settings, history, downloaded models, diagnostics, and
-the local database. Atmospeak does not require a cloud account.
+That directory contains settings, history, downloaded AI-edit model data,
+diagnostics, and the local database. Atmospeak does not require a cloud account.
 
 ## Backtrack (always on in cleanup)
 
@@ -158,32 +165,21 @@ flowchart LR
 Setup and downloads happen only from Settings (or the background job started
 when you enable the toggle). The paste path never waits on a model download.
 
-## Speech models
+## Speech engine
 
-The bundled Whisper model works immediately. Optional models download from their
-published Hugging Face repositories into Atmospeak's local model directory,
-stream to a temporary file, and are installed only after their pinned SHA-256
-hash passes.
+Atmospeak bundles Parakeet Unified English 0.6B Q8_0. The 731,357,568-byte
+GGUF runs on the CPU through transcribe.cpp. Settings shows Handy?s
+reference accuracy and speed measurements. Recordings, History, and
+previously downloaded model files remain on disk during an upgrade.
 
-| Atmospeak ID | Upstream model | Availability | Approx. size |
-| --- | --- | --- | ---: |
-| `tiny.en` | Whisper Tiny English | Setup / Settings | 75 MB |
-| `base.en` | Whisper Base English | **Bundled default** | 142 MB |
-| `small.en` | Whisper Small English | Setup / Settings | 466 MB |
-| `medium.en` | Whisper Medium English | Settings | 1.43 GB |
-| `large-v3-turbo-q5` | Whisper Large v3 Turbo q5 | Settings | 548 MB |
-| `distil-large-v3.5` | Distil-Whisper Large v3.5 | Settings | 1.42 GB |
-| `distil-large-v3` | Distil-Whisper Large v3 | Legacy installs | 1.42 GB |
+Debug builds support a custom ASR executable and a verified copy of the
+bundled Parakeet weights. Release packages include both with the model license.
 
-Optional **AI edit** model (separate from Whisper):
+Optional **AI edit** model (separate from speech recognition):
 
 | Atmospeak ID | Upstream | Availability | Approx. size |
 | --- | --- | --- | ---: |
 | `qwen2.5-0.5b` | Qwen2.5 0.5B Instruct GGUF | Settings → AI auto-edit | ~470 MB |
-
-If an optional Whisper selection is missing, Atmospeak falls back to the
-bundled `base.en` model. Advanced Settings can also point to a custom compatible
-Whisper CLI and GGML model.
 
 ## How it works
 
@@ -191,38 +187,20 @@ Whisper CLI and GGML model.
 flowchart TD
   A[Hold / Tap shortcut or dock] --> B[Rust dictation engine]
   B --> C[CPAL capture → mono 16 kHz]
-  C --> D[Silero VAD → rolling preview]
-  D --> E[Vulkan / CPU sidecar → resident host → CLI]
+  C --> D[Parakeet CPU sidecar → rolling preview]
+  D --> E[Durable WAV replay → same CPU sidecar → final transcript]
   E --> F[Tail reconcile → cleanup + Backtrack]
   F --> G{AI auto-edit ready?}
   G -->|yes ≤750ms| H[Polished text]
   G -->|no / timeout| I[Cleaned text]
-  H --> J[One paste → History]
+  H --> J[One paste → History + WAV replay]
   I --> J
 ```
 
-Ordinary dictation is rejected before ASR when it is effectively silent, too
-quiet, or too noisy. This prevents empty recordings from becoming Whisper
-hallucinations.
-
-### Speed (unchanged gates from 0.5.2)
-
-Measured on a warm `base.en` CPU path with the porcelain-moon fixture
-(~3.2 s audio).
-
-```mermaid
-xychart-beta
-    title "Release → paste totalMs (warm porcelain-moon, lower is better)"
-    x-axis ["Before: host ≤5s route", "After: Vulkan stream (1.0.0)"]
-    y-axis "Milliseconds" 0 --> 2200
-    bar [1718, 213]
-```
-
-| Metric | Before (≤5 s → warm host) | After (Vulkan streaming) | Gate |
-| --- | ---: | ---: | ---: |
-| Release → paste (`totalMs`) | ~1250–1840 ms | **190–244 ms** | ≤ **500** ms |
-| Inject (`injectMs`) | ~54–55 ms | ~54–55 ms | ≤ 150 ms |
-| Paste-only wall (`pasteVisibleMs`) | — | — | ≤ 300 ms |
+Streaming preview and durable-WAV replay use the same bundled Parakeet CPU
+engine. Audio quality checks are advisory: quiet, noisy, or clipped input can
+emit a warning, but the captured WAV remains available in History and the
+warning does not delete audio or abort dictation.
 
 ## Build from source
 
@@ -238,26 +216,17 @@ Requirements:
 git clone https://github.com/leviathofnoesia/atmospeak.git
 cd atmospeak
 git lfs install
-git lfs pull
 bun install
+
+# Build the pinned CPU decoder and stage the verified Parakeet weights.
+powershell -ExecutionPolicy Bypass -File scripts/build-asr-sidecars.ps1
 bun run tauri dev
 ```
 
-The bundled GGML model and `whisper.cpp` binaries are LFS-tracked. If a clone
-contains pointer files instead of the runtime, recover them with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/bootstrap-whisper.ps1
-```
-
-Optional: refresh the bundled `llama-server` stub path with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/bootstrap-llama.ps1
-```
-
-(If missing, Atmospeak can still download the polish runtime into
-`%LOCALAPPDATA%\Atmospeak` when you run **Download & set up**.)
+Use an E: checkout for native builds. The first build downloads the pinned
+transcribe.cpp source and Parakeet GGUF. The package includes the speech
+sidecar, CPU backend DLLs, model, and license notices.
+See [Model bootstrap](docs/MODEL_BOOTSTRAP.md).
 
 ## Validate a change
 
@@ -270,8 +239,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 The native push-to-talk harness exercises shortcut persistence, key-down,
-key-up, transcription, target restoration, exactly one native paste, and the
-release→paste / inject latency gates:
+key-up, transcription, target restoration, and exactly one native paste:
 
 ```powershell
 bun run validation:native-ptt
@@ -290,20 +258,20 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
 - Unsigned installers; SmartScreen warnings remain.
 - No cloud STT, mobile client, cross-device synchronization, or live typing
   into the target application.
+- The bundled ASR engine supports English only and runs on the CPU.
 - Live preview is local and appears only in the Atmospeak dock.
 - AI auto-edit is optional and must not block paste; first-time setup is
   Settings-driven and downloads ~470&nbsp;MB once.
-- Latency depends on speech length, selected model, GPU/CPU performance, and
-  current ASR backlog. Short warm fixtures remain gated; Atmospeak does not
-  promise a fixed latency on every machine or utterance.
+- Timing depends on speech length, CPU performance, and current ASR backlog;
+  Atmospeak does not promise a fixed latency on every machine or utterance.
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
 
 ## What is free
 
-Dictation, every local Whisper model, cleanup, Backtrack, injection, history,
-dictionary, snippets, and on-device AI edit are **free, unlimited, and require no
-account** in the public MIT build.
+Bundled local Parakeet English dictation, cleanup, Backtrack, injection,
+history, dictionary, snippets, and on-device AI edit are **free, unlimited, and
+require no account** in the public MIT build.
 
 Everything shipped through 1.0.0 stays that way for the free edition. Paid
 capability lives in a **separate Atmospeak Pro build** (online Polar licence,
@@ -316,11 +284,11 @@ Free updater feed: `https://www.novpax.org/downloads/atmospeak/free/latest.json`
 ## Project
 
 Atmospeak uses Tauri 2, React, TypeScript, Rust, SQLite, CPAL, WebView2, and
-`whisper.cpp`. It is clean-room software and does not contain proprietary code,
-assets, or model services from competing dictation products.
+the Parakeet Unified English 0.6B model with transcribe.cpp. It is
+clean-room software and does not contain proprietary code, assets, or model
+services from competing dictation products.
 
 See [`docs/RELEASE.md`](docs/RELEASE.md) for packaging and updater details,
-[`docs/MODEL_BOOTSTRAP.md`](docs/MODEL_BOOTSTRAP.md) for runtime recovery, and
 [`tests/manual/production-100.md`](tests/manual/production-100.md) for the
 manual production matrix.
 

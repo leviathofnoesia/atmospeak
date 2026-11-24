@@ -12,7 +12,11 @@ param(
 
   [string]$FocusWindowTitle = "",
 
-  [Int64]$FocusHwnd = 0
+  [Int64]$FocusHwnd = 0,
+
+  [Int64]$AtUtcMs = 0,
+
+  [string]$EventLogPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,8 +26,64 @@ using System;
 using System.Runtime.InteropServices;
 
 public static class AtmospeakNativeKeys {
+  [DllImport("kernel32.dll")]
+  public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr process);
+  [DllImport("user32.dll")]
+  public static extern bool AttachThreadInput(uint from, uint to, bool attach);
+  [StructLayout(LayoutKind.Sequential)]
+  private struct KeyboardInput {
+    public ushort key;
+    public ushort scan;
+    public uint flags;
+    public uint time;
+    public UIntPtr extra;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct MouseInput {
+    public int x, y;
+    public uint data, flags, time;
+    public UIntPtr extra;
+  }
+  [StructLayout(LayoutKind.Explicit)]
+  private struct InputUnion {
+    [FieldOffset(0)] public KeyboardInput keyboard;
+    [FieldOffset(0)] public MouseInput mouse;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct Input {
+    public uint type;
+    public InputUnion value;
+  }
+  public sealed class InputEdge {
+    public long Ticks, UtcMs, ReturnedTicks;
+    public uint Count;
+  }
   [DllImport("user32.dll", SetLastError = true)]
-  public static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+  private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+  public static InputEdge SendChord(byte[] keys, bool release) {
+    var inputs = new Input[keys.Length];
+    for (int i = 0; i < keys.Length; i++) {
+      inputs[i].type = 1;
+      inputs[i].value.keyboard.key = keys[release ? keys.Length - i - 1 : i];
+      inputs[i].value.keyboard.flags = release ? 2u : 0u;
+    }
+    int size = Marshal.SizeOf(typeof(Input));
+    // Warm clock and P/Invoke setup with no input events before timing the edge.
+    SendInput(0, new Input[0], size);
+    System.Diagnostics.Stopwatch.GetTimestamp();
+    var edge = new InputEdge();
+    edge.UtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    edge.Ticks = System.Diagnostics.Stopwatch.GetTimestamp();
+    edge.Count = SendInput((uint)inputs.Length, inputs, size);
+    edge.ReturnedTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+    if (edge.Count != inputs.Length) {
+      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Native chord input was not accepted completely");
+    }
+    return edge;
+  }
 
   [DllImport("user32.dll")]
   [return: MarshalAs(UnmanagedType.Bool)]
@@ -127,19 +187,26 @@ if ($focusProcess) {
 }
 
 if ($focusWindow -ne [IntPtr]::Zero) {
-  [AtmospeakNativeKeys]::ShowWindow($focusWindow, 9) | Out-Null
-  # Windows allows a process that just received user input to transfer the
-  # foreground. A harmless Alt tap gives this short-lived harness process that
-  # right without changing the target document.
-  [AtmospeakNativeKeys]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-  [AtmospeakNativeKeys]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-  [AtmospeakNativeKeys]::BringWindowToTop($focusWindow) | Out-Null
-  [AtmospeakNativeKeys]::SetForegroundWindow($focusWindow) | Out-Null
-  Start-Sleep -Milliseconds 150
+  $currentThread = [AtmospeakNativeKeys]::GetCurrentThreadId()
+  $foregroundThread = [AtmospeakNativeKeys]::GetWindowThreadProcessId([AtmospeakNativeKeys]::GetForegroundWindow(), [IntPtr]::Zero)
+  $targetThread = [AtmospeakNativeKeys]::GetWindowThreadProcessId($focusWindow, [IntPtr]::Zero)
+  $attached = @()
+  try {
+    foreach ($otherThread in @($foregroundThread, $targetThread) | Select-Object -Unique) {
+      if ($otherThread -ne 0 -and $otherThread -ne $currentThread -and [AtmospeakNativeKeys]::AttachThreadInput($currentThread, $otherThread, $true)) { $attached += $otherThread }
+    }
+    for ($attempt = 0; $attempt -lt 8; $attempt++) {
+      [AtmospeakNativeKeys]::ShowWindow($focusWindow, 9) | Out-Null
+      [AtmospeakNativeKeys]::BringWindowToTop($focusWindow) | Out-Null
+      [AtmospeakNativeKeys]::SetForegroundWindow($focusWindow) | Out-Null
+      Start-Sleep -Milliseconds 20
+      if ([AtmospeakNativeKeys]::GetForegroundWindow() -eq $focusWindow) { break }
+    }
+  } finally {
+    foreach ($otherThread in $attached) { [AtmospeakNativeKeys]::AttachThreadInput($currentThread, $otherThread, $false) | Out-Null }
+  }
   if ([AtmospeakNativeKeys]::GetForegroundWindow() -ne $focusWindow) {
-    # Harnesses still need to deliver global hotkeys even when Windows refuses
-    # the foreground transfer (common under automation / multi-monitor focus).
-    Write-Output "focus-soft-fail"
+    throw "Owned native target did not become foreground; refusing to send keys elsewhere."
   }
 }
 
@@ -155,38 +222,27 @@ $codes = foreach ($keyName in $keyNames) {
   [byte]$virtualKeys[$trimmed]
 }
 
-function Send-KeyDown([byte]$Code) {
-  [AtmospeakNativeKeys]::keybd_event($Code, 0, 0, [UIntPtr]::Zero)
+if ($AtUtcMs -gt 0) {
+  while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $AtUtcMs) { Start-Sleep -Milliseconds 1 }
 }
-
-function Send-KeyUp([byte]$Code) {
-  [AtmospeakNativeKeys]::keybd_event($Code, 0, 2, [UIntPtr]::Zero)
-}
-
-switch ($Action) {
-  "down" {
-    foreach ($code in $codes) {
-      Send-KeyDown $code
-    }
-  }
-  "up" {
-    [array]::Reverse($codes)
-    foreach ($code in $codes) {
-      Send-KeyUp $code
-    }
-  }
+$edge = switch ($Action) {
+  "down" { [AtmospeakNativeKeys]::SendChord([byte[]]$codes, $false) }
+  "up" { [AtmospeakNativeKeys]::SendChord([byte[]]$codes, $true) }
   "press" {
-    foreach ($code in $codes) {
-      Send-KeyDown $code
-    }
+    $pressed = [AtmospeakNativeKeys]::SendChord([byte[]]$codes, $false)
     Start-Sleep -Milliseconds 60
-    [array]::Reverse($codes)
-    foreach ($code in $codes) {
-      Send-KeyUp $code
-    }
+    $null = [AtmospeakNativeKeys]::SendChord([byte[]]$codes, $true)
+    $pressed
   }
 }
+$edgeTicks = $edge.Ticks
+$edgeUtcMs = $edge.UtcMs
 
 if ($focusProcess) {
   Write-Output $focusProcess.Id
+}
+
+if ($EventLogPath) {
+  $event = @{ kind = "key-$Action"; ticks = "$edgeTicks"; frequency = "$( [System.Diagnostics.Stopwatch]::Frequency )"; utcMs = $edgeUtcMs; requestedUtcMs = $AtUtcMs; keys = $Keys; timingVersion = 2; inputEventCount = $edge.Count; inputCallReturnedTicks = "$($edge.ReturnedTicks)" } | ConvertTo-Json -Compress
+  [System.IO.File]::AppendAllText($EventLogPath, $event + "`n", [System.Text.UTF8Encoding]::new($false))
 }

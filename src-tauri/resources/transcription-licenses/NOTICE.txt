@@ -1,0 +1,6 @@
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+
+Model: NVIDIA Parakeet Unified English 0.6B
+Original: https://huggingface.co/nvidia/parakeet-unified-en-0.6b
+GGUF Q8_0 conversion by handy-computer:
+https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/tree/7e948f21b7bdbac698d3318db9d350f1096f3b6c

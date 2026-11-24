@@ -1,88 +1,104 @@
+#Requires -Version 5.1
+# Build the pinned transcribe.cpp CPU sidecar and stage its verified Parakeet weights.
+[CmdletBinding()]
 param(
-  [switch]$CpuOnly
+  [string]$BuildRoot = $(if ($env:ATMOSPEAK_ASR_BUILD_ROOT) { $env:ATMOSPEAK_ASR_BUILD_ROOT } else { "E:\BuildCache\atmospeak-asr-build" }),
+  [string]$SelectionRoot = $(if ($env:ATMOSPEAK_ASR_SELECTION_ROOT) { $env:ATMOSPEAK_ASR_SELECTION_ROOT } else { "E:\BuildCache\atmospeak-asr-cache\parakeet" })
 )
 
 $ErrorActionPreference = "Stop"
-
 $Root = Split-Path -Parent $PSScriptRoot
 $Manifest = Join-Path $Root "src-asr-host\Cargo.toml"
-# Long Windows target paths produce a ~3.3MB CPU sidecar that falls ~10× behind
-# realtime. Prefer an explicit short dir, else C:\asrb, else the repo target.
-$TargetDir = if ($env:ATMOSPEAK_ASR_TARGET_DIR) {
-  $env:ATMOSPEAK_ASR_TARGET_DIR
-} elseif ($IsWindows -or $env:OS -match "Windows") {
-  $short = "C:\asrb"
-  New-Item -ItemType Directory -Force -Path $short | Out-Null
-  $short
-} else {
-  Join-Path $Root "src-asr-host\target"
-}
-if (-not $env:CMAKE_GENERATOR) {
-  $ninja = Get-Command ninja -ErrorAction SilentlyContinue
-  if (-not $ninja) {
-    $ninjaExe = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" `
-      -Recurse -Filter ninja.exe -ErrorAction SilentlyContinue |
-      Select-Object -First 1
-    if ($ninjaExe) {
-      $env:Path = "$($ninjaExe.DirectoryName);" + $env:Path
-      $ninja = Get-Command ninja -ErrorAction SilentlyContinue
-    }
-  }
-  if ($ninja) {
-    $env:CMAKE_GENERATOR = "Ninja"
-  }
-}
 $OutputDir = Join-Path $Root "src-tauri\resources\asr"
-$VadPath = Join-Path $OutputDir "ggml-silero-v6.2.0.bin"
-$VadUrl = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
-$VadSha256 = "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
+$DefaultTempRoot = Join-Path $BuildRoot "tmp"
+$DefaultTargetDir = Join-Path $BuildRoot "cargo-target"
+$DefaultCargoHome = "E:\BuildCache\cargo"
 
-if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-  throw "CMake is required to build atmospeak-asr-host. Install CMake and place it on PATH."
-}
-if (-not $env:LIBCLANG_PATH -and -not (Get-Command clang -ErrorAction SilentlyContinue)) {
-  throw "LLVM/libclang is required by whisper-rs. Set LIBCLANG_PATH or install LLVM."
+function Assert-EPath {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Label
+  )
+  try {
+    $full = [System.IO.Path]::GetFullPath($Path)
+  } catch {
+    throw "$Label is not a valid path: $Path"
+  }
+  if ($full -notmatch "^[Ee]:\\") {
+    throw "$Label must resolve under E: for an isolated build: $full"
+  }
+  return $full
 }
 
-New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-if (-not (Test-Path -LiteralPath $VadPath)) {
-  Invoke-WebRequest -Uri $VadUrl -OutFile $VadPath
-}
-$ActualVadSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $VadPath).Hash.ToLowerInvariant()
-if ($ActualVadSha256 -ne $VadSha256) {
-  throw "Silero VAD checksum mismatch: expected $VadSha256, received $ActualVadSha256"
-}
+$BuildRoot = Assert-EPath $BuildRoot "ASR build root"
+$SelectionRoot = Assert-EPath $SelectionRoot "ASR selection cache"
+$TempRoot = Assert-EPath $(if ($env:ATMOSPEAK_BUILD_TEMP) { $env:ATMOSPEAK_BUILD_TEMP } else { $DefaultTempRoot }) "ATMOSPEAK_BUILD_TEMP"
+$TargetDir = Assert-EPath $(if ($env:ATMOSPEAK_ASR_TARGET_DIR) { $env:ATMOSPEAK_ASR_TARGET_DIR } else { $DefaultTargetDir }) "ATMOSPEAK_ASR_TARGET_DIR"
+$CargoHome = Assert-EPath $(if ($env:CARGO_HOME) { $env:CARGO_HOME } else { $DefaultCargoHome }) "CARGO_HOME"
+$OutputDir = Assert-EPath $OutputDir "ASR resource output"
 
+foreach ($directory in @($BuildRoot, $TempRoot, $TargetDir, $CargoHome, $SelectionRoot, $OutputDir)) {
+  New-Item -ItemType Directory -Force -Path $directory | Out-Null
+}
+$env:TEMP = $TempRoot
+$env:TMP = $TempRoot
+$env:CARGO_HOME = $CargoHome
 $env:CARGO_TARGET_DIR = $TargetDir
-# CPU and Vulkan feature sets must not share one target dir — a Vulkan build
-# leaves ggml-vulkan objects that a subsequent default build can pick up, and
-# the resulting "cpu" sidecar then stalls mid-utterance (multi-second backlog).
-$CpuTargetDir = Join-Path $TargetDir "cpu"
-$env:CARGO_TARGET_DIR = $CpuTargetDir
-cargo build --locked --release --manifest-path $Manifest
+$env:ATMOSPEAK_ASR_BUILD_ROOT = $BuildRoot
+
+$modelName = 'parakeet-unified-en-0.6b-Q8_0.gguf'
+$modelHash = '4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795'
+$cached = Join-Path $SelectionRoot $modelName
+if (-not (Test-Path -LiteralPath $cached -PathType Leaf) -or
+    (Get-Item -LiteralPath $cached).Length -ne 731357568 -or
+    (Get-FileHash -LiteralPath $cached -Algorithm SHA256).Hash -ne $modelHash) {
+  $partial = "$cached.$PID.partial"
+  try {
+    $modelUrl = "https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/7e948f21b7bdbac698d3318db9d350f1096f3b6c/$modelName"
+    & curl.exe --fail --location --retry 2 --max-time 900 --output $partial $modelUrl
+    if ($LASTEXITCODE -ne 0) { throw "Parakeet download failed (exit $LASTEXITCODE)." }
+    if ((Get-Item -LiteralPath $partial).Length -ne 731357568 -or
+        (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash -ne $modelHash) {
+      throw "Parakeet weights do not match the pinned artifact."
+    }
+    Move-Item -LiteralPath $partial -Destination $cached -Force
+  } finally {
+    if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+  }
+}
+
+$env:TRANSCRIBE_CMAKE_ARGS = "-DGGML_NATIVE=OFF"
+$messages = & cargo build --locked --release --manifest-path $Manifest --message-format=json
 if ($LASTEXITCODE -ne 0) {
-  throw "CPU ASR sidecar build failed with exit code $LASTEXITCODE"
-}
-Copy-Item `
-  (Join-Path $CpuTargetDir "release\atmospeak-asr-host.exe") `
-  (Join-Path $OutputDir "atmospeak-asr-cpu.exe") `
-  -Force
-
-if (-not $CpuOnly) {
-  if (-not $env:VULKAN_SDK) {
-    throw "VULKAN_SDK is required for the Vulkan ASR sidecar."
+  $messages | ForEach-Object {
+    $record = ConvertFrom-Json $_
+    if ($record.reason -eq 'compiler-message') { Write-Host $record.message.rendered }
   }
-  $VulkanTargetDir = Join-Path $TargetDir "vulkan"
-  $env:CARGO_TARGET_DIR = $VulkanTargetDir
-  cargo build --locked --release --features vulkan --manifest-path $Manifest
-  if ($LASTEXITCODE -ne 0) {
-    throw "Vulkan ASR sidecar build failed with exit code $LASTEXITCODE"
-  }
-  Copy-Item `
-    (Join-Path $VulkanTargetDir "release\atmospeak-asr-host.exe") `
-    (Join-Path $OutputDir "atmospeak-asr-vulkan.exe") `
-    -Force
+  throw "CPU ASR sidecar build failed (exit $LASTEXITCODE)."
 }
-
-$env:CARGO_TARGET_DIR = $TargetDir
-Write-Host "ASR sidecars are ready in $OutputDir"
+$nativeBuild = $messages | ForEach-Object { ConvertFrom-Json $_ } | Where-Object {
+  $_.reason -eq 'build-script-executed' -and $_.package_id -like '*#transcribe-cpp-sys@*'
+} | Select-Object -Last 1
+if (-not $nativeBuild) { throw "Cargo did not report the pinned transcribe.cpp runtime." }
+$nativeDir = Join-Path $nativeBuild.out_dir 'bin'
+$tauri = Get-Content -LiteralPath (Join-Path $Root "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json
+$asrNames = @($tauri.bundle.resources | Where-Object { $_ -like 'resources/asr/*.dll' } | Split-Path -Leaf)
+$crtNames = @('MSVCP140.dll', 'MSVCP140_1.dll', 'VCRUNTIME140.dll', 'VCRUNTIME140_1.dll')
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+$visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if (-not $visualStudio) { throw "Visual Studio C++ Build Tools and their x64 redistributable files are required." }
+$redist = Get-ChildItem -Path (Join-Path $visualStudio 'VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT') -Directory |
+  Sort-Object { [version]$_.Parent.Parent.Name } -Descending | Where-Object {
+    $candidate = $_.FullName
+    @($crtNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $candidate $_) -PathType Leaf) }).Count -eq 0
+  } | Select-Object -First 1
+if (-not $redist) { throw "Visual Studio's x64 C++ redistributable files are missing." }
+foreach ($name in $asrNames) {
+  $directory = if ($name -in $crtNames) { $redist.FullName } else { $nativeDir }
+  Copy-Item -LiteralPath (Join-Path $directory $name) -Destination (Join-Path $OutputDir $name) -Force
+}
+Copy-Item -LiteralPath (Join-Path $TargetDir "release\atmospeak-asr-host.exe") -Destination (Join-Path $OutputDir "atmospeak-asr-cpu.exe") -Force
+$modelOutput = Join-Path $Root "src-tauri\resources\models"
+New-Item -ItemType Directory -Force -Path $modelOutput | Out-Null
+Copy-Item -LiteralPath $cached -Destination (Join-Path $modelOutput $modelName) -Force
+Write-Host "Parakeet CPU sidecar and model staged."

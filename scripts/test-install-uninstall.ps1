@@ -1,6 +1,6 @@
 param(
   [string]$InstallerPath = "",
-  [string]$InstallDir = (Join-Path $env:TEMP "AtmospeakInstallTest")
+  [string]$InstallDir = $(if ($env:ATMOSPEAK_INSTALL_SMOKE_ROOT) { $env:ATMOSPEAK_INSTALL_SMOKE_ROOT } else { "E:\BuildCache\atmospeak-install-smoke" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -227,16 +227,27 @@ function Get-FreeTcpPort {
 }
 
 $Root = Split-Path -Parent $PSScriptRoot
+
+function Assert-EPath {
+  param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Label)
+  $full = [System.IO.Path]::GetFullPath($Path)
+  if ($full -notmatch "^[Ee]:\\") {
+    throw "$Label must resolve under E: for an isolated install smoke: $full"
+  }
+  return $full
+}
 if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
   $InstallerPath = Get-ChildItem (Join-Path $Root "release") -Filter "*_x64-setup.exe" -File -Recurse |
     Sort-Object LastWriteTime -Descending |
     Select-Object -ExpandProperty FullName -First 1
 }
 
+if ($InstallerPath) { $InstallerPath = Assert-EPath $InstallerPath "InstallerPath" }
 if (-not $InstallerPath -or -not (Test-Path $InstallerPath)) {
   throw "Installer not found. Run scripts/package-release.ps1 first."
 }
 
+$InstallDir = Assert-EPath $InstallDir "InstallDir"
 $ProfileDir = "$InstallDir-profile"
 Assert-NoRealInstallRegistration -Directory $InstallDir
 Remove-TestInstallShortcuts -Directory $InstallDir
@@ -279,11 +290,11 @@ if (-not (Test-Path $AppExe)) {
 if (-not (Test-Path $AppExe)) {
   throw "Installed app executable not found under $InstallDir"
 }
-if (-not (Test-Path (Join-Path $InstallDir "resources\models\ggml-base.en.bin"))) {
-  throw "Bundled model not found in installed resources."
-}
-if (-not (Test-Path (Join-Path $InstallDir "resources\whisper-runtime\whisper-cli.exe"))) {
-  throw "Bundled whisper runtime not found in installed resources."
+$tauriConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot "../src-tauri/tauri.conf.json") -Raw | ConvertFrom-Json
+foreach ($requiredResource in $tauriConfig.bundle.resources) {
+  if (-not (Test-Path -Path (Join-Path $InstallDir $requiredResource) -PathType Leaf)) {
+    throw "Required installer resource is missing: $requiredResource"
+  }
 }
 
 if (Test-Path $ProfileDir) {

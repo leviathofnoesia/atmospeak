@@ -37,8 +37,8 @@ export function AdvancedPanel({
       <div className="instruction-card">
         <h3>Bundled by default</h3>
         <p>
-          Atmospeak ships with whisper.cpp and Base English. The resident host keeps the selected
-          model warm, with automatic one-shot CLI fallback. Override paths only for custom builds.
+          Atmospeak ships with a resident CPU transcription engine and a bundled English model.
+          The engine keeps the selected model warm. Override paths only for custom builds.
         </p>
       </div>
       {!import.meta.env.PROD ? (
@@ -52,14 +52,14 @@ export function AdvancedPanel({
             }
           />
           <label>
-            <span>Advanced whisper-cli path</span>
+            <span>Advanced ASR executable path</span>
             <input
-              value={settings.advancedWhisperCliPath}
+              value={settings.advancedAsrExecutablePath}
               disabled={!settings.advancedRuntimeEnabled}
               onChange={(event) =>
-                setSettings({ ...settings, advancedWhisperCliPath: event.currentTarget.value })
+                setSettings({ ...settings, advancedAsrExecutablePath: event.currentTarget.value })
               }
-              placeholder="C:\\path\\to\\whisper-cli.exe"
+              placeholder="C:\\path\\to\\atmospeak-asr-cpu.exe"
             />
           </label>
           <label>
@@ -70,7 +70,7 @@ export function AdvancedPanel({
               onChange={(event) =>
                 setSettings({ ...settings, advancedModelPath: event.currentTarget.value })
               }
-              placeholder="C:\\path\\to\\ggml-base.en.bin"
+              placeholder="C:\\path\\to\\model.bin"
             />
           </label>
         </>
@@ -92,7 +92,7 @@ export function AdvancedPanel({
       <div className="instruction-card">
         <h3>Selected input and paths</h3>
         <p>Microphone · {settings.microphoneName ?? "none selected"}</p>
-        <p>Whisper CLI · {modelStatus?.whisperCliPath || "unavailable"}</p>
+        <p>ASR executable · {modelStatus?.executablePath || "unavailable"}</p>
         <p>Model · {modelStatus?.modelPath || "unavailable"}</p>
       </div>
       <PanelTitle icon={<Cpu size={22} />} title="Runtime logs" />

@@ -1,9 +1,13 @@
 pub mod app_state;
+pub mod application_profiles;
 pub mod asr_host;
 pub mod backtrack;
 pub mod cleanup;
 pub mod dictation_engine;
+pub mod dictation_polish;
+pub mod history_actions;
 pub mod injection;
+pub mod list_formatting;
 pub mod live_paste;
 pub mod llama_host;
 pub mod metrics;
@@ -14,9 +18,14 @@ pub mod polish_models;
 pub mod proc;
 pub mod recorder;
 pub mod runtime;
+pub mod selected_text;
 pub mod shortcuts;
 pub mod sound_check;
 pub mod startup;
 pub mod streaming_asr;
+pub mod text_processing;
 pub mod transcriber;
+pub mod voice_edit;
 pub mod window_manager;
+
+pub mod dictation_state;

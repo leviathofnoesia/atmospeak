@@ -6,6 +6,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import type {
   AppSettings,
   AppSnapshot,
+  TranscriptSession,
   DictionaryEntry,
   InjectionResult,
   MicrophoneInfo,
@@ -28,7 +29,7 @@ interface WindowWithTauri extends Window {
 }
 
 const releaseVersion = "1.0.3";
-const mockInstalledModels = new Set(["base.en"]);
+const mockInstalledModels = new Set(["parakeet-unified-en"]);
 
 let mockSnapshot: AppSnapshot = {
   settings: defaultSettings(),
@@ -81,7 +82,7 @@ if (
         rmsDbfs: -24,
         peakDbfs: -8,
         snrDb: 28,
-        modelId: "base.en",
+        modelId: "parakeet-unified-en",
         asrBackend: "host",
       },
     },
@@ -234,6 +235,8 @@ export async function copyText(text: string): Promise<string> {
   }
   if (hasTauriRuntime()) {
     await writeText(text);
+  } else {
+    await navigator.clipboard.writeText(text);
   }
   return "Transcript copied to clipboard.";
 }
@@ -286,24 +289,24 @@ export function deleteSnippet(id: string): Promise<AppSnapshot> {
 export function getModelStatus(): Promise<ModelStatus> {
   return command("get_model_status", undefined, () => {
     const usingAdvanced = mockSnapshot.settings.advancedRuntimeEnabled;
-    const whisperCliFound = usingAdvanced
-      ? mockSnapshot.settings.advancedWhisperCliPath.trim().length > 0
+    const executableFound = usingAdvanced
+      ? mockSnapshot.settings.advancedAsrExecutablePath.trim().length > 0
       : true;
     const modelFound = usingAdvanced ? mockSnapshot.settings.advancedModelPath.trim().length > 0 : true;
     return {
-      whisperCliFound,
+      executableFound,
       modelFound,
-      ready: whisperCliFound && modelFound,
+      ready: executableFound && modelFound,
       source: usingAdvanced ? "advancedOverride" : "bundled",
-      whisperCliPath: usingAdvanced
-        ? mockSnapshot.settings.advancedWhisperCliPath
-        : "app://resources/whisper-runtime/whisper-cli.exe",
+      executablePath: usingAdvanced
+        ? mockSnapshot.settings.advancedAsrExecutablePath
+        : "app://resources/asr/atmospeak-asr-cpu.exe",
       modelPath: usingAdvanced
         ? mockSnapshot.settings.advancedModelPath
-        : "app://resources/models/ggml-base.en.bin",
+        : "app://resources/models/parakeet-unified-en-0.6b-Q8_0.gguf",
       message:
-        whisperCliFound && modelFound
-          ? "Bundled offline transcription runtime is ready."
+        executableFound && modelFound
+          ? "Bundled offline CPU transcription runtime is ready."
           : "The advanced transcription runtime is incomplete.",
     };
   });
@@ -313,66 +316,12 @@ export function getModelInventory(): Promise<ModelInventory> {
   return command("get_model_inventory", undefined, () => {
     const models: ModelInventory["models"] = [
       {
-        id: "base.en",
-        label: "Base English",
+        id: "parakeet-unified-en",
+        label: "Parakeet Unified English 0.6B",
         installed: true,
         bundled: true,
-        path: "app://resources/models/ggml-base.en.bin",
-        sizeMb: 142,
-      },
-      {
-        id: "tiny.en",
-        label: "Tiny English",
-        installed: mockInstalledModels.has("tiny.en"),
-        bundled: false,
-        path: mockInstalledModels.has("tiny.en") ? "mock://models/ggml-tiny.en.bin" : null,
-        sizeMb: 75,
-      },
-      {
-        id: "small.en",
-        label: "Small English",
-        installed: mockInstalledModels.has("small.en"),
-        bundled: false,
-        path: mockInstalledModels.has("small.en") ? "mock://models/ggml-small.en.bin" : null,
-        sizeMb: 466,
-      },
-      {
-        id: "medium.en",
-        label: "Medium English",
-        installed: mockInstalledModels.has("medium.en"),
-        bundled: false,
-        path: mockInstalledModels.has("medium.en") ? "mock://models/ggml-medium.en.bin" : null,
-        sizeMb: 1463,
-      },
-      {
-        id: "distil-large-v3",
-        label: "Distil Large v3",
-        installed: mockInstalledModels.has("distil-large-v3"),
-        bundled: false,
-        path: mockInstalledModels.has("distil-large-v3")
-          ? "mock://models/ggml-distil-large-v3.bin"
-          : null,
-        sizeMb: 1450,
-      },
-      {
-        id: "large-v3-turbo-q5",
-        label: "Large v3 Turbo q5",
-        installed: mockInstalledModels.has("large-v3-turbo-q5"),
-        bundled: false,
-        path: mockInstalledModels.has("large-v3-turbo-q5")
-          ? "mock://models/ggml-large-v3-turbo-q5_0.bin"
-          : null,
-        sizeMb: 548,
-      },
-      {
-        id: "distil-large-v3.5",
-        label: "Distil Large v3.5",
-        installed: mockInstalledModels.has("distil-large-v3.5"),
-        bundled: false,
-        path: mockInstalledModels.has("distil-large-v3.5")
-          ? "mock://models/ggml-distil-large-v3.5.bin"
-          : null,
-        sizeMb: 1450,
+        path: "app://resources/models/parakeet-unified-en-0.6b-Q8_0.gguf",
+        sizeMb: 697,
       },
     ];
     return {
@@ -380,7 +329,7 @@ export function getModelInventory(): Promise<ModelInventory> {
         ? "advanced-override"
         : mockInstalledModels.has(mockSnapshot.settings.activeModelId)
           ? mockSnapshot.settings.activeModelId
-          : "base.en",
+          : "parakeet-unified-en",
       models,
     };
   });
@@ -652,4 +601,32 @@ export function completeOnboarding(settings: AppSettings): Promise<AppSnapshot> 
 
 export function resetOverlayPosition(): Promise<void> {
   return command("reset_overlay_position", undefined, () => undefined);
+}
+
+export interface HistoryRequest { generation: number; sessionId: string | null }
+
+export function copyTranscript(id: string | null = null): Promise<string> {
+  return command("copy_transcript", { id }, () => { throw new Error("Copying saved transcripts requires the desktop app."); });
+}
+
+export function openHistory(sessionId: string | null = null): Promise<void> {
+  return command("open_history", { sessionId }, () => { throw new Error("Opening saved recordings requires the desktop app."); });
+}
+
+export function takeHistoryRequest(): Promise<HistoryRequest | null> {
+  return command("take_history_request", undefined, () => null);
+}
+
+export function getDictationSnapshot(): Promise<import("../types/dictation").NativeDictationEvent | null> {
+  return command("get_dictation_snapshot", undefined, () => null);
+}
+export function searchHistory(query: string, offset: number): Promise<TranscriptSession[]> {
+  return command("search_history", { query, offset }, () => { throw new Error("History search requires the desktop app."); });
+}
+export function getHistorySession(id: string): Promise<TranscriptSession | null> {
+  return command("get_history_session", { id }, () => { throw new Error("History recovery requires the desktop app."); });
+}
+
+export function dismissDictationError(generation: number): Promise<void> {
+  return command("dismiss_dictation_error", { generation }, () => undefined);
 }
