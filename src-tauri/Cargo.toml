@@ -39,8 +39,8 @@ reqwest = { version = "0.12", default-features = false, features = [
   "multipart",
   "rustls-tls",
 ] }
-rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
-tauri = { version = "2", features = ["tray-icon"] }
+rusqlite = { version = "0.37", features = ["bundled", "chrono", "functions"] }
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
@@ -54,14 +54,20 @@ uuid = { version = "1", features = ["serde", "v4"] }
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
   "Win32_Storage_FileSystem",
   "Win32_Security",
   "Win32_System_JobObjects",
   "Win32_System_LibraryLoader",
   "Win32_System_Threading",
+  "Win32_System_Com",
+  "Win32_UI_Accessibility",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4.1"
 
 [dev-dependencies]
 tempfile = "3"

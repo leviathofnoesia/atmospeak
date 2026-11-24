@@ -1,5 +1,7 @@
 # Phase B — Persistent ASR host (shipped in 0.3.0)
 
+> Historical snapshot. The current Moonshine CPU engine and recovery contract are documented in [streaming-asr.md](streaming-asr.md).
+
 Phase A ran `whisper-cli.exe` once per utterance, reloading the model every time.
 Phase B keeps a `whisper-server.exe` resident so the model stays warm.
 

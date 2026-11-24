@@ -1,96 +1,186 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Verify the packaged CPU Parakeet host with a deterministic WAV fixture.
+
+.DESCRIPTION
+  The host contract is one executable invocation:
+    atmospeak-asr-cpu.exe --model <gguf> --transcribe-wav <file>
+  This check deliberately does not start a server, microphone, browser, or
+  alternate ASR engine.
+#>
+[CmdletBinding()]
 param(
-  [string]$ServerPath = "",
-  [string]$ModelPath = ""
+  [int]$Iterations = 1,
+  [string]$ReportPath = "",
+  [string]$SidecarPath = "",
+  [string]$ModelPath = "",
+  [string]$FixturePath = "",
+  [string]$RunRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($ServerPath)) {
-  $ServerPath = Join-Path $Root "src-tauri\resources\whisper-runtime\whisper-server.exe"
-}
-if ([string]::IsNullOrWhiteSpace($ModelPath)) {
-  $ModelPath = Join-Path $Root "src-tauri\resources\models\ggml-base.en.bin"
-}
-if (-not (Test-Path -LiteralPath $ServerPath)) {
-  throw "Whisper server not found: $ServerPath"
-}
-if (-not (Test-Path -LiteralPath $ModelPath)) {
-  throw "Whisper model not found: $ModelPath"
+$DefaultRunRoot = "E:\BuildCache\atmospeak-smoke\run-data\parakeet-host"
+$GeneratedFixture = $false
+$OwnedProcessIds = New-Object 'System.Collections.Generic.HashSet[int]'
+$modelHash = "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795"
+
+function Assert-EPath {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Label,
+    [switch]$MustExist,
+    [switch]$Directory
+  )
+  $full = [System.IO.Path]::GetFullPath($Path)
+  if ($full -notmatch "^[Ee]:\\") {
+    throw "$Label must resolve under E: for an isolated host check: $full"
+  }
+  if ($MustExist) {
+    $kind = if ($Directory) { "Container" } else { "Leaf" }
+    if (-not (Test-Path -LiteralPath $full -PathType $kind)) {
+      throw "$Label does not exist: $full"
+    }
+  }
+  return $full
 }
 
-$listener = [System.Net.Sockets.TcpListener]::new(
-  [System.Net.IPAddress]::Loopback,
-  0
-)
-$listener.Start()
-$Port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-$listener.Stop()
+function Get-Sha256Hex {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
 
-$FixturePath = Join-Path ([System.IO.Path]::GetTempPath()) (
-  "atmospeak-host-check-{0}.wav" -f [Guid]::NewGuid().ToString("N")
-)
-$Phrase = "The porcelain moon hums over the studio."
-$Server = $null
+function Assert-Model {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  $file = Get-Item -LiteralPath $Path
+  $hash = Get-Sha256Hex $Path
+  if ($file.Length -ne 731357568 -or $hash -ne $modelHash) {
+    throw "Parakeet weights do not match the pinned artifact."
+  }
+  [ordered]@{ name = $file.Name; size = $file.Length; sha256 = $hash }
+}
 
-try {
+function Assert-Transcript {
+  param([Parameter(Mandatory = $true)][string]$Text)
+  foreach ($token in @("porcelain", "moon", "studio")) {
+    if ($Text -notmatch [Regex]::Escape($token)) {
+      throw "Parakeet transcript did not contain '$token': $Text"
+    }
+  }
+}
+
+function Get-Percentile {
+  param([Parameter(Mandatory = $true)][double[]]$Values, [Parameter(Mandatory = $true)][double]$Percentile)
+  $sorted = @($Values | Sort-Object)
+  $rank = [Math]::Max(1, [Math]::Ceiling(($Percentile / 100) * $sorted.Count))
+  return [double]$sorted[$rank - 1]
+}
+
+if ($Iterations -lt 1 -or $Iterations -gt 10) {
+  throw "Iterations must be between 1 and 10."
+}
+$RunRoot = Assert-EPath $(if ($RunRoot) { $RunRoot } else { $DefaultRunRoot }) "RunRoot"
+$RunRoot = [System.IO.Path]::GetFullPath($RunRoot)
+$SidecarPath = Assert-EPath $(if ($SidecarPath) { $SidecarPath } else { Join-Path $Root "src-tauri\resources\asr\atmospeak-asr-cpu.exe" }) "ASR sidecar" -MustExist
+$ModelPath = Assert-EPath $(if ($ModelPath) { $ModelPath } else { Join-Path $Root "src-tauri\resources\models\parakeet-unified-en-0.6b-Q8_0.gguf" }) "Parakeet model" -MustExist
+if ($ReportPath) {
+  $ReportPath = Assert-EPath $ReportPath "ReportPath"
+} else {
+  $ReportPath = Join-Path $RunRoot "parakeet-host-report.json"
+}
+$ReportPath = [System.IO.Path]::GetFullPath($ReportPath)
+$SidecarDirectory = Split-Path -Parent $SidecarPath
+foreach ($dependency in @("transcribe.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu-x64.dll")) {
+  if (-not (Test-Path -LiteralPath (Join-Path $SidecarDirectory $dependency) -PathType Leaf)) {
+    throw "Missing Parakeet native dependency: $dependency"
+  }
+}
+
+$modelRecords = Assert-Model $ModelPath
+New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReportPath) | Out-Null
+
+if (-not $FixturePath) {
+  $FixturePath = Join-Path $RunRoot "porcelain-moon-studio.wav"
   Add-Type -AssemblyName System.Speech
-  $synthesizer = [System.Speech.Synthesis.SpeechSynthesizer]::new()
+  $voice = New-Object System.Speech.Synthesis.SpeechSynthesizer
   try {
-    $synthesizer.SetOutputToWaveFile($FixturePath)
-    $synthesizer.Speak($Phrase)
+    $voice.Rate = -1
+    $voice.Volume = 60
+    $voice.SetOutputToWaveFile($FixturePath)
+    $voice.Speak("The porcelain moon hums over the studio.")
+  } finally {
+    $voice.Dispose()
   }
-  finally {
-    $synthesizer.Dispose()
-  }
-
-  $Server = Start-Process -FilePath $ServerPath `
-    -WorkingDirectory (Split-Path -Parent $ServerPath) `
-    -ArgumentList @("-m", $ModelPath, "--host", "127.0.0.1", "--port", $Port) `
-    -WindowStyle Hidden `
-    -PassThru
-
-  $deadline = (Get-Date).AddSeconds(30)
-  do {
-    if ($Server.HasExited) {
-      throw "whisper-server exited during startup with code $($Server.ExitCode)"
-    }
-    try {
-      Invoke-WebRequest "http://127.0.0.1:$Port/" -TimeoutSec 2 -UseBasicParsing |
-        Out-Null
-      break
-    }
-    catch {
-      Start-Sleep -Milliseconds 150
-    }
-  } while ((Get-Date) -lt $deadline)
-
-  if ((Get-Date) -ge $deadline) {
-    throw "whisper-server did not become ready within 30 seconds"
-  }
-
-  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-  $Transcript = & curl.exe --silent --show-error --fail `
-    -F "file=@$FixturePath;type=audio/wav" `
-    -F "response_format=text" `
-    "http://127.0.0.1:$Port/inference"
-  $stopwatch.Stop()
-  if ($LASTEXITCODE -ne 0) {
-    throw "whisper-server request failed with code $LASTEXITCODE"
-  }
-  $TranscriptText = ($Transcript -join " ").Trim()
-  foreach ($requiredToken in @("porcelain", "moon", "studio")) {
-    if ($TranscriptText -notmatch [Regex]::Escape($requiredToken)) {
-      throw "Host transcript did not contain '$requiredToken': $TranscriptText"
-    }
-  }
-
-  Write-Host "Host transcription passed in $($stopwatch.ElapsedMilliseconds)ms."
-  Write-Host "Transcript: $TranscriptText"
+  $GeneratedFixture = $true
+} else {
+  $FixturePath = Assert-EPath $FixturePath "FixturePath" -MustExist
 }
-finally {
-  if ($Server -and -not $Server.HasExited) {
-    Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue
-    Wait-Process -Id $Server.Id -Timeout 10 -ErrorAction SilentlyContinue
+$FixturePath = [System.IO.Path]::GetFullPath($FixturePath)
+
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
+$env:TEMP = Join-Path $RunRoot "tmp"
+$env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+$results = New-Object System.Collections.Generic.List[object]
+try {
+  for ($iteration = 1; $iteration -le $Iterations; $iteration += 1) {
+    $stdoutPath = Join-Path $RunRoot ("stdout-{0}.txt" -f $iteration)
+    $stderrPath = Join-Path $RunRoot ("stderr-{0}.txt" -f $iteration)
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $arguments = @("--model", ('"{0}"' -f $ModelPath), "--transcribe-wav", ('"{0}"' -f $FixturePath))
+    $process = Start-Process -FilePath $SidecarPath -WorkingDirectory $SidecarDirectory -ArgumentList $arguments -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru -WindowStyle Hidden
+    $null = $process.Handle
+    [void]$OwnedProcessIds.Add([int]$process.Id)
+    if (-not $process.WaitForExit(180000)) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      throw "Parakeet CPU sidecar timed out on iteration $iteration."
+    }
+    [void]$OwnedProcessIds.Remove([int]$process.Id)
+    $timer.Stop()
+    if ($process.ExitCode -ne 0) {
+      $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+      throw "Parakeet CPU sidecar exited with code $($process.ExitCode): $stderr"
+    }
+    $transcript = (Get-Content -LiteralPath $stdoutPath -Raw).Trim()
+    Assert-Transcript $transcript
+    [void]$results.Add([ordered]@{
+      iteration = $iteration
+      elapsedMs = [double]$timer.Elapsed.TotalMilliseconds
+      transcript = $transcript
+      stdout = $stdoutPath
+      stderr = $stderrPath
+    })
   }
-  Remove-Item -LiteralPath $FixturePath -Force -ErrorAction SilentlyContinue
+} finally {
+  foreach ($processId in @($OwnedProcessIds)) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+  }
+  if ($null -eq $previousTemp) { Remove-Item Env:TEMP -ErrorAction SilentlyContinue } else { $env:TEMP = $previousTemp }
+  if ($null -eq $previousTmp) { Remove-Item Env:TMP -ErrorAction SilentlyContinue } else { $env:TMP = $previousTmp }
+}
+$elapsed = @($results | ForEach-Object { [double]$_.elapsedMs })
+$report = [ordered]@{
+  passed = $true
+  engine = "parakeet"
+  backend = "cpu"
+  modelId = "parakeet-unified-en"
+  sidecar = $SidecarPath
+  sidecarSha256 = Get-Sha256Hex $SidecarPath
+  decoderSha256 = Get-Sha256Hex (Join-Path $SidecarDirectory "transcribe.dll")
+  model = $modelRecords
+  fixture = $FixturePath
+  iterations = $Iterations
+  elapsedMs = [ordered]@{
+    p50 = Get-Percentile $elapsed 50
+    p95 = Get-Percentile $elapsed 95
+  }
+  runs = $results.ToArray()
+}
+$report | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $ReportPath -Encoding utf8
+Write-Host "Parakeet CPU host check passed. Report: $ReportPath"
+if ($GeneratedFixture -and (Test-Path -LiteralPath $FixturePath)) {
+  Remove-Item -LiteralPath $FixturePath -Force
 }

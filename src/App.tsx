@@ -1,3 +1,8 @@
+import { useOverlayHitRegions } from "./lib/useOverlayHitRegions";
+import { useOverlayVisibility } from "./lib/useOverlayPreference";
+import { watchDictation, type DictationRecovery } from "./lib/dictationState";
+import { dismissDictationError, copyTranscript, openHistory, takeHistoryRequest, type HistoryRequest } from "./lib/api";
+import { useAppSnapshot } from "./lib/useAppSnapshot";
 import { listen } from "@tauri-apps/api/event";
 import { PhysicalPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
@@ -8,7 +13,6 @@ import {
   Radio,
   Scissors,
   Settings,
-  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
@@ -72,7 +76,6 @@ import {
 import type {
   AppNotice,
   AppSettings,
-  AppSnapshot,
   DictionaryEntry,
   HubTab,
   MicLevel,
@@ -248,7 +251,9 @@ const DEV_SHORTCUT_FIXTURE =
   new URLSearchParams(window.location.search).get("fixture") === "shortcut";
 
 function AppShell() {
-  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
+  const [stateRecovery, setStateRecovery] = useState<DictationRecovery>(null);
+  const { snapshot, setSnapshot, refreshSnapshot: refreshSnapshotOnly } = useAppSnapshot();
+  const [historySelection, setHistorySelection] = useState<HistoryRequest | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
   const [microphones, setMicrophones] = useState<MicrophoneInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
@@ -261,6 +266,23 @@ function AppShell() {
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
   const [lastMetrics, setLastMetrics] = useState<StageMetrics | null>(null);
   const [activeTab, setActiveTab] = useState<HubTab>("home");
+  useEffect(() => {
+    const openSettings = () => {
+      try {
+        if (!localStorage.getItem("atmospeak.open-settings")) return;
+        localStorage.removeItem("atmospeak.open-settings");
+        setActiveTab("settings");
+      } catch {
+        // The hub remains reachable when local storage is unavailable.
+      }
+    };
+    const receive = (event: StorageEvent) => {
+      if (event.key === "atmospeak.open-settings") openSettings();
+    };
+    window.addEventListener("storage", receive);
+    openSettings();
+    return () => window.removeEventListener("storage", receive);
+  }, []);
   const [notice, setNotice] = useState<AppNotice>({
     tone: "neutral",
     message: "Atmospeak ready.",
@@ -285,7 +307,7 @@ function AppShell() {
     keys: [],
     message: "",
   });
-  const [, setMicLevel] = useState<MicLevel | null>(null);
+  const [micLevel, setMicLevel] = useState<MicLevel | null>(null);
   const [soundCheck, setSoundCheck] = useState<SoundCheckState>({
     active: false,
     result: null,
@@ -319,6 +341,7 @@ function AppShell() {
   const shortcutCaptureRef = useRef(shortcutCapture);
   const soundCheckStartRef = useRef<Promise<boolean> | null>(null);
   const soundCheckFinishInFlightRef = useRef(false);
+  const shortcutTestRevision = useRef(0);
   const shortcutPressedCodesRef = useRef(new Map<number, string>());
   const focusedPressedKeysRef = useRef(new Map<string, string>());
   const focusedCapturedKeysRef = useRef(new Set<string>());
@@ -501,17 +524,10 @@ function AppShell() {
     };
   }, [completeRecordedShortcut]);
 
-  const refreshSnapshotOnly = useCallback(async () => {
-    const next = await getAppSnapshot();
-    setSnapshot(next);
-    setSettingsDraft(next.settings);
-    return next;
-  }, []);
-
   const refresh = useCallback(async () => {
     const [next, mics, status, inventory, polishModels, shortcut, events, metrics] =
       await Promise.all([
-        getAppSnapshot(),
+        refreshSnapshotOnly(),
         listMicrophones(),
         getModelStatus(),
         getModelInventory(),
@@ -520,7 +536,6 @@ function AppShell() {
         getRuntimeEvents(),
         getLastStageMetrics(),
       ]);
-    setSnapshot(next);
     const preferredMicrophone =
       next.settings.microphoneName ??
       mics.find((microphone) => microphone.isDefault)?.name ??
@@ -535,7 +550,7 @@ function AppShell() {
     setRuntimeEvents(events);
     setLastMetrics(metrics);
     return next;
-  }, []);
+  }, [refreshSnapshotOnly]);
 
   useEffect(() => {
     void refresh().catch((error: unknown) => {
@@ -554,6 +569,24 @@ function AppShell() {
     }, 1000);
     return () => window.clearInterval(interval);
   }, [recording]);
+
+  const historyRevealRevision = useRef(0);
+  const revealRequestedHistory = useCallback(async () => {
+    let revision = historyRevealRevision.current;
+    try {
+      const request = await takeHistoryRequest();
+      if (!request || request.generation <= historyRevealRevision.current) return;
+      revision = request.generation;
+      historyRevealRevision.current = revision;
+      await refreshSnapshotOnly();
+      if (revision !== historyRevealRevision.current) return;
+      setHistorySelection(request);
+      setActiveTab("history");
+    } catch (error) {
+      if (revision !== historyRevealRevision.current) return;
+      setNotice({ tone: "error", message: `History could not open: ${stringifyError(error)}` });
+    }
+  }, [refreshSnapshotOnly]);
 
   const applyNativeDictation = useCallback(
     (payload: NativeDictationEvent) => {
@@ -575,6 +608,8 @@ function AppShell() {
       if (payload.result !== null) {
         void refreshSnapshotOnly();
         setActiveTab("history");
+      } else if (payload.phase === "error") {
+        void refreshSnapshotOnly();
       }
     },
     [refreshSnapshotOnly, setBusyState],
@@ -590,6 +625,11 @@ function AppShell() {
 
     void (async () => {
       const pairs: Array<[string, (payload: unknown) => void]> = [
+        ["atmospeak://open-history", () => { void revealRequestedHistory(); }],
+        ["atmospeak://recovery-notice", (payload) => {
+          const notice = payload as { message: string; error: boolean };
+          setNotice({ tone: notice.error ? "error" : "success", message: notice.message });
+        }],
         [
           "atmospeak://shortcut-capture",
           (payload) => {
@@ -696,12 +736,12 @@ function AppShell() {
           },
         ],
         [
-          "wind-speak://native-dictation",
-          (payload) => applyNativeDictation(payload as NativeDictationEvent),
-        ],
-        [
-          "atmospeak://native-dictation",
-          (payload) => applyNativeDictation(payload as NativeDictationEvent),
+          "atmospeak://history-changed",
+          () => {
+            void refreshSnapshotOnly().catch((error: unknown) => {
+              setNotice({ tone: "error", message: `History could not refresh: ${stringifyError(error)}` });
+            });
+          },
         ],
         [
           "wind-speak://runtime-event",
@@ -741,6 +781,7 @@ function AppShell() {
           "atmospeak://sound-check",
           (payload) => {
             const result = payload as SoundCheckResult;
+            if (result.deviceName !== settingsRef.current?.microphoneName) return;
             setSoundCheck({
               active: false,
               result,
@@ -765,6 +806,12 @@ function AppShell() {
           unlisteners.push(unlisten);
         }
       }
+      const stopDictation = await watchDictation((event) => { if (!cancelled) applyNativeDictation(event); }, (recovery) => { if (!cancelled) setStateRecovery(recovery); }).catch((error) => {
+        if (!cancelled) setNotice({ tone: "error", message: `Recording state could not load: ${stringifyError(error)}` });
+        return () => {};
+      });
+      if (cancelled) stopDictation(); else unlisteners.push(stopDictation);
+      if (!cancelled) await revealRequestedHistory();
     })();
 
     return () => {
@@ -777,7 +824,7 @@ function AppShell() {
       void setShortcutTestActive(false);
       void cancelShortcutCapture();
     };
-  }, [applyNativeDictation, completeRecordedShortcut]);
+  }, [applyNativeDictation, completeRecordedShortcut, refreshSnapshotOnly, revealRequestedHistory]);
 
   const startMicCheck = useCallback(async () => {
     if (busyRef.current || recordingRef.current !== null) {
@@ -858,9 +905,10 @@ function AppShell() {
       soundCheckFinishInFlightRef.current = false;
       return;
     }
-    setSoundCheck((current) => ({ ...current, active: false, message: "Transcribing locally..." }));
+    setSoundCheck((current) => ({ ...current, active: true, message: "Transcribing locally..." }));
     try {
       const result = await finishSoundCheck("The porcelain moon hums over the studio.");
+      if (result.deviceName !== settingsRef.current?.microphoneName) return;
       setSoundCheck({
         active: false,
         result,
@@ -870,7 +918,7 @@ function AppShell() {
       });
       if (result.passed) {
         const next = await refreshSnapshotOnly();
-        setSettingsDraft(next.settings);
+        if (result.deviceName === settingsRef.current?.microphoneName) setSettingsDraft(next.settings);
       }
     } catch (error: unknown) {
       setSoundCheck({ active: false, result: null, message: stringifyError(error) });
@@ -987,7 +1035,7 @@ function AppShell() {
       setModelInventory(inventory);
       setSettingsDraft((current) =>
         current?.activeModelId === modelId
-          ? { ...current, activeModelId: "base.en" }
+          ? { ...current, activeModelId: "moonshine-medium-streaming-en" }
           : current,
       );
       setModelStatus(await getModelStatus());
@@ -1032,7 +1080,15 @@ function AppShell() {
     return (
       <Onboarding
         settings={settingsDraft}
-        setSettings={setSettingsDraft}
+        setSettings={(next) => {
+          if (next.microphoneName !== settingsRef.current?.microphoneName) {
+            setSoundCheck({ active: false, result: null, message: "Check this microphone before continuing." });
+            setMicCheck({ active: false, passed: false, level: 0, message: "Microphone changed." });
+          }
+          settingsRef.current = next;
+          setSettingsDraft(next);
+        }}
+        soundCheckLevel={Math.max(0, Math.min(1, ((micLevel?.peakDbfs ?? -60) + 60) / 60))}
         microphones={microphones}
         modelStatus={modelStatus}
         modelInventory={modelInventory}
@@ -1048,6 +1104,7 @@ function AppShell() {
         onFinishSoundCheck={finishPhraseCheck}
         onOpenWindowsSoundSettings={openWindowsSoundSettings}
         onTestShortcut={() => {
+          const revision = ++shortcutTestRevision.current;
           void (async () => {
             shortcutCaptureRef.current = { arming: false, active: false, keys: [], message: "" };
             setShortcutCapture(shortcutCaptureRef.current);
@@ -1068,7 +1125,9 @@ function AppShell() {
               // complete in order or a late capture cancellation can silently
               // pause the test that was just registered.
               await cancelShortcutCapture();
+              if (revision !== shortcutTestRevision.current) return;
               const status = await registerSetupShortcut(settingsDraft.hotkey);
+              if (revision !== shortcutTestRevision.current) return;
               shortcutStatusRef.current = status;
               setShortcutStatus(status);
               setShortcutTest({
@@ -1081,6 +1140,7 @@ function AppShell() {
               }
               if (status.registered) {
                 shortcutTestTimerRef.current = window.setTimeout(() => {
+                  if (revision !== shortcutTestRevision.current) return;
                   shortcutTestTimerRef.current = null;
                   void setShortcutTestActive(false);
                   setShortcutTest({
@@ -1091,6 +1151,7 @@ function AppShell() {
                 }, 15_000);
               }
             } catch (error: unknown) {
+              if (revision !== shortcutTestRevision.current) return;
               void setShortcutTestActive(false);
               setShortcutTest({
                 active: false,
@@ -1101,6 +1162,7 @@ function AppShell() {
           })();
         }}
         onRecordShortcut={() => {
+          shortcutTestRevision.current += 1;
           if (shortcutTestTimerRef.current !== null) {
             window.clearTimeout(shortcutTestTimerRef.current);
             shortcutTestTimerRef.current = null;
@@ -1124,6 +1186,7 @@ function AppShell() {
           });
         }}
         onCancelShortcutTest={() => {
+          shortcutTestRevision.current += 1;
           if (shortcutTestTimerRef.current !== null) {
             window.clearTimeout(shortcutTestTimerRef.current);
             shortcutTestTimerRef.current = null;
@@ -1144,6 +1207,7 @@ function AppShell() {
           }));
         }}
         onShortcutChange={(hotkey) => {
+          shortcutTestRevision.current += 1;
           if (shortcutTestTimerRef.current !== null) {
             window.clearTimeout(shortcutTestTimerRef.current);
             shortcutTestTimerRef.current = null;
@@ -1248,20 +1312,11 @@ function AppShell() {
           })}
         </nav>
         <div className="marquee-foot">
-          + ON DEVICE · NO CLOUD · WHISPER · {modelInventory?.activeModelId ?? "BASE.EN"} +
+          + ON DEVICE · NO CLOUD · MOONSHINE CPU · {modelInventory?.activeModelId ?? "MOONSHINE-MEDIUM-STREAMING-EN"} +
         </div>
       </aside>
       <main className="hub__main">
-        <button
-          type="button"
-          className="hub__close"
-          aria-label="Close hub"
-          onClick={() => {
-            if (hasTauriRuntime()) void getCurrentWindow().close();
-          }}
-        >
-          <X size={16} />
-        </button>
+        {stateRecovery && <div className="notice-rail notice-rail--error" role="alert"><p>Recording state could not load.</p><button type="button" onClick={() => void stateRecovery.retry()}>Retry</button></div>}
         {notice.tone !== "neutral" ? (
           <div className={`notice-rail notice-rail--${notice.tone}`} role="status">
             <span className={`notice-rail__tone notice-rail__tone--${notice.tone}`} />
@@ -1280,6 +1335,7 @@ function AppShell() {
         ) : null}
         {activeTab === "history" ? (
           <HistoryPanel
+            selection={historySelection}
             sessions={snapshot.sessions}
             onCopy={async (session) => {
               const message = await copyText(sessionDisplayText(session));
@@ -1436,6 +1492,7 @@ function AppShell() {
               });
             }}
             onRecordShortcut={() => {
+          shortcutTestRevision.current += 1;
               if (shortcutTestTimerRef.current !== null) {
                 window.clearTimeout(shortcutTestTimerRef.current);
                 shortcutTestTimerRef.current = null;
@@ -1469,6 +1526,7 @@ function AppShell() {
               setShortcutCapture(shortcutCaptureRef.current);
             }}
             onShortcutChange={(hotkey) => {
+          shortcutTestRevision.current += 1;
               if (shortcutTestTimerRef.current !== null) {
                 window.clearTimeout(shortcutTestTimerRef.current);
                 shortcutTestTimerRef.current = null;
@@ -1585,7 +1643,6 @@ function AppShell() {
                       ? {
                           ...current,
                           activeModelId: modelId,
-                          modelSelectionMode: "manual",
                         }
                       : current,
                   )
@@ -1605,8 +1662,21 @@ function AppShell() {
 }
 
 function OverlayShell() {
+  useOverlayHitRegions();
+  const { onlyWhileRecording, setOnlyWhileRecording } = useOverlayVisibility();
+  const [stateRecovery, setStateRecovery] = useState<DictationRecovery>(null);
+  const [stickyError, setStickyError] = useState(false);
+  const [recoveryId, setRecoveryId] = useState<string | null>(null);
+  const recoveryRevision = useRef(0);
+  const dictationGeneration = useRef(0);
   const [phase, setPhase] = useState<RecorderPhase>("idle");
   const [message, setMessage] = useState("Ready");
+  const [actionNotice, setActionNotice] = useState("");
+  useEffect(() => {
+    if (!actionNotice) return;
+    const timer = window.setTimeout(() => setActionNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [actionNotice]);
   const [level, setLevel] = useState(0);
   const [dragDiagnostic, setDragDiagnostic] = useState("");
   const suppressPositionSaveRef = useRef(false);
@@ -1652,30 +1722,45 @@ function OverlayShell() {
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
     void (async () => {
-      const unlisten = await listen<NativeDictationEvent>(
-        "wind-speak://native-dictation",
-        (event) => {
-          setPhase(event.payload.phase);
-          setMessage(event.payload.message);
-          setRecording(event.payload.recording);
-          if (event.payload.phase === "listening" && event.payload.recording) {
+      const unlisten = await watchDictation((payload) => {
+          if (cancelled) return;
+          dictationGeneration.current = payload.generation;
+          if (payload.phase !== "idle") recoveryRevision.current += 1;
+          if (payload.phase === "error") {
+            setStickyError(true);
+            setRecoveryId(payload.recording?.id ?? null);
+          } else if (payload.phase === "listening" || payload.phase === "idle") {
+            setStickyError(false);
+            setRecoveryId(null);
+          }
+          setPhase(payload.phase);
+          if (payload.phase !== "idle") setMessage(payload.message);
+          setRecording(payload.recording);
+          if (payload.phase === "listening" && payload.recording) {
             setLiveTranscript({
-              sessionId: event.payload.recording.id,
+              sessionId: payload.recording.id,
               phase: "idle",
               stableText: "",
               partialText: "",
               latencyMs: null,
             });
-          } else if (event.payload.phase === "idle") {
+          } else if (payload.phase === "idle") {
             setLiveTranscript((current) => ({ ...current, phase: "idle" }));
           }
           // "Set down in Notepad" — named from where the text actually landed.
-          const target = event.payload.result?.injection?.targetProcessName;
+          const target = payload.result?.injection?.targetProcessName;
           if (target) setHostApp(target);
-        },
-      );
+        }, (recovery) => { if (!cancelled) setStateRecovery(recovery); }).catch((error) => {
+          if (!cancelled) setMessage(`Recording state could not load: ${stringifyError(error)}`);
+          return () => {};
+        });
       if (cancelled) unlisten();
       else unlisteners.push(unlisten);
+
+      const unlistenRecovery = await listen<{ message: string; error: boolean }>(
+        "atmospeak://recovery-notice", (event) => setMessage(event.payload.message),
+      );
+      if (cancelled) unlistenRecovery(); else unlisteners.push(unlistenRecovery);
 
       const unlistenTranscript = await listen<LiveTranscriptEvent>(
         "atmospeak://live-transcript",
@@ -1757,6 +1842,7 @@ function OverlayShell() {
       const unlistenReset = await listen(
         "atmospeak://overlay-position-resetting",
         () => {
+          setOnlyWhileRecording(false);
           suppressPositionSaveRef.current = true;
           window.clearTimeout(resetTimer);
           resetTimer = window.setTimeout(() => {
@@ -1784,7 +1870,8 @@ function OverlayShell() {
             .then(([x, y]) => {
               if (x === payload.x && y === payload.y) return;
               // Suppress the echo from our own settle so we don't write twice.
-              suppressPositionSaveRef.current = true;
+              setOnlyWhileRecording(false);
+          suppressPositionSaveRef.current = true;
               void getCurrentWindow()
                 .setPosition(new PhysicalPosition(x, y))
                 .finally(() => {
@@ -1825,18 +1912,36 @@ function OverlayShell() {
     return () => window.clearInterval(interval);
   }, [phase, recording]);
 
+  useEffect(() => {
+    if (phase !== "pasted" && phase !== "saved") return;
+    const collapse = () => {
+      if ((document.querySelector(".dock-wrap:hover") || (document.hasFocus() && document.querySelector(".dock-wrap:focus-within")))) {
+        timer = window.setTimeout(collapse, 300);
+        return;
+      }
+      setPhase((current) => current === "pasted" || current === "saved" ? "idle" : current);
+    };
+    let timer = window.setTimeout(collapse, 1800);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+
+  if (onlyWhileRecording && phase === "idle" && !stickyError && !stateRecovery && !actionNotice) return null;
+
   return (
     <RecorderOverlay
       recording={recording}
       elapsedSeconds={elapsedSeconds}
       busy={phase === "finalizing"}
-      phase={phase}
+      phase={stickyError ? "error" : phase}
       modelStatus={modelStatus}
-      notice={dragDiagnostic || message}
+      notice={stateRecovery ? "Recording state could not load." : dragDiagnostic || message}
+      actionNotice={actionNotice}
+      onRetryState={stateRecovery ? () => void stateRecovery.retry() : undefined}
       liveTranscript={liveTranscript}
       inputLevel={level}
       inputBands={[]}
-      bubbleSize="medium"
+      onHideIdle={() => setOnlyWhileRecording(true)}
+      bubbleSize="small"
       bubbleOpacity={1}
       hostApp={hostApp}
       hotkeyLabel={settings?.hotkey ?? "your shortcut"}
@@ -1877,7 +1982,32 @@ function OverlayShell() {
             }
           });
       }}
+      hasRecovery={recoveryId !== null}
+      onCopyTranscript={() => {
+        setActionNotice("");
+        const revision = ++recoveryRevision.current;
+        void copyTranscript(stickyError ? recoveryId : null).then((message) => {
+          if (revision === recoveryRevision.current) setActionNotice(message);
+        }).catch((error) => {
+          if (revision === recoveryRevision.current) setActionNotice(stringifyError(error));
+        });
+      }}
+      onOpenHistory={() => {
+        setActionNotice("");
+        const revision = ++recoveryRevision.current;
+        void openHistory(stickyError ? recoveryId : null).catch((error) => {
+          if (revision === recoveryRevision.current) setActionNotice(stringifyError(error));
+        });
+      }}
+      onDismissError={() => {
+        void dismissDictationError(dictationGeneration.current).catch((error) => setMessage(stringifyError(error)));
+        recoveryRevision.current += 1;
+        setStickyError(false);
+        setMessage("");
+        setPhase((current) => current === "error" ? "idle" : current);
+      }}
       onOpenHub={() => {
+        try { localStorage.setItem("atmospeak.open-settings", String(Date.now())); } catch { /* Open the hub even when storage is unavailable. */ }
         void showMainWindow();
       }}
     />

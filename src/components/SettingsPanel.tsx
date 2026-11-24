@@ -20,7 +20,9 @@ import type {
 import { shortcutOptions } from "../panelOptions";
 import { PanelTitle } from "./PanelTitle";
 import { PolishSettings } from "./PolishSettings";
+import { ApplicationProfiles } from "./ApplicationProfiles";
 import { ToggleRow } from "./ToggleRow";
+import { useOverlayVisibility } from "../lib/useOverlayPreference";
 
 interface ShortcutTestState {
   active: boolean;
@@ -38,6 +40,7 @@ interface ShortcutCaptureState {
 const SETTINGS_SECTIONS = [
   { id: "settings-input", label: "Input" },
   { id: "settings-polish", label: "AI polish" },
+  { id: "settings-profiles", label: "Profiles & editing" },
   { id: "settings-models", label: "Models" },
   { id: "settings-transcription", label: "Transcription" },
   { id: "settings-companion", label: "Companion" },
@@ -112,6 +115,7 @@ export function SettingsPanel({
   polishSetupMessage = "",
   onEnsurePolishRuntime,
 }: SettingsPanelProps) {
+  const { onlyWhileRecording, setOnlyWhileRecording } = useOverlayVisibility();
   const shortcutKeys = (
     shortcutCapture.active && shortcutCapture.keys.length > 0
       ? shortcutCapture.keys
@@ -135,22 +139,11 @@ export function SettingsPanel({
           <h1>Quiet by <em>default.</em></h1>
         </div>
 
-        <nav className="settings-jump" aria-label="Settings sections">
-          {SETTINGS_SECTIONS.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              className="settings-jump__chip"
-              onClick={() => scrollToSection(section.id)}
-            >
-              {section.label}
-            </button>
-          ))}
-        </nav>
+
 
         <section className="settings-panel">
           <div className="settings-section" id="settings-input">
-            <PanelTitle icon={<Keyboard size={22} />} title="Input" />
+            <PanelTitle icon={<Keyboard size={22} />} title="Everyday dictation" />
             <label>
               <span>Microphone</span>
               <select
@@ -276,6 +269,23 @@ export function SettingsPanel({
               checked={settings.cleanupEnabled}
               onChange={(cleanupEnabled) => setSettings({ ...settings, cleanupEnabled })}
             />
+          </div>
+          <details className="settings-more">
+            <summary className="button button--ghost">More settings</summary>
+            <p className="muted">AI editing, appearance, models, privacy and troubleshooting.</p>
+        <nav className="settings-jump" aria-label="Settings sections">
+          {SETTINGS_SECTIONS.slice(1).map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              className="settings-jump__chip"
+              onClick={() => scrollToSection(section.id)}
+            >
+              {section.label}
+            </button>
+          ))}
+        </nav>
+          <div className="settings-section">
             <ToggleRow
               icon={<RotateCw size={18} />}
               label="Start Atmospeak with Windows"
@@ -305,7 +315,7 @@ export function SettingsPanel({
           <div className="settings-section" id="settings-polish">
             <PanelTitle icon={<Sparkles size={22} />} title="AI polish" />
             <p className="muted">
-              Optional rewrite before paste. Provider API keys save immediately to the OS keyring;
+              Local AI editing can refine text before paste; remote editing appears in History. API keys save immediately;
               other polish options need Save changes.
             </p>
             <PolishSettings
@@ -318,6 +328,8 @@ export function SettingsPanel({
             />
           </div>
 
+          <ApplicationProfiles settings={settings} setSettings={setSettings} />
+
           <div className="settings-section" id="settings-models">
             {modelManagement}
           </div>
@@ -325,59 +337,9 @@ export function SettingsPanel({
           <div className="settings-section" id="settings-transcription">
             <PanelTitle icon={<Radio size={22} />} title="Local transcription" />
             <p className="muted">
-              Atmospeak can decode bounded segments while you speak. Live text stays in the
-              companion and the final result is pasted only once.
+              The bundled CPU engine decodes bounded segments while you speak. Live text stays in
+              the companion and the final result is pasted only once.
             </p>
-            <label>
-              <span>Model selection</span>
-              <select
-                value={settings.modelSelectionMode}
-                onChange={(event) =>
-                  setSettings({
-                    ...settings,
-                    modelSelectionMode: event.currentTarget
-                      .value as AppSettings["modelSelectionMode"],
-                  })
-                }
-              >
-                <option value="automatic">Automatic</option>
-                <option value="manual">Manual</option>
-              </select>
-            </label>
-            <label>
-              <span>Transcription profile</span>
-              <select
-                value={settings.transcriptionProfile}
-                onChange={(event) =>
-                  setSettings({
-                    ...settings,
-                    transcriptionProfile: event.currentTarget
-                      .value as AppSettings["transcriptionProfile"],
-                  })
-                }
-              >
-                <option value="balanced">Balanced</option>
-                <option value="quality">Quality</option>
-                <option value="speed">Speed</option>
-              </select>
-            </label>
-            <label>
-              <span>Acceleration</span>
-              <select
-                value={settings.accelerationPreference}
-                onChange={(event) =>
-                  setSettings({
-                    ...settings,
-                    accelerationPreference: event.currentTarget
-                      .value as AppSettings["accelerationPreference"],
-                  })
-                }
-              >
-                <option value="auto">Auto (Vulkan, then CPU)</option>
-                <option value="vulkan">Vulkan</option>
-                <option value="cpu">CPU</option>
-              </select>
-            </label>
             <ToggleRow
               icon={<Radio size={18} />}
               label="Live preview in the companion"
@@ -478,6 +440,15 @@ export function SettingsPanel({
               {shortcutTest.active ? ` · Testing… ${shortcutTest.message}` : null}
               {shortcutTest.detected ? ` · ${shortcutTest.message}` : null}
             </p>
+            <ToggleRow
+              icon={<Radio size={18} />}
+              label="Show orb only while recording"
+              checked={onlyWhileRecording}
+              onChange={setOnlyWhileRecording}
+            />
+            <p className="muted">
+              When enabled, the orb hides at rest. Your shortcut and tray controls still work.
+            </p>
             <div className="settings-actions">
               <button
                 type="button"
@@ -489,7 +460,10 @@ export function SettingsPanel({
               <button
                 type="button"
                 className="button button--ghost"
-                onClick={() => void onShowFloatingControl()}
+                onClick={() => {
+                  setOnlyWhileRecording(false);
+                  void onShowFloatingControl();
+                }}
               >
                 Show floating control
               </button>
@@ -541,6 +515,7 @@ export function SettingsPanel({
               {advanced}
             </details>
           </div>
+          </details>
         </section>
       </div>
 

@@ -15,7 +15,7 @@ use crate::{
     services::{app_state::AppState, llama_host, model_downloader},
 };
 
-pub const DEFAULT_POLISH_MODEL_ID: &str = "qwen2.5-0.5b";
+pub const DEFAULT_POLISH_MODEL_ID: &str = "qwen2.5-1.5b";
 
 #[derive(Debug, Clone, Copy)]
 pub struct PolishModelDescriptor {
@@ -31,12 +31,21 @@ pub struct PolishModelDescriptor {
 pub const POLISH_MODELS: &[PolishModelDescriptor] = &[
     PolishModelDescriptor {
         id: DEFAULT_POLISH_MODEL_ID,
+        label: "Balanced (Qwen2.5 1.5B)",
+        filename: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        sha256: "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+        size_bytes: 1_117_320_736,
+        recommended: true,
+    },
+    PolishModelDescriptor {
+        id: "qwen2.5-0.5b",
         label: "Fast (Qwen2.5 0.5B)",
         filename: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
         url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
         sha256: "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
         size_bytes: 491_000_000,
-        recommended: true,
+        recommended: false,
     },
 ];
 
@@ -125,11 +134,7 @@ pub fn download(app: &AppHandle, model_id: &str) -> Result<()> {
     result
 }
 
-fn download_inner(
-    app: &AppHandle,
-    state: &AppState,
-    model: &PolishModelDescriptor,
-) -> Result<()> {
+fn download_inner(app: &AppHandle, state: &AppState, model: &PolishModelDescriptor) -> Result<()> {
     let destination = installed_path(&state.app_dir, model);
     fs::create_dir_all(models_dir(&state.app_dir))
         .context("failed to create polish-models directory")?;

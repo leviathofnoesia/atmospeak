@@ -25,7 +25,6 @@ def base_settings(mode: str) -> dict:
         "onboardingVersion": ONBOARDING_VERSION,
         "advancedRuntimeEnabled": False,
         "advancedModelPath": "",
-        "advancedWhisperCliPath": "",
     }
 
 

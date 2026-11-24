@@ -1,56 +1,24 @@
-# Advanced Runtime Overrides
+# Bundled English speech model
 
-Atmospeak bundles the Windows x64 CPU `whisper.cpp` runtime and
-`ggml-base.en.bin` model. Fresh installs should not ask users to download a
-model or paste runtime paths.
+Build in an E: checkout with Rust, CMake, and Visual Studio Build Tools
+with Desktop development with C++.
 
-Use this document only when replacing the bundled engine for development,
-benchmarking, or larger local model tests.
-
-## Bundled Runtime Layout
-
-```text
-src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
-src-tauri/resources/whisper-runtime/whisper-cli.exe
-src-tauri/resources/whisper-runtime/*.dll
-src-tauri/resources/models/ggml-base.en.bin
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-asr-sidecars.ps1
 ```
 
-The Tauri bundle also includes `resources/ACKNOWLEDGEMENTS.md`.
+The build uses transcribe.cpp at revision
+`2778ae4bf5ca5f394d129a39467f4ad9552dc34f` and stages its runtime-selected
+CPU kernels beside the speech sidecar. The weights are
+`parakeet-unified-en-0.6b-Q8_0.gguf` from the Handy conversion at revision
+`7e948f21b7bdbac698d3318db9d350f1096f3b6c`. The build and the speech
+sidecar verify the 731,357,568-byte file against SHA-256
+`4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795`.
 
-## Override Paths
+Set `ATMOSPEAK_ASR_SELECTION_ROOT` to an E: folder with the verified GGUF to
+reuse a cached download. The app bundles the weights and runs offline after
+installation. Attribution and the NVIDIA and MIT licenses ship in
+`resources/transcription-licenses`.
 
-1. Open **Advanced**.
-2. Enable **Use advanced runtime override**.
-3. Set `whisper-cli.exe`.
-4. Set a compatible GGML model path.
-5. Save runtime settings.
-
-Atmospeak returns to bundled defaults as soon as the override toggle is off.
-
-## Managed Optional Models
-
-Settings can install checksum-pinned models into `%LOCALAPPDATA%\Atmospeak\models`.
-The current-generation choices are:
-
-- `large-v3-turbo-q5` — multilingual Large v3 Turbo q5, about 548 MB.
-- `distil-large-v3.5` — current English Distil-Whisper, about 1.45 GB.
-
-The bundled `base.en` model remains the fallback if an optional model is missing.
-The older `distil-large-v3` identifier remains supported for existing installs.
-
-## Refreshing Bundled Assets
-
-Official whisper.cpp Windows releases are published at:
-
-```text
-https://github.com/ggml-org/whisper.cpp/releases
-```
-
-The default model source is:
-
-```text
-https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-```
-
-After replacing runtime files, run the full build and Tauri package checks.
+Both live dictation and saved-WAV replay use Parakeet's buffered stream.
+The app and sidecar enforce the same protocol version.

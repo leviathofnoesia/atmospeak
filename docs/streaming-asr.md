@@ -1,93 +1,106 @@
 # Streaming local ASR
 
-Atmospeak 0.5 keeps microphone audio and transcription on the local machine.
-From 0.5.1 the sidecar splits ingestion from inference so capture never stalls
-behind a decode. From 0.5.2, commits are more aggressive and short warm clips
-can finish on the resident host when streaming has not already committed
-mid-utterance. From 0.5.3, short clips briefly preferred the warm batch host
-even when a dock partial appeared. From **1.0.0**, short clips stay on
-**streaming finalize** (Vulkan first). Release→paste now prefers the cleaned
-live hypothesis built during the hold, so paste no longer waits on Final when
-the orb already shows text; finalize remains the fallback when no preview is
-ready. The recorder sends bounded 20 ms, mono 16 kHz PCM frames to a
-crash-isolated `atmospeak-asr-host` process while retaining the recording for
-history and batch fallback.
+Parakeet Unified English 0.6B Q8_0 runs locally through the pinned
+transcribe.cpp CPU sidecar. The app sends 16 kHz mono PCM and Parakeet
+consumes it in buffered chunks. Live dictation and WAV recovery share that
+decoder. The build and license details are in [Model bootstrap](MODEL_BOOTSTRAP.md).
 
-## Runtime selection
+## Runtime and build
 
-The release build produces CPU and Vulkan hosts from the same locked Rust and
-whisper.cpp dependency graph. Startup tries Vulkan, then CPU, then the existing
-warm `whisper-server`, and finally `whisper-cli`. Set
-`ATMOSPEAK_STREAMING_ASR=0`, `ATMOSPEAK_ASR_BACKEND=cpu`, or
-`ATMOSPEAK_WHISPER_HOST=0` to exercise rollback paths.
+`scripts/build-asr-sidecars.ps1` stages the sidecar, portable CPU kernels,
+and verified GGUF. Model preparation runs in a background worker. The model
+stays resident for streaming sessions. Superseded startup generations terminate
+their owned child before publication. Windows job ownership handles shutdown.
 
-`scripts/build-asr-sidecars.ps1` verifies the pinned Silero VAD model checksum
-and creates both sidecar executables. It requires CMake, libclang, and (for the
-Vulkan variant) the Vulkan SDK. On Windows it prefers a short target dir
-(`C:\asrb` or `ATMOSPEAK_ASR_TARGET_DIR`) and Ninja when available — long-path
-MSVC builds produced a slow ~3.3 MB CPU sidecar that could not keep up realtime.
+## Capture, recognition, and delivery
 
-## Session flow
+1. The CPAL callback downmixes input into a bounded, nonblocking queue. A
+   recorder worker persists the recoverable WAV and incrementally resamples
+   audio into 20 ms mono 16 kHz frames.
+2. Audio and controls use separate bounded queues. Session IDs and sequences
+   isolate sessions. Stop carries an accepted-audio barrier and final sequence
+   so leading, middle, and tail losses can be counted.
+3. The sidecar reader parses commands. One worker owns the native transcriber
+   and stream. Dispatch wakes the parked worker directly, avoiding a fixed
+   idle-polling delay on Stop.
+   Preview freshness uses the frame's reader-to-worker queue age, rather than
+   comparing wall time to an independent audio sample clock. Start delays and
+   producer clock drift cannot permanently suppress previews. The native
+   max_backlog_ms diagnostic reports that queue age.
 
-1. The CPAL callback downmixes a device frame and uses a bounded, non-blocking
-   queue.
-2. A recorder worker appends the lossless capture, incrementally resamples it,
-   and queues 20 ms PCM frames for the sidecar writer. Every hop feeds the same
-   dropped-frame counter.
-3. Inside `atmospeak-asr-host`, a reader thread only parses stdin. An inference
-   worker owns the session: Silero VAD runs on the trailing three seconds of the
-   uncommitted chunk (every ~100 ms of fresh audio), commits after ~300 ms of
-   silence or a ~2 second forced split, and runs rolling six-second previews at
-   most once per second — skipping previews while decode backlog is high so
-   `StopSession` is not starved. Decode reuses one `WhisperState`, uses
-   single-segment greedy params, and honors an abort flag so StopSession is not
-   stuck behind an in-flight force-split.
-4. Stable chunks are reconciled with their overlap. Lone silence markers
-   (`[BLANK_AUDIO]`, `[silence]`, …) are dropped; real filler words are kept.
-   Dictionary and snippet context is prompt-only inside the sidecar. Atmospeak
-   also runs cleanup/snippet expansion on each live `Partial` / `StableSegment`
-   into a paste-ready buffer so the orb shows the same text release will paste.
-   Capture always uses the streaming sidecar when it is available; the
-   live-preview setting no longer disables that hot path.
-5. On release, if the paste-ready buffer is non-empty for the active session,
-   Atmospeak pastes that cleaned hypothesis immediately after mic stop (no wait
-   on Final, quality gate, or WAV). Trailing silence after the last spoken word
-   must not block preview paste — requiring `covered_through_ms` coverage used
-   to force Final → host batch. The orb advances to Pasted; host cancel, WAV
-   teardown, and session persistence run after paste. Clipboard restore stays
-   off the inject critical path. When preview is missing or empty, stop falls
-   back to finalize capture, quality gate, `StopSession` / `await_final` (or
-   batch), cleanup, then paste.
-   Only settings are read on that path — the release→paste critical section
-   never loads history, dictionary, or snippets.
-6. Material streaming loss (≥ ~250 ms of dropped frames) or a failed stop on
-   the slow path leaves the full local recording available to the legacy batch
-   path, which prefers the lazy resident `whisper-server` over a cold one-shot
-   `whisper-cli`. The preview decision reads the live drop counter, because the
-   settled `streaming_frames_dropped` field is only populated by
-   `finalize_capture`, which preview paste deliberately defers until after
-   inject.
-7. Auto-polish only blocks paste when its output is the text being pasted —
-   local providers (Bundled, Ollama). Copy-only providers
-   (OpenAI-compatible) are polished after inject, for history.
+4. Parakeet emits cumulative Partial text for live preview. Partials remain
+   provisional. Dictionary/snippet context resets for every session; there is
+   no fixed overlapping Whisper chunk commit path.
+5. Stop drains accepted audio, stops the native stream, finalizes its tail,
+   and emits metrics before Final. Delivery requires the matching authoritative
+   result. A displayed partial does not authorize an early paste.
+6. The app checkpoints the recording in History before final processing,
+   analyzes bounded recent audio without changing the saved samples, applies
+   cleanup and optional editing, and injects the chosen final text once.
+   Audio-quality warnings are advisory, never authority to delete capture.
+7. Cancel remains reachable during processing. Cancellation generations suppress
+   stale results and delivery while retaining available audio/text for recovery.
+   The following session starts with a fresh native stream.
 
-There is one pipeline, not a fast one and a slow one. Release always runs the
-same sequence — resolve a transcript, inject it, settle the UI, tear down,
-persist — and the only thing that varies is which source answered:
+## Faults and saved-WAV recovery
 
-| Source | Answers with | Cost |
-| --- | --- | ---: |
-| Live hypothesis | Text already cleaned during the hold | ~0 ms |
-| Decode | Finalize capture, then streaming finalize or batch | 10^2–10^4 ms |
+Material transport loss and native failures retain the durable recording.
+Recovery uses an owned one-shot process of the same CPU engine:
 
-The live source is the normal one; the decode source exists because a
-transcript that was never produced cannot be pasted, not because paste has two
-speeds. A source may hand over while capture is still open — the live one does,
-so the WAV join and host cancel land after the text — and the shared tail runs
-that deferred teardown in order. `inject_transcript` is the single point where
-text enters the machine, and the stage clock stops there for every source.
+```text
+atmospeak-asr-cpu.exe --model <directory> --transcribe-wav <path>
+```
 
-IPC is versioned, length-prefixed MessagePack over stdin/stdout. Protocol
-frames are capped at 1 MiB; stdout is protocol-only and logs go to stderr.
-The protocol types live in `src-asr-protocol`. The reader/worker split is
-internal to the sidecar and does not bump the protocol version.
+The adapter concurrently drains bounded stdout/stderr, requires UTF-8 output,
+and checks exit status. Cancellation or timeout kills, waits, and drains the
+owned child. The deadline is 30 seconds plus the WAV-byte audio budget, capped
+at 30 minutes. Failure retains the source and reports the error; it does not
+switch engines or authorize pasting an unconfirmed partial.
+
+## Protocol and verification
+
+IPC is versioned, length-prefixed MessagePack over stdin/stdout, capped at
+1 MiB per message. Streaming stdout is protocol-only; diagnostics use stderr.
+Stale versions are rejected before model use. Protocol changes require a rebuilt
+sidecar.
+
+Recorded-audio checks cover known-phrase output, short/long recordings,
+zero-drop healthy runs, stale protocols, missing-tail/middle-gap accounting,
+cancellation without Final, the following session, and saved-WAV replay.
+Recognition latency ends at Final; editing and paste are separate stages.
+Historical ASR transcripts measure agreement, not human-ground-truth accuracy.
+
+Use focused existing automated checks for changed behavior. Confirmed microphone
+acceptance remains valid unless a concrete change or observed failure invalidates
+it. Documentation and window-chrome updates require no repeat physical mic test.
+
+## Final text
+
+Deterministic cleanup runs only after the authoritative final transcript. It
+preserves existing paragraph breaks, decimal numbers, times, URLs, negation,
+and meaningful uses of "like". Fixed patterns compile once. Dictionary and
+snippet replacements are literal (including dollar signs) and happen after
+speech formatting; overlapping phrases prefer the longest match.
+
+Use "bullet point apples next bullet pears" or "number one check the build
+number two ship it" for explicit lists. An optional "end list" returns to prose.
+Numbered commands must start at one and be sequential; ordinary first/second
+phrases and ambiguous numbering remain prose. A list introduced within prose
+needs a colon or an explicit "bullet list" / "numbered list" command.
+
+"Scratch that" clears the current sentence or list item. "I mean" and numeric
+or repeated-anchor corrections replace the identified tail. Uncertain uses of
+"actually" remain literal. Restatement cleanup considers adjacent phrases only;
+it cannot erase intervening sentences or paragraphs. Raw ASR remains in History.
+Optional AI editing is separate and can still change wording.
+
+Replacement matching keeps one earliest valid candidate per dictionary/snippet
+pattern and advances only consumed or overlapping candidates. It preserves
+Unicode case folding, word boundaries, longest overlaps, entry-order ties, and
+literal replacement bodies without repeatedly scanning every unused term over
+each remaining suffix.
+
+Saved-recording desktop measurements pace frames against absolute monotonic
+deadlines. Sleeping a fresh 20 ms after each frame accumulates scheduling drift,
+inflates capture finalization, and is unsuitable for long-recording latency
+comparisons.

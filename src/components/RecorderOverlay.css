@@ -394,3 +394,24 @@ body.is-overlay-window { background: transparent !important; }
 @media (prefers-reduced-motion: reduce) {
   .dock::after, .dock__mark, .dock[data-state="listening"] { animation: none !important; }
 }
+
+.dock-recovery { display: flex; gap: 8px; margin-top: 6px; }
+.dock-recovery button {
+  color: #fff; background: #26252d; border: 1px solid #77727e;
+  border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.dock-recovery button:hover { background: #41404b; }
+.dock-recovery button:focus-visible { outline: 2px solid #d5c5fb; outline-offset: 2px; }
+
+.dock-tip { visibility: hidden; }
+.dock-wrap[data-revealed="true"] .dock-tip, .dock-tip--warn { visibility: visible; }
+.dock-recovery { position: absolute; top: calc(50% + 37px); margin: 0; }
+.dock-recovery button, .dock-menu button { min-height: 32px; min-width: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.dock-menu { position: absolute; top: calc(50% - 71px); display: flex; gap: 6px; padding: 4px; background: #26252d; border: 1px solid #77727e; border-radius: 8px; }
+.dock-menu button { color: #fff; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.dock-menu button:hover { background: #41404b; }
+.dock-menu button:focus-visible { outline: 2px solid #d5c5fb; }
+.dock-wrap .dock-tip { position: absolute; top: calc(50% + 34px); }
+.dock-wrap[data-revealed="true"] .dock-tip { display: none; }
+
+.dock[data-recovery] { border: 2px solid #e6b75a; }

@@ -28,9 +28,9 @@ pub struct StageTimer {
 }
 
 impl StageTimer {
-    pub fn new() -> Self {
+    pub fn from_request(started: Instant) -> Self {
         Self {
-            started: Instant::now(),
+            started,
             capture_stop_ms: 0,
             write_ms: 0,
             asr_ms: 0,
@@ -88,8 +88,10 @@ pub fn emit_stage_metrics(app: &AppHandle, metrics: &StageMetrics) {
             created_at: Utc::now(),
             kind: "stage-metrics".to_string(),
             message: format!(
-                "session {} total={}ms asr={}ms backend={}",
-                metrics.session_id, metrics.total_ms, metrics.asr_ms, metrics.asr_backend
+                "timing_version=2 origin=engine-enqueue session={} total_ms={} capture_stop_ms={} write_ms={} asr_ms={} cleanup_ms={} inject_ms={} audio_ms={} backend={}",
+                metrics.session_id, metrics.total_ms, metrics.capture_stop_ms,
+                metrics.write_ms, metrics.asr_ms, metrics.cleanup_ms, metrics.inject_ms,
+                metrics.audio_duration_ms, metrics.asr_backend
             ),
         });
     }
@@ -117,14 +119,22 @@ pub fn emit_streaming_metrics(app: &AppHandle, metrics: &StreamingMetrics) {
 }
 
 pub fn emit_runtime(app: &AppHandle, kind: &str, message: impl Into<String>) {
-    let event = RuntimeEvent {
-        created_at: Utc::now(),
-        kind: kind.to_string(),
-        message: message.into(),
-    };
-    let _ = app.emit("wind-speak://runtime-event", event.clone());
-    let _ = app.emit("atmospeak://runtime-event", event.clone());
+    emit_runtime_events(
+        app,
+        vec![RuntimeEvent {
+            created_at: Utc::now(),
+            kind: kind.to_string(),
+            message: message.into(),
+        }],
+    );
+}
+
+pub fn emit_runtime_events(app: &AppHandle, events: Vec<RuntimeEvent>) {
+    for event in &events {
+        let _ = app.emit("wind-speak://runtime-event", event);
+        let _ = app.emit("atmospeak://runtime-event", event);
+    }
     if let Some(state) = app.try_state::<AppState>() {
-        state.record_event(event);
+        state.record_events(events);
     }
 }

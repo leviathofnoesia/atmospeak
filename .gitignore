@@ -16,3 +16,15 @@ playwright-report/
 *.pfx
 *.p12
 *.log
+src-tauri/resources/asr/*.dll
+src-tauri/resources/asr/*.lib
+src-tauri/resources/asr/*.exp
+src-tauri/resources/asr/*.obj
+src-tauri/resources/asr/moonshine-asr-manifest.json
+src-tauri/resources/asr/models-manifest-v0.1.5.json
+src-tauri/resources/asr/models-manifest-from-capi-v0.1.5.json
+src-tauri/resources/asr/models-integrity.json
+src-tauri/resources/asr/LICENSE-moonshine-v0.1.5.txt
+src-tauri/resources/asr/LICENSE-onnxruntime.txt
+src-tauri/resources/models/moonshine-medium-streaming-en/
+src-tauri/resources/models/parakeet-unified-en-0.6b-Q8_0.gguf

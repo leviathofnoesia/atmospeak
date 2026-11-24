@@ -14,9 +14,11 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
     let recenter = MenuItemBuilder::with_id("recenter", "Reset Dock Position").build(app)?;
     let pause = MenuItemBuilder::with_id("pause", "Pause / Resume Shortcuts").build(app)?;
     let dictate = MenuItemBuilder::with_id("dictate", "Start / Stop Dictation").build(app)?;
+    let copy_last = MenuItemBuilder::with_id("copy-last", "Copy last transcript").build(app)?;
+    let history = MenuItemBuilder::with_id("history", "Open History").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &overlay, &recenter, &pause, &dictate, &quit])
+        .items(&[&open, &overlay, &recenter, &pause, &dictate, &copy_last, &history, &quit])
         .build()?;
 
     TrayIconBuilder::new()
@@ -37,6 +39,20 @@ pub fn install(app: &mut tauri::App) -> tauri::Result<()> {
             "dictate" => {
                 let _ = app.emit("wind-speak://shortcut", "toggle");
                 dictation_engine::route_shortcut_payload(app, "toggle");
+            }
+            "copy-last" | "history" => {
+                let app = app.clone();
+                let copy = event.id().as_ref() == "copy-last";
+                tauri::async_runtime::spawn_blocking(move || {
+                    let result = if copy {
+                        crate::services::history_actions::copy_transcript(&app, None)
+                    } else {
+                        crate::services::history_actions::open_history(&app, None).map(|_| "History opened.".into())
+                    };
+                    let error = result.is_err();
+                    let message = result.unwrap_or_else(|message| message);
+                    let _ = app.emit("atmospeak://recovery-notice", serde_json::json!({ "message": message, "error": error }));
+                });
             }
             "quit" => app.exit(0),
             _ => {}

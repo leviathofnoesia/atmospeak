@@ -2,6 +2,8 @@ export type DictationMode = "toggle" | "pushToTalk";
 
 export interface AppSettings {
   hotkey: string;
+  voiceEditHotkey: string;
+  applicationProfiles: ApplicationProfile[];
   mode: DictationMode;
   microphoneName: string | null;
   restoreClipboard: boolean;
@@ -15,16 +17,13 @@ export interface AppSettings {
   activeModelId: string;
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
-  advancedWhisperCliPath: string;
+  advancedAsrExecutablePath: string;
   /** Companion appearance — mirrors the Rust `AppSettings` appearance block. */
   accent: Accent;
   dockShape: DockShape;
   waveStyle: WaveStyle;
   dockTheme: DockTheme;
   motion: Motion;
-  modelSelectionMode: ModelSelectionMode;
-  transcriptionProfile: TranscriptionProfile;
-  accelerationPreference: AccelerationPreference;
   livePreviewEnabled: boolean;
   autoPolish: boolean;
   polishStyle: PolishStyle;
@@ -34,6 +33,14 @@ export interface AppSettings {
   polishProvider: PolishProvider;
   /** Canonical origin the OS-keyring API key is bound to (empty when unbound). */
   polishApiKeyOrigin: string;
+}
+
+export interface ApplicationProfile {
+  application: string;
+  cleanupEnabled: boolean | null;
+  autoPolish: boolean | null;
+  polishStyle: PolishStyle | null;
+  instructions: string;
 }
 
 export type PolishStyle = "none" | "concise" | "formal" | "casual" | "excited";
@@ -96,10 +103,6 @@ export type DictationPhase =
   | "saved"
   | "error";
 
-export type ModelSelectionMode = "automatic" | "manual";
-export type TranscriptionProfile = "balanced" | "quality" | "speed";
-export type AccelerationPreference = "auto" | "vulkan" | "cpu";
-
 export interface StageMetrics {
   sessionId: string;
   captureStopMs: number;
@@ -137,6 +140,7 @@ export interface StreamingMetrics {
 }
 
 export interface NativeDictationEvent {
+  generation: number;
   recording: RecordingStarted | null;
   phase: DictationPhase;
   message: string;
@@ -246,12 +250,12 @@ export interface SoundCheckResult {
 }
 
 export interface ModelStatus {
-  whisperCliFound: boolean;
+  executableFound: boolean;
   modelFound: boolean;
   ready: boolean;
   message: string;
   source: "bundled" | "managedModel" | "advancedOverride";
-  whisperCliPath: string;
+  executablePath: string;
   modelPath: string;
 }
 
@@ -340,25 +344,24 @@ export function defaultSettings(): AppSettings {
     onboardingComplete: false,
     onboardingVersion: "",
     audioCalibration: null,
-    activeModelId: "base.en",
+    activeModelId: "moonshine-medium-streaming-en",
     advancedRuntimeEnabled: false,
     advancedModelPath: "",
-    advancedWhisperCliPath: "",
+    advancedAsrExecutablePath: "",
     accent: "dusk",
     dockShape: "orb",
     waveStyle: "ribbon",
     dockTheme: "dark",
     motion: "lively",
-    modelSelectionMode: "automatic",
-    transcriptionProfile: "balanced",
-    accelerationPreference: "auto",
     livePreviewEnabled: true,
     autoPolish: false,
     polishStyle: "none",
     customInstructions: "",
     polishEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
-    polishModel: "qwen2.5-0.5b",
+    polishModel: "qwen2.5-1.5b",
     polishProvider: "bundled",
     polishApiKeyOrigin: "",
+    voiceEditHotkey: "Ctrl+Alt+E",
+    applicationProfiles: [],
   };
 }

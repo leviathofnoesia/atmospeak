@@ -12,25 +12,40 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data:; font-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com https://www.novpax.org https://updates.novpax.org https://api.polar.sh https://polar.sh; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$LOCALDATA/Atmospeak/recordings/**"]
+      },
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost data:; font-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com https://www.novpax.org https://updates.novpax.org https://api.polar.sh https://polar.sh; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "externalBin": [
-      "binaries/whisper-cli"
-    ],
     "resources": [
-      "resources/whisper-runtime/whisper-cli.exe",
-      "resources/whisper-runtime/whisper-server.exe",
-      "resources/whisper-runtime/whisper.dll",
-      "resources/whisper-runtime/ggml.dll",
-      "resources/whisper-runtime/ggml-base.dll",
-      "resources/whisper-runtime/ggml-cpu.dll",
-      "resources/models/ggml-base.en.bin",
-      "resources/asr/*",
+      "resources/asr/atmospeak-asr-cpu.exe",
+      "resources/asr/transcribe.dll",
+      "resources/asr/ggml.dll",
+      "resources/asr/ggml-base.dll",
+      "resources/asr/ggml-cpu-x64.dll",
+      "resources/asr/ggml-cpu-sse42.dll",
+      "resources/asr/ggml-cpu-sandybridge.dll",
+      "resources/asr/ggml-cpu-haswell.dll",
+      "resources/asr/ggml-cpu-skylakex.dll",
+      "resources/asr/ggml-cpu-cannonlake.dll",
+      "resources/asr/ggml-cpu-cascadelake.dll",
+      "resources/asr/ggml-cpu-icelake.dll",
+      "resources/asr/ggml-cpu-alderlake.dll",
+      "resources/asr/MSVCP140.dll",
+      "resources/asr/MSVCP140_1.dll",
+      "resources/asr/VCRUNTIME140.dll",
+      "resources/asr/VCRUNTIME140_1.dll",
+      "resources/models/parakeet-unified-en-0.6b-Q8_0.gguf",
+      "resources/transcription-licenses/NVIDIA-Open-Model-License.pdf",
+      "resources/transcription-licenses/NOTICE.txt",
+      "resources/transcription-licenses/transcribe-cpp-MIT.txt",
+      "resources/transcription-licenses/ggml-MIT.txt",
       "resources/llama-runtime/*",
       "resources/ACKNOWLEDGEMENTS.md"
     ],

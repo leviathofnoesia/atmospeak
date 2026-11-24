@@ -53,6 +53,7 @@ interface OnboardingProps {
   shortcutCapture: ShortcutCaptureState;
   micCheck: MicCheckState;
   soundCheck: SoundCheckState;
+  soundCheckLevel?: number;
   onStartMicCheck: () => Promise<void>;
   onStopMicCheck: () => Promise<void>;
   onStartSoundCheck: () => Promise<void>;
@@ -70,25 +71,26 @@ interface OnboardingProps {
   onComplete: () => Promise<void>;
 }
 
-const STEPS = ["Welcome", "Microphone", "Voice model", "Shortcut", "Sound check", "Ready"];
+const STEPS = ["Welcome", "Microphone", "Speech engine", "Shortcut", "Sound check", "Ready"];
 const SC_TARGET = "The porcelain moon hums over the studio.";
-const ONBOARDING_MODEL_IDS = new Set(["tiny.en", "base.en", "small.en"]);
+const PARAKEET_MODEL_ID = "parakeet-unified-en";
 
 const FALLBACK_MODELS: ModelInventoryItem[] = [
-  { id: "tiny.en", label: "Swift", installed: false, bundled: false, path: null, sizeMb: 74 },
-  { id: "base.en", label: "Balanced", installed: true, bundled: true, path: "bundled", sizeMb: 142 },
-  { id: "small.en", label: "Faithful", installed: false, bundled: false, path: null, sizeMb: 466 },
+  {
+    id: PARAKEET_MODEL_ID,
+    label: "Parakeet Unified English 0.6B",
+    installed: true,
+    bundled: true,
+    path: "bundled",
+    sizeMb: 697,
+  },
 ];
 
 const MODEL_COPY: Record<string, { tag: string; desc: string }> = {
-  "tiny.en": { tag: "fast", desc: "Quick drafts, casual notes. Lightest footprint." },
-  "base.en": { tag: "recommended", desc: "The everyday voice - accurate and responsive." },
-  "small.en": { tag: "most accurate", desc: "Names, jargon, accents. Needs a little more room." },
-  "medium.en": { tag: "high accuracy", desc: "A larger English model for accuracy-first dictation." },
-  "distil-large-v3": { tag: "fast + accurate", desc: "Large-model accuracy distilled for faster English transcription." },
-  "large-v3-turbo-q5": { tag: "new · multilingual", desc: "Quantized Large v3 Turbo for stronger accuracy without the full 1.5 GB download." },
-  "distil-large-v3.5": { tag: "new · English", desc: "The newest distilled English model, tuned for robust short-form transcription." },
-  "base": { tag: "multilingual", desc: "Auto-detect and non-English dictation with a local model." },
+  [PARAKEET_MODEL_ID]: {
+    tag: "bundled · CPU",
+    desc: "English streaming speech recognition that stays on this device.",
+  },
 };
 
 // ── small inline glyphs ──
@@ -143,6 +145,7 @@ export function Onboarding(props: OnboardingProps) {
     shortcutCapture,
     micCheck,
     soundCheck,
+    soundCheckLevel = 0,
     onStartMicCheck,
     onStopMicCheck,
     onStartSoundCheck,
@@ -160,25 +163,28 @@ export function Onboarding(props: OnboardingProps) {
     onComplete,
   } = props;
 
+  const currentSoundCheck = soundCheck.result?.deviceName === settings.microphoneName
+    ? soundCheck.result : null;
   const [step, setStepRaw] = useState(0);
   const [completionError, setCompletionError] = useState("");
   const [completing, setCompleting] = useState(false);
   const setStep = (n: number) => setStepRaw(Math.max(0, Math.min(STEPS.length - 1, n)));
 
   const modelReady = modelStatus?.ready ?? false;
-  const inventoryChoices = modelInventory?.models.filter((model) => ONBOARDING_MODEL_IDS.has(model.id)) ?? [];
+  const inventoryChoices =
+    modelInventory?.models.filter((model) => model.id === PARAKEET_MODEL_ID) ?? [];
   const modelChoices = inventoryChoices.length ? inventoryChoices : FALLBACK_MODELS;
   const activeModel =
     modelChoices.find((model) => model.id === settings.activeModelId) ??
     modelChoices.find((model) => model.id === modelInventory?.activeModelId) ??
-    modelChoices.find((model) => model.id === "base.en") ??
+    modelChoices.find((model) => model.id === PARAKEET_MODEL_ID) ??
     modelChoices[0];
   const selectedModelReady = activeModel?.installed ?? false;
   const canContinue = (() => {
     if (step === 1) return micCheck.passed;
     if (step === 2) return modelReady && selectedModelReady;
     if (step === 3) return shortcutTest.detected;
-    if (step === 4) return soundCheck.result?.passed ?? false;
+    if (step === 4) return currentSoundCheck?.passed ?? false;
     return true;
   })();
   const progressPct = (step / (STEPS.length - 1)) * 100;
@@ -199,7 +205,7 @@ export function Onboarding(props: OnboardingProps) {
   };
 
   return (
-    <div className="ob-stage">
+    <div className="ob-stage pro-onboarding">
       <div className="ob-window">
         <span className="crop tl" /><span className="crop tr" />
         <span className="crop bl" /><span className="crop br" />
@@ -208,7 +214,7 @@ export function Onboarding(props: OnboardingProps) {
         <aside className="ob-rail">
           <div className="ob-brand">
             <span className="ob-aura"><Aura size={40} active /></span>
-            <span className="wm"><strong>Atmospeak</strong><span>First run · on device</span></span>
+            <span className="wm"><strong>Atmospeak Pro</strong><span>Pro setup / on device</span></span>
           </div>
           <nav className="ob-steps">
             {STEPS.map((s, i) => (
@@ -236,8 +242,8 @@ export function Onboarding(props: OnboardingProps) {
             {step === 0 && (
               <div className="ob-fade">
                 <div className="ob-hero-aura"><Aura size={132} active /></div>
-                <div className="ob-kick">Welcome · v0.3.1 Recovery</div>
-                <h1 className="ob-h">Speak. It listens.<br />It sets the words <em>down.</em></h1>
+                <div className="ob-kick">Welcome / Atmospeak Pro setup</div>
+                <h1 className="ob-h">Your private voice workspace<br />starts <em>here.</em></h1>
                 <p className="ob-lede">
                   Atmospeak turns your voice into clean text wherever your cursor rests — transcribed entirely
                   on this device. No cloud, no account, nothing to forget. Let's take a quiet minute to set it up.
@@ -251,8 +257,7 @@ export function Onboarding(props: OnboardingProps) {
                   <div className="ob-kick">Step 01 · Permission</div>
                   <h1 className="ob-h">May I <em>listen?</em></h1>
                   <p className="ob-lede">
-                    Atmospeak needs your microphone to hear you. It only ever captures while you hold your key —
-                    never in the background.
+                    Atmospeak records when you start dictation or a microphone check. Stop or cancel whenever you need.
                   </p>
                 </div>
                 <label className="ob-field">
@@ -290,22 +295,22 @@ export function Onboarding(props: OnboardingProps) {
                 </div>
                 <div className="ob-priv">
                   <Glyph d={ICONS.lock} size={18} sw={1.8} />
-                  <div><b>Private by design.</b> Audio is processed locally and discarded the moment your words are written. It never touches a server.</div>
+                  <div><b>Private by design.</b> Dictation audio and text stay in local History so you can recover, review, or delete them. Transcription runs on this device.</div>
                 </div>
               </div>
             )}
 
             {step === 2 && (
               <div className="ob-fade">
-                <div className="ob-kick">Step 02 · On-device model</div>
-                <h1 className="ob-h">A voice model, <em>downloaded once.</em></h1>
-                <p className="ob-lede">Pick the voice that fits how you work. It runs entirely offline.</p>
+                <div className="ob-kick">Step 02 · On-device speech</div>
+                <h1 className="ob-h">Speech stays <em>on this device.</em></h1>
+                <p className="ob-lede">Parakeet Unified English 0.6B runs locally on the CPU.</p>
                 <div className="ob-panel ob-models">
                   {modelChoices.map((m) => {
                     const copy = MODEL_COPY[m.id] ?? {
                       tag: m.bundled ? "bundled" : m.installed ? "installed" : "available",
                       desc: m.installed
-                        ? "A local Whisper model ready to run offline."
+                        ? "Local English speech recognition ready to run offline."
                         : "Visible in inventory; install it before selecting.",
                     };
                     const selected = activeModel?.id === m.id;
@@ -335,7 +340,7 @@ export function Onboarding(props: OnboardingProps) {
                         <span className="mname">{m.label}<span className="tag">{selected ? "selected" : copy.tag}</span></span>
                         <span className="mdesc">{copy.desc}</span>
                       </span>
-                      <span className="msize">{m.sizeMb ? `${m.sizeMb} MB` : m.installed ? "local" : "not installed"}</span>
+                      <span className="msize">{m.sizeMb ? `${m.sizeMb} MiB` : m.installed ? "local" : "not installed"}</span>
                       {!m.bundled ? (
                         <button
                           type="button"
@@ -474,23 +479,48 @@ export function Onboarding(props: OnboardingProps) {
                   <div className="ob-kick">Step 04 · Sound check</div>
                   <h1 className="ob-h">Say this <em>line.</em></h1>
                   <p className="ob-lede">
-                    A real local transcription confirms the microphone, model, and resident host together.
+                    Read the line below to check that Atmospeak can hear and transcribe you.
                   </p>
                 </div>
+                <label className="ob-field">
+                  <span>Sound-check microphone</span>
+                  <select value={settings.microphoneName ?? ""} disabled={soundCheck.active}
+                    onChange={(event) => setSettings({ ...settings, microphoneName: event.currentTarget.value || null })}>
+                    <option value="" disabled>Choose a microphone</option>
+                    {microphones.map((mic) => <option key={mic.name} value={mic.name}>{mic.name}</option>)}
+                  </select>
+                </label>
+                <MicMeter live={soundCheck.active} level={soundCheckLevel} />
+                {!soundCheck.active && !currentSoundCheck?.passed && soundCheck.message && (
+                  <p className="ob-keyhint">No clear speech? Choose another microphone above, then try again.
+                    <button type="button" className="ob-preset" onClick={() => void onOpenWindowsSoundSettings()}>Open microphone settings</button>
+                  </p>
+                )}
                 <div className="ob-sc-card">
                   <div className="strip"><span>READ ALOUD</span><span>◇ CALIBRATION</span></div>
-                  <span className={`ob-sc-target${soundCheck.result?.passed ? " is-pass" : ""}`}>
-                    {soundCheck.result?.transcript || SC_TARGET}
+                  <span className={`ob-sc-target${currentSoundCheck?.passed ? " is-pass" : ""}`}>
+                    {currentSoundCheck?.transcript || SC_TARGET}
                   </span>
                 </div>
                 <div className="ob-sc-row">
-                  {!soundCheck.result?.passed ? (
+                  {!currentSoundCheck?.passed ? (
                     <button
                       className={`ob-hold${soundCheck.active ? " holding" : ""}`}
                       onPointerDown={(event) => {
                         event.currentTarget.setPointerCapture(event.pointerId);
                         void onStartSoundCheck();
                       }}
+                      onKeyDown={(event) => {
+                        if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+                          event.preventDefault(); void onStartSoundCheck();
+                        }
+                      }}
+                      onKeyUp={(event) => {
+                        if (event.key === " " || event.key === "Enter") {
+                          event.preventDefault(); void onFinishSoundCheck();
+                        }
+                      }}
+                      onBlur={() => void onFinishSoundCheck()}
                       onPointerUp={() => void onFinishSoundCheck()}
                       onPointerCancel={() => void onFinishSoundCheck()}
                     >
@@ -499,7 +529,7 @@ export function Onboarding(props: OnboardingProps) {
                   ) : (
                     <div className="ob-sc-pass">
                       <span className="ok"><Glyph d={ICONS.check} size={13} /></span>
-                      Heard clearly · host ASR {soundCheck.result.asrMs}ms
+                      Heard clearly. Your microphone is ready.
                     </div>
                   )}
                 </div>
@@ -511,17 +541,20 @@ export function Onboarding(props: OnboardingProps) {
               <div className="ob-fade ob-ready">
                 <div className="ob-ready-aura"><Aura size={120} active /></div>
                 <div className="ob-kick">Ready</div>
-                <h1 className="ob-h">The companion is <em>waiting.</em></h1>
+                <h1 className="ob-h">You’re <em>ready.</em></h1>
                 <p className="ob-lede">
                   It rests quietly at the edge of your screen. Reach for your key and it wakes; speak, release,
                   and your words are set down.
                 </p>
                 <div className="ob-ready-summary">
-                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{soundCheck.result?.deviceName ?? "not checked"}</b></div>
-                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Resident ASR <b>{soundCheck.result?.asrBackend ?? "not checked"}</b> · SNR {soundCheck.result?.snrDb.toFixed(1) ?? "—"} dB</div>
-                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> <b>{activeModel?.label ?? "Balanced"}</b> model · runs offline</div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Microphone <b>{currentSoundCheck?.deviceName ?? "not checked"}</b></div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Speech check passed</div>
+                  <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> <b>{activeModel?.label ?? "Parakeet Unified English 0.6B"}</b> model · runs offline</div>
                   <div className="line"><span className="ok"><Glyph d={ICONS.check} size={12} /></span> Summon with <b>{selectedHotkeyChips.join(" ")}</b> · {settings.mode === "pushToTalk" ? "Hold" : "Tap"}</div>
                 </div>
+                <details><summary>Technical details</summary>
+                  <p>Speech engine: {currentSoundCheck?.asrBackend ?? "not checked"}. Signal-to-noise ratio: {currentSoundCheck?.snrDb.toFixed(1) ?? "—"} dB.</p>
+                </details>
                 <div className="ob-ready-actions">
                   <button className="ob-preset" onClick={() => void onPasteTest()} disabled={pasteTest.running}>
                     {pasteTest.running ? "Testing paste…" : "Run paste test"}

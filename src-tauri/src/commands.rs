@@ -75,6 +75,10 @@ fn save_settings_blocking(
     mut settings: AppSettings,
     confirm_key_rebinding: bool,
 ) -> CommandResult<AppSnapshot> {
+    crate::services::application_profiles::validate(&settings)
+        .map_err(|error| error.to_string())?;
+    crate::services::voice_edit::validate_hotkey(&settings).map_err(|error| error.to_string())?;
+
     let state = app.state::<AppState>();
     let previous_settings = state
         .database
@@ -140,7 +144,7 @@ fn save_settings_blocking(
     // Release builds never persist executable overrides from the renderer.
     if !cfg!(debug_assertions) {
         settings.advanced_runtime_enabled = false;
-        settings.advanced_whisper_cli_path.clear();
+        settings.advanced_asr_executable_path.clear();
         settings.advanced_model_path.clear();
     } else if settings.advanced_runtime_enabled {
         // Validate before persist so a bad path cannot restart ASR with Command::new.
@@ -150,8 +154,7 @@ fn save_settings_blocking(
     let runtime_changed = previous_settings.active_model_id != settings.active_model_id
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
-        || previous_settings.advanced_whisper_cli_path != settings.advanced_whisper_cli_path
-        || previous_settings.acceleration_preference != settings.acceleration_preference;
+        || previous_settings.advanced_asr_executable_path != settings.advanced_asr_executable_path;
     let setup_complete = settings.onboarding_complete
         && settings.onboarding_version == crate::ONBOARDING_VERSION
         && settings
@@ -208,6 +211,33 @@ fn save_settings_blocking(
         }
         return Err(error.to_string());
     }
+    if setup_complete {
+        if let Err(error) = crate::services::voice_edit::register(
+            &app,
+            &previous_settings.voice_edit_hotkey,
+            &settings.voice_edit_hotkey,
+        ) {
+            let _ = database.save_settings(&previous_settings);
+            drop(database);
+            let _ = crate::services::voice_edit::register(
+                &app,
+                &settings.voice_edit_hotkey,
+                &previous_settings.voice_edit_hotkey,
+            );
+            let _ = startup::set_start_at_login(previous_settings.start_at_login);
+            let _ = shortcuts::register_shortcut(
+                &app,
+                state.shortcut_status.clone(),
+                state.shortcuts_paused.clone(),
+                &previous_settings.hotkey,
+                previous_settings.mode,
+                shortcuts_were_paused,
+            );
+            return Err(format!(
+                "Voice editing shortcut could not be registered: {error}"
+            ));
+        }
+    }
     let expired_audio = database
         .prune_sessions(settings.transcript_retention_days)
         .map_err(|e| e.to_string())?;
@@ -257,6 +287,46 @@ pub async fn show_overlay_window(app: AppHandle) -> CommandResult<()> {
 }
 
 #[tauri::command]
+pub async fn copy_transcript(app: AppHandle, id: Option<String>) -> CommandResult<String> {
+    tauri::async_runtime::spawn_blocking(move || crate::services::history_actions::copy_transcript(&app, id.as_deref()))
+        .await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn open_history(app: AppHandle, session_id: Option<String>) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::services::history_actions::open_history(&app, session_id))
+        .await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub fn get_dictation_snapshot(state: State<'_, AppState>) -> Option<crate::models::NativeDictationEvent> {
+    state.dictation_snapshot.lock().snapshot()
+}
+
+#[tauri::command]
+pub fn dismiss_dictation_error(app: AppHandle, state: State<'_, AppState>, generation: u64) {
+    if let Some(event) = state.dictation_snapshot.lock().dismiss(generation) {
+        let _ = app.emit("wind-speak://native-dictation", event.clone());
+        let _ = app.emit("atmospeak://native-dictation", event);
+    }
+}
+
+#[tauri::command]
+pub fn search_history(state: State<'_, AppState>, query: String, offset: u32) -> CommandResult<Vec<crate::models::TranscriptSession>> {
+    state.database.lock().search_sessions(&query, offset).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_history_session(state: State<'_, AppState>, id: String) -> CommandResult<Option<crate::models::TranscriptSession>> {
+    state.database.lock().get_session(&id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn take_history_request(state: State<'_, AppState>) -> Option<crate::services::history_actions::HistoryRequest> {
+    state.history_request.lock().take()
+}
+
+#[tauri::command]
 pub async fn show_main_window(app: AppHandle) -> CommandResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let setup = !window_manager::setup_is_complete(&app, crate::ONBOARDING_VERSION);
@@ -270,6 +340,14 @@ pub async fn show_main_window(app: AppHandle) -> CommandResult<()> {
 #[tauri::command]
 pub fn save_overlay_position(app: AppHandle, x: i32, y: i32) -> (i32, i32) {
     overlay_window::save_position(&app, x, y)
+}
+
+#[tauri::command]
+pub fn set_overlay_hit_regions(
+    app: AppHandle,
+    regions: Vec<overlay_window::OverlayHitRegion>,
+) -> CommandResult<()> {
+    overlay_window::set_hit_regions(&app, regions).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -356,13 +434,19 @@ pub fn get_last_stage_metrics(state: State<'_, AppState>) -> Option<StageMetrics
 }
 
 #[tauri::command]
-pub fn start_recording(state: State<'_, AppState>) -> CommandResult<RecordingStarted> {
-    engine(&state)?.start_blocking()
+pub async fn start_recording(state: State<'_, AppState>) -> CommandResult<RecordingStarted> {
+    let engine = engine(&state)?;
+    tauri::async_runtime::spawn_blocking(move || engine.start_blocking())
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn stop_recording(state: State<'_, AppState>) -> CommandResult<DictationResult> {
-    engine(&state)?.stop_blocking()
+pub async fn stop_recording(state: State<'_, AppState>) -> CommandResult<DictationResult> {
+    let engine = engine(&state)?;
+    tauri::async_runtime::spawn_blocking(move || engine.stop_blocking())
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -386,6 +470,7 @@ pub fn handle_dictation_action(
         "stop" => EngineAction::Stop,
         "toggle" => EngineAction::Toggle,
         "cancel" => EngineAction::Cancel,
+        "editSelection" => EngineAction::EditSelection,
         other => return Err(format!("unknown dictation action: {other}")),
     };
     if engine.dispatch_fire_and_forget(engine_action) {
@@ -396,13 +481,19 @@ pub fn handle_dictation_action(
 }
 
 #[tauri::command]
-pub fn mic_check_start(state: State<'_, AppState>) -> CommandResult<()> {
-    engine(&state)?.mic_check_start()
+pub async fn mic_check_start(state: State<'_, AppState>) -> CommandResult<()> {
+    let engine = engine(&state)?;
+    tauri::async_runtime::spawn_blocking(move || engine.mic_check_start())
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn mic_check_stop(state: State<'_, AppState>) -> CommandResult<()> {
-    engine(&state)?.mic_check_stop()
+pub async fn mic_check_stop(state: State<'_, AppState>) -> CommandResult<()> {
+    let engine = engine(&state)?;
+    tauri::async_runtime::spawn_blocking(move || engine.mic_check_stop())
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -447,6 +538,9 @@ pub async fn complete_onboarding(
     state: State<'_, AppState>,
     mut settings: AppSettings,
 ) -> CommandResult<AppSnapshot> {
+    crate::services::application_profiles::validate(&settings)
+        .map_err(|error| error.to_string())?;
+    crate::services::voice_edit::validate_hotkey(&settings).map_err(|error| error.to_string())?;
     let persisted = state
         .database
         .lock()
@@ -482,6 +576,7 @@ pub async fn complete_onboarding(
     let hotkey = settings.hotkey.clone();
     let mode = settings.mode;
     let start_at_login = settings.start_at_login;
+    let edit_hotkey = settings.voice_edit_hotkey.clone();
     let shortcut = tauri::async_runtime::spawn_blocking(move || {
         let shortcut = shortcuts::register_shortcut(
             &shortcut_app,
@@ -495,6 +590,11 @@ pub async fn complete_onboarding(
             return Ok::<_, String>(shortcut);
         }
         if let Err(error) = startup::set_start_at_login(start_at_login) {
+            let _ = startup::set_start_at_login(previous_start_at_login);
+            shortcuts::set_paused(&shortcut_app, shortcut_status, shortcuts_paused, true);
+            return Err(error.to_string());
+        }
+        if let Err(error) = crate::services::voice_edit::register(&shortcut_app, "", &edit_hotkey) {
             let _ = startup::set_start_at_login(previous_start_at_login);
             shortcuts::set_paused(&shortcut_app, shortcut_status, shortcuts_paused, true);
             return Err(error.to_string());
@@ -736,7 +836,9 @@ pub fn set_session_prefer_polished(
 }
 
 #[tauri::command]
-pub fn get_polish_inventory(state: State<'_, AppState>) -> CommandResult<Vec<crate::models::ModelInventoryItem>> {
+pub fn get_polish_inventory(
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<crate::models::ModelInventoryItem>> {
     Ok(crate::services::polish_models::inventory(&state.app_dir))
 }
 
@@ -868,7 +970,7 @@ pub async fn download_model(app: AppHandle, model_id: String) -> CommandResult<M
 
     let state = app.state::<AppState>();
     state.shutdown_asr_host();
-    crate::start_asr_host(&app);
+    crate::publish_lazy_asr_host(&app);
     let settings = state
         .database
         .lock()

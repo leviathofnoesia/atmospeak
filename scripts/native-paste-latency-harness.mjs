@@ -1,201 +1,146 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
-const portFlag = process.argv.find((argument) => argument.startsWith("--port="));
-const port = Number(portFlag?.split("=")[1]);
-if (!Number.isInteger(port) || port <= 0) {
-  throw new Error("Usage: node scripts/native-paste-latency-harness.mjs --port=<port>");
+const args = Object.fromEntries(process.argv.slice(2).map((value) => {
+  const split = value.indexOf("=");
+  return [value.slice(2, split), value.slice(split + 1)];
+}));
+if (args["allow-desktop-input"] !== "true") {
+  throw new Error("This interactive tool changes keyboard focus, sends keys and replaces the clipboard. Run only after explicit permission for an uninterrupted desktop session, using --allow-desktop-input=true.");
 }
-
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const targetScript = join(root, "scripts", "native-injection-target.ps1");
-const targetPath = join(tmpdir(), `atmospeak-paste-target-${process.pid}.txt`);
-const targetReadyPath = join(tmpdir(), `atmospeak-paste-target-${process.pid}.ready`);
-const pasteText = "Atmospeak paste latency probe.";
-/** Wall time from inject_text invoke until target text appears (includes IPC). */
-const PASTE_VISIBLE_MS_BUDGET = 300;
-writeFileSync(targetPath, "", "utf8");
-
-let browser;
-let nativeTarget;
+const required = (key) => {
+  const value = args[key];
+  if (!value || !isAbsolute(value) || !/^E:[\\/]/i.test(value)) throw new Error(`--${key}=<absolute E: path> is required`);
+  return resolve(value);
+};
+const appExe = required("app");
+const recording = required("recording");
+const runRoot = required("run-root");
+const seedDatabase = required("seed-database");
+const runs = Number(args.runs ?? 5);
+if (!Number.isInteger(runs) || runs < 1 || runs > 30) throw new Error("--runs must be 1–30");
+if (![appExe, recording, seedDatabase].every(existsSync)) throw new Error("Input file is missing");
+const hotkey = args.hotkey ?? "Ctrl+Shift+F12";
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+const wave = readFileSync(recording);
+let rate, channels, bits, audioBytes;
+for (let offset = 12; offset + 8 <= wave.length;) {
+  const size = wave.readUInt32LE(offset + 4);
+  const kind = wave.toString("ascii", offset, offset + 4);
+  if (kind === "fmt ") {
+    channels = wave.readUInt16LE(offset + 10);
+    rate = wave.readUInt32LE(offset + 12);
+    bits = wave.readUInt16LE(offset + 22);
+  }
+  if (kind === "data") audioBytes = size;
+  offset += 8 + size + (size & 1);
+}
+if (rate !== 16000 || channels !== 1 || bits !== 16 || !audioBytes) throw new Error("Use an existing mono 16 kHz PCM16 recording");
+const audioMs = audioBytes / 32;
+mkdirSync(runRoot, { recursive: true });
+const profile = join(runRoot, "profile");
+mkdirSync(profile, { recursive: true });
+const databasePath = join(profile, "wind-speak.sqlite3");
+if (existsSync(databasePath)) throw new Error("Use a fresh run-root; never overwrite a previous benchmark");
+copyFileSync(seedDatabase, databasePath);
+const database = new DatabaseSync(databasePath);
+database.exec("PRAGMA busy_timeout=2000");
+const originalSettings = JSON.parse(database.prepare("select value from settings where key='app'").get().value);
+const settings = { ...originalSettings, hotkey, voiceEditHotkey: "", applicationProfiles: [], mode: "pushToTalk", autoInject: true, autoPolish: false, restoreClipboard: true, startAtLogin: false, transcriptRetentionDays: 0, microphoneName: null, onboardingComplete: true, onboardingVersion: "atmospeak-setup-v2" };
+database.prepare("update settings set value=? where key='app'").run(JSON.stringify(settings));
+// Keep realistic history/dictionary size without referring to installed recordings.
+database.exec("update transcript_sessions set audio_path=''");
+const priorRows = Number(database.prepare("select coalesce(max(rowid),0) as n from transcript_sessions").get().n);
+const priorEvents = Number(database.prepare("select coalesce(max(id),0) as n from runtime_events").get().n);
+const environment = { ...process.env, TEMP: join(runRoot, "tmp"), TMP: join(runRoot, "tmp"), ATMOSPEAK_APP_DATA_DIR: profile, WIND_SPEAK_APP_DATA_DIR: profile, ATMOSPEAK_NATIVE_HARNESS: "1", ATMOSPEAK_TEST_AUDIO_FIXTURE: recording, WEBVIEW2_USER_DATA_FOLDER: join(runRoot, "webview-profile"), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--disk-cache-dir=${join(runRoot, "webview-cache")}`, NODE_COMPILE_CACHE: join(runRoot, "node-cache") };
+for (const key of ["TEMP", "WEBVIEW2_USER_DATA_FOLDER", "NODE_COMPILE_CACHE"]) mkdirSync(environment[key], { recursive: true });
+delete environment.ATMOSPEAK_WEBVIEW_DEBUG_PORT;
+const children = new Set();
+function start(exe, arguments_, cwd = root) {
+  const child = spawn(exe, arguments_, { cwd, env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  children.add(child);
+  let output = "";
+  child.stdout.on("data", (data) => { output += data; });
+  child.stderr.on("data", (data) => { output += data; });
+  child.output = () => output;
+  return child;
+}
+async function exit(child, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) await sleep(10);
+  if (child.exitCode !== 0) throw new Error(`Owned helper failed (${child.exitCode}): ${child.output().slice(-1500)}`);
+}
+async function until(action, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = action();
+    if (result) return result;
+    await sleep(10);
+  }
+  throw new Error(`${label} exceeded ${timeoutMs}ms`);
+}
+const jsonLines = (path) => existsSync(path) ? readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } }) : [];
+const ps = ["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File"];
+const rows = [];
+let app;
 try {
-  let lastError;
-  const deadline = Date.now() + 20_000;
-  while (!browser && Date.now() < deadline) {
-    try {
-      browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 1_000 });
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
+  await exit(start("powershell.exe", [...ps, join(root, "scripts/send-native-keys.ps1"), "-Action", "up", "-Keys", hotkey]));
+  app = start(appExe, [], dirname(appExe));
+  await until(() => {
+    if (app.exitCode !== null) throw new Error(`Benchmark app exited: ${app.output().slice(-1000)}`);
+    return database.prepare("select id from runtime_events where id>? and kind='streaming-asr-ready'").get(priorEvents);
+  }, 25000, "CPU model ready");
+  for (let iteration = 0; iteration < runs; iteration++) {
+    const caseRoot = join(runRoot, `run-${iteration + 1}`);
+    mkdirSync(caseRoot);
+    const output = join(caseRoot, "native-text.txt");
+    const ready = join(caseRoot, "native.ready");
+    const editorEvents = join(caseRoot, "editor-events.jsonl");
+    const keyEvents = join(caseRoot, "key-events.jsonl");
+    const editor = start("powershell.exe", ["-STA", ...ps, join(root, "scripts/native-injection-target.ps1"), "-OutputPath", output, "-ReadyPath", ready, "-EventLogPath", editorEvents]);
+    await until(() => existsSync(ready), 12000, "Owned native editor ready");
+    const hwnd = readFileSync(ready, "utf8").trim();
+    const cursor = Number(database.prepare("select coalesce(max(id),0) as n from runtime_events").get().n);
+    const down = start("powershell.exe", [...ps, join(root, "scripts/send-native-keys.ps1"), "-Action", "down", "-Keys", hotkey, "-FocusHwnd", hwnd, "-EventLogPath", keyEvents]);
+    await exit(down);
+    const listening = await until(() => database.prepare("select created_at from runtime_events where id>? and kind='shortcut-ack' and message like '%->listening%' order by id desc limit 1").get(cursor), 8000, "Recording fixture started");
+    // Start the stop controller immediately; its startup is outside the measured interval.
+    const atUtc = Math.ceil(Date.parse(listening.created_at) + audioMs + 30);
+    const up = start("powershell.exe", [...ps, join(root, "scripts/send-native-keys.ps1"), "-Action", "up", "-Keys", hotkey, "-AtUtcMs", String(atUtc), "-EventLogPath", keyEvents]);
+    await exit(up, audioMs + 10000);
+    const submit = jsonLines(keyEvents).find((event) => event.kind === "key-up");
+    if (!submit) throw new Error("Missing native Submit edge");
+    if (submit.timingVersion !== 2 || submit.inputEventCount !== hotkey.split("+").length) throw new Error("Missing native SendInput timing or incomplete chord");
+    if (submit.utcMs - submit.requestedUtcMs > 100) throw new Error("Stop controller arrived late; do not report an artificially idle-tail result");
+    const session = await until(() => database.prepare("select rowid,* from transcript_sessions where rowid>? and injected=1 order by rowid desc limit 1").get(priorRows + iteration), 30000, "Final text delivered");
+    const expected = session.polished_text || session.cleaned_text;
+    const visible = await until(() => {
+      if (!existsSync(output)) return;
+      const text = readFileSync(output, "utf8");
+      if (text.replaceAll("\r\n", "\n") !== expected.replaceAll("\r\n", "\n")) return;
+      const sha = createHash("sha256").update(text, "utf8").digest("hex");
+      return jsonLines(editorEvents).find((event) => event.sha256 === sha && BigInt(event.ticks) >= BigInt(submit.ticks));
+    }, 5000, "Exact text visible in owned editor");
+    const metrics = await until(() => database.prepare("select * from dictation_metrics where session_id=?").get(session.id), 2000, "Streaming metrics saved");
+    if (!metrics || (args["allow-fallback"] !== "true" && (metrics.audio_frames_dropped !== 0 || metrics.fallback_reason))) throw new Error("Streaming replay dropped audio or fell back");
+    const captured = readFileSync(session.audio_path);
+    if (captured.readUInt32LE(40) !== audioBytes) throw new Error("Captured fixture did not contain the entire original recording");
+    const path = database.prepare("select message from runtime_events where kind='submit-path' and message like ? order by id desc limit 1").get(`%session=${session.id} %`);
+    const row = { inputTimingVersion: 2, nativeInputCallMs: Number(BigInt(submit.inputCallReturnedTicks) - BigInt(submit.ticks)) * 1000 / Number(submit.frequency), iteration: iteration + 1, sessionId: session.id, audioMs, submitToVisibleMs: Number(BigInt(visible.ticks) - BigInt(submit.ticks)) * 1000 / Number(visible.frequency), visibleCharacters: visible.length, wordCount: session.word_count, textSha256: visible.sha256, capturedSamples: audioBytes / 2, streamingMetrics: metrics, submitPath: path?.message, exactReadback: true, stageLog: app.output().split(/\r?\n/).filter((line) => line.includes(`session=${session.id}`) && line.includes("stage-metrics")).at(-1) };
+    rows.push(row);
+    writeFileSync(join(runRoot, "results.json"), JSON.stringify({ label: args.label ?? "submit-to-native-text", executableSha256: createHash("sha256").update(readFileSync(appExe)).digest("hex"), recording, priorHistoryRows: priorRows, inputTimingVersion: 2, clock: "shared Windows QueryPerformanceCounter; immediately before native SendInput to editor TextChanged", audioMs, rows }, null, 2));
+    console.log(JSON.stringify(row));
+    editor.kill();
+    children.delete(editor);
+    await sleep(1300);
   }
-  if (!browser) {
-    throw new Error(`WebView2 debugging did not open on port ${port}: ${lastError}`);
-  }
-
-  const nativePages = () =>
-    browser
-      .contexts()
-      .flatMap((context) => context.pages())
-      .filter((candidate) => !candidate.url().startsWith("edge://"));
-  const page = nativePages()[0];
-  if (!page) throw new Error("Atmospeak did not create a native WebView.");
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForFunction(
-    () => typeof window.__TAURI_INTERNALS__?.invoke === "function",
-    undefined,
-    { timeout: 15_000 },
-  );
-
-  const invoke = async (command, args = {}, timeoutMs = 30_000) => {
-    let timeout;
-    try {
-      return await Promise.race([
-        page.evaluate(
-          ({ command, args }) => window.__TAURI_INTERNALS__.invoke(command, args),
-          { command, args },
-        ),
-        new Promise((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error(`Native command "${command}" exceeded ${timeoutMs}ms.`)),
-            timeoutMs,
-          );
-        }),
-      ]);
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  const initial = await invoke("get_app_snapshot");
-  const settings = {
-    ...initial.settings,
-    autoInject: true,
-    restoreClipboard: true,
-    startAtLogin: false,
-    onboardingComplete: true,
-    onboardingVersion: initial.settings.onboardingVersion || "desktop-parity-v5",
-  };
-  await invoke("save_settings", { settings });
-
-  nativeTarget = spawn(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-STA",
-      "-WindowStyle",
-      "Hidden",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      targetScript,
-      "-OutputPath",
-      targetPath,
-      "-ReadyPath",
-      targetReadyPath,
-    ],
-    {
-      windowsHide: false,
-      stdio: "ignore",
-    },
-  );
-  const targetDeadline = Date.now() + 10_000;
-  while (!existsSync(targetReadyPath) && Date.now() < targetDeadline) {
-    if (nativeTarget.exitCode != null) {
-      throw new Error(`Native injection target exited with code ${nativeTarget.exitCode}.`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  if (!existsSync(targetReadyPath)) {
-    throw new Error("Native injection target did not become ready.");
-  }
-  const targetHwnd = readFileSync(targetReadyPath, "utf8").trim();
-  if (!/^-?\d+$/.test(targetHwnd) || targetHwnd === "0") {
-    throw new Error(`Native injection target HWND was invalid: ${targetHwnd}`);
-  }
-
-  // Give Atmospeak a recent-input path to SetForegroundWindow by focusing the
-  // target from a helper that just received synthetic key input.
-  const { execFileSync } = await import("node:child_process");
-  const keyScript = join(root, "scripts", "send-native-keys.ps1");
-  execFileSync(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      keyScript,
-      "-Action",
-      "press",
-      "-Keys",
-      "Ctrl",
-      "-FocusProcessId",
-      String(nativeTarget.pid),
-    ],
-    { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
-  );
-
-  const started = Date.now();
-  const injection = await invoke("inject_text", {
-    text: pasteText,
-    targetHwnd,
-  });
-  if (!injection?.injected) {
-    throw new Error(`inject_text soft-failed: ${JSON.stringify(injection)}`);
-  }
-  if (!injection.restoredTarget) {
-    throw new Error(
-      `inject_text did not restore the paste target: ${JSON.stringify(injection)}`,
-    );
-  }
-
-  let targetText = "";
-  const saveDeadline = Date.now() + 2_000;
-  while (Date.now() < saveDeadline) {
-    targetText = readFileSync(targetPath, "utf8").replace(/^\uFEFF/, "").trim();
-    if (targetText === pasteText) break;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  const pasteVisibleMs = Date.now() - started;
-  if (targetText !== pasteText) {
-    throw new Error(
-      `Paste target mismatch: ${JSON.stringify({ pasteText, targetText, injection })}`,
-    );
-  }
-  if (pasteVisibleMs > PASTE_VISIBLE_MS_BUDGET) {
-    throw new Error(
-      `Paste-visible latency SLO failed: ${JSON.stringify({
-        pasteVisibleMs,
-        budgetMs: PASTE_VISIBLE_MS_BUDGET,
-        injection,
-      })}`,
-    );
-  }
-
-  console.log(
-    JSON.stringify({
-      passed: true,
-      pasteVisibleMs,
-      budgetMs: PASTE_VISIBLE_MS_BUDGET,
-      restoredClipboard: injection.restoredClipboard,
-      restoredTarget: injection.restoredTarget,
-      targetText,
-    }),
-  );
 } finally {
-  if (nativeTarget && nativeTarget.exitCode == null) {
-    nativeTarget.kill();
-    await Promise.race([
-      new Promise((resolve) => nativeTarget.once("exit", resolve)),
-      new Promise((resolve) => setTimeout(resolve, 2_000)),
-    ]);
-  }
-  rmSync(targetPath, { force: true });
-  rmSync(targetReadyPath, { force: true });
-  await browser?.close().catch(() => {});
+  for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill();
+  writeFileSync(join(runRoot, "application.log"), app?.output() ?? "");
+  database.close();
 }

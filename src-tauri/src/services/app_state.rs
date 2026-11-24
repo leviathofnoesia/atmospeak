@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::{
+    io::Seek,
     path::PathBuf,
     sync::{
         Arc,
@@ -13,7 +14,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     db::Database,
-    models::{RuntimeEvent, ShortcutStatus, StageMetrics},
+    models::{RuntimeEvent, ShortcutStatus, StageMetrics, TranscriptSession},
     services::{
         asr_host::AsrHost, dictation_engine::EngineHandle, live_paste::LivePasteBuffer,
         llama_host::LlamaHost, recorder::RecorderService, streaming_asr::StreamingAsr,
@@ -24,6 +25,9 @@ use crate::{
 pub struct AppState {
     pub app_dir: PathBuf,
     pub database: Mutex<Database>,
+    pub dictation_snapshot: Mutex<crate::services::dictation_state::DictationState>,
+    pub history_request_generation: AtomicU64,
+    pub history_request: Mutex<Option<crate::services::history_actions::HistoryRequest>>,
     pub recorder: RecorderService,
     pub shortcut_status: Arc<Mutex<ShortcutStatus>>,
     pub shortcuts_paused: Arc<Mutex<bool>>,
@@ -55,6 +59,8 @@ impl AppState {
         std::fs::create_dir_all(&recordings_dir)
             .context("failed to create recordings directory")?;
         let database = Database::open(app_dir.clone())?;
+        let recorder = RecorderService::new(recordings_dir.clone());
+        recover_interrupted_recordings(&database, &recorder);
         let runtime_events = database.list_runtime_events(200).unwrap_or_default();
         let retention_days = database
             .load_settings()
@@ -70,7 +76,10 @@ impl AppState {
         Ok(Self {
             app_dir: app_dir.clone(),
             database: Mutex::new(database),
-            recorder: RecorderService::new(recordings_dir),
+            history_request: Mutex::new(None),
+            history_request_generation: AtomicU64::new(0),
+            dictation_snapshot: Mutex::new(Default::default()),
+            recorder,
             shortcut_status: Arc::new(Mutex::new(ShortcutStatus::default())),
             shortcuts_paused: Arc::new(Mutex::new(false)),
             shortcut_test_active: Arc::new(Mutex::new(false)),
@@ -182,6 +191,10 @@ impl AppState {
         self.streaming_asr_generation.fetch_add(1, Ordering::AcqRel) + 1
     }
 
+    pub fn streaming_asr_is_current(&self, generation: u64) -> bool {
+        self.streaming_asr_generation.load(Ordering::Acquire) == generation
+    }
+
     pub fn set_streaming_asr_if_current(&self, generation: u64, host: Arc<StreamingAsr>) -> bool {
         // Coordinate the generation test and publication with shutdown's slot
         // lock. A shutdown that wins either invalidates us before this point or
@@ -189,7 +202,7 @@ impl AppState {
         let mut candidate = Some(host);
         let previous = {
             let mut slot = self.streaming_asr.lock();
-            if self.streaming_asr_generation.load(Ordering::Acquire) != generation {
+            if !self.streaming_asr_is_current(generation) {
                 None
             } else {
                 Some(slot.replace(candidate.take().expect("candidate host is available")))
@@ -247,14 +260,18 @@ impl AppState {
     }
 
     pub fn record_event(&self, event: RuntimeEvent) {
-        if let Err(error) = self.database.lock().insert_runtime_event(&event) {
-            eprintln!("failed to persist runtime event: {error}");
+        self.record_events(vec![event]);
+    }
+
+    pub fn record_events(&self, events: Vec<RuntimeEvent>) {
+        if let Err(error) = self.database.lock().insert_runtime_events(&events) {
+            eprintln!("failed to persist runtime events: {error}");
         }
         let mut log = self.runtime_events.lock();
-        log.insert(0, event);
-        if log.len() > 200 {
-            log.truncate(200);
+        for event in events {
+            log.insert(0, event);
         }
+        log.truncate(200);
     }
 
     pub fn recent_events(&self, limit: usize) -> Vec<RuntimeEvent> {
@@ -310,6 +327,124 @@ impl AppState {
     }
 }
 
+/// Reconcile capture checkpoints before the engine starts accepting new work.
+/// The marker is acknowledged only after the corresponding History row is committed.
+/// A valid source already referenced by History is preserved and the marker is simply
+/// retired, so recovery never replaces a known-good WAV with a partial prefix.
+fn recover_interrupted_recordings(database: &Database, recorder: &RecorderService) {
+    let recoverable = match recorder.list_recoverable_recordings() {
+        Ok(recordings) => recordings,
+        Err(error) => {
+            eprintln!("atmospeak recovery: failed to inspect capture checkpoints: {error}");
+            return;
+        }
+    };
+
+    for recording in recoverable {
+        let existing = match database.get_session(&recording.id) {
+            Ok(session) => session,
+            Err(error) => {
+                eprintln!(
+                    "atmospeak recovery: failed to inspect History for {}: {error}",
+                    recording.id
+                );
+                continue;
+            }
+        };
+
+        if existing
+            .as_ref()
+            .is_some_and(|session| audio_source_is_usable(&session.audio_path))
+        {
+            if let Err(error) = recorder.acknowledge_recovered_recording(&recording.id) {
+                eprintln!(
+                    "atmospeak recovery: failed to acknowledge already-saved {}: {error}",
+                    recording.id
+                );
+            }
+            continue;
+        }
+
+        let finished = match recorder.recover_recording(&recording.id) {
+            Ok(finished) => finished,
+            Err(error) => {
+                eprintln!(
+                    "atmospeak recovery: failed to materialize {}: {error}",
+                    recording.id
+                );
+                continue;
+            }
+        };
+
+        let session = match existing {
+            Some(mut session) => {
+                session.audio_path = finished.path.to_string_lossy().to_string();
+                session.duration_ms = finished.duration_ms;
+                session
+            }
+            None => TranscriptSession {
+                id: finished.id.clone(),
+                raw_text: String::new(),
+                cleaned_text: String::new(),
+                polished_text: None,
+                prefer_polished: true,
+                audio_path: finished.path.to_string_lossy().to_string(),
+                duration_ms: finished.duration_ms,
+                word_count: 0,
+                injected: false,
+                source_application: None,
+                created_at: chrono::Utc::now(),
+            },
+        };
+        if let Err(error) = database.insert_session(&session) {
+            eprintln!(
+                "atmospeak recovery: failed to commit {} to History: {error}",
+                session.id
+            );
+            continue;
+        }
+        if let Err(error) = recorder.acknowledge_recovered_recording(&recording.id) {
+            eprintln!(
+                "atmospeak recovery: failed to acknowledge {} after History commit: {error}",
+                recording.id
+            );
+        }
+    }
+}
+
+fn audio_source_is_usable(path: &str) -> bool {
+    let path = PathBuf::from(path);
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    let Ok(reader) = hound::WavReader::open(&path) else {
+        return false;
+    };
+    let spec = reader.spec();
+    if spec.channels != 1
+        || spec.sample_rate != 16_000
+        || spec.bits_per_sample != 16
+        || spec.sample_format != hound::SampleFormat::Int
+    {
+        return false;
+    }
+
+    // WavReader has consumed the RIFF/fmt/data headers and is positioned at
+    // the PCM payload. Compare its declared frame count with the bytes that
+    // physically remain, so a torn data length cannot masquerade as a source.
+    let declared_frames = u64::from(reader.duration());
+    let mut file = reader.into_inner();
+    let Ok(data_start) = file.stream_position() else {
+        return false;
+    };
+    let physical_pcm_bytes = metadata.len().saturating_sub(data_start);
+    let expected_pcm_bytes = declared_frames * 2;
+    declared_frames > 0 && physical_pcm_bytes == expected_pcm_bytes
+}
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -420,7 +555,7 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::AppState;
+    use super::{AppState, audio_source_is_usable};
     use crate::models::RuntimeEvent;
     use chrono::Utc;
     use std::sync::atomic::Ordering;
@@ -428,10 +563,13 @@ mod tests {
     #[test]
     fn named_accessors_round_trip_state() {
         let key = "WIND_SPEAK_APP_DATA_DIR";
+        let atmospeak_key = "ATMOSPEAK_APP_DATA_DIR";
         let previous = std::env::var(key).ok();
+        let previous_atmospeak = std::env::var(atmospeak_key).ok();
         let temp = tempfile::tempdir().expect("app state tempdir");
         unsafe {
             std::env::set_var(key, temp.path());
+            std::env::set_var(atmospeak_key, temp.path());
         }
 
         let state = AppState::new().expect("app state");
@@ -455,13 +593,24 @@ mod tests {
         state.set_shortcut_test_active(false);
         assert!(!state.shortcut_test_active());
 
-        for i in 0..5 {
-            state.record_event(RuntimeEvent {
-                created_at: Utc::now(),
-                kind: "test".to_string(),
-                message: format!("event-{i}"),
-            });
-        }
+        state.record_event(RuntimeEvent {
+            created_at: Utc::now(),
+            kind: "test".into(),
+            message: "event-0".into(),
+        });
+        state.record_events(
+            (1..5)
+                .map(|i| RuntimeEvent {
+                    created_at: Utc::now(),
+                    kind: "test".into(),
+                    message: format!("event-{i}"),
+                })
+                .collect(),
+        );
+        assert_eq!(
+            state.database.lock().list_runtime_events(10).unwrap().len(),
+            5
+        );
         let events = state.recent_events(3);
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].message, "event-4");
@@ -471,21 +620,26 @@ mod tests {
         assert!(state.retention_sweeper_cancel.load(Ordering::Relaxed));
 
         match previous {
-            Some(value) => unsafe {
-                std::env::set_var(key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(key);
-            },
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        match previous_atmospeak {
+            Some(value) => unsafe { std::env::set_var(atmospeak_key, value) },
+            None => unsafe { std::env::remove_var(atmospeak_key) },
         }
     }
-
     #[test]
     fn abandoned_shortcut_test_lease_expires() {
-        let key = "WIND_SPEAK_APP_DATA_DIR";
-        let previous = std::env::var(key).ok();
+        let wind_key = "WIND_SPEAK_APP_DATA_DIR";
+        let atmospeak_key = "ATMOSPEAK_APP_DATA_DIR";
+        let previous_wind = std::env::var(wind_key).ok();
+        let previous_atmospeak = std::env::var(atmospeak_key).ok();
+        let temp = tempfile::tempdir().expect("app state tempdir");
         unsafe {
-            std::env::set_var(key, r"C:\temp\wind-speak-shortcut-lease-test");
+            // Set both names so an outer baseline override cannot redirect this
+            // test into a shared profile.
+            std::env::set_var(wind_key, temp.path());
+            std::env::set_var(atmospeak_key, temp.path());
         }
 
         let state = AppState::new().expect("app state");
@@ -495,13 +649,37 @@ mod tests {
         assert!(!state.shortcut_test_active());
         assert!(!*state.shortcut_test_active.lock());
 
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var(key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(key);
-            },
+        match previous_wind {
+            Some(value) => unsafe { std::env::set_var(wind_key, value) },
+            None => unsafe { std::env::remove_var(wind_key) },
         }
+        match previous_atmospeak {
+            Some(value) => unsafe { std::env::set_var(atmospeak_key, value) },
+            None => unsafe { std::env::remove_var(atmospeak_key) },
+        }
+    }
+
+    #[test]
+    fn audio_source_validation_requires_complete_pcm_payload() {
+        let temp = tempfile::tempdir().expect("audio validation tempdir");
+        let path = temp.path().join("recording.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).expect("wav writer");
+        for sample in [0_i16, 1, -1, 2] {
+            writer.write_sample(sample).expect("wav sample");
+        }
+        writer.finalize().expect("wav finalize");
+
+        assert!(audio_source_is_usable(&path.to_string_lossy()));
+
+        let mut bytes = std::fs::read(&path).expect("read wav");
+        bytes.truncate(bytes.len() - 2);
+        std::fs::write(&path, bytes).expect("truncate wav");
+        assert!(!audio_source_is_usable(&path.to_string_lossy()));
     }
 }

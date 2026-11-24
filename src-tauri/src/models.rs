@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct AppSettings {
     pub hotkey: String,
+    pub voice_edit_hotkey: String,
+    pub application_profiles: Vec<ApplicationProfile>,
     pub mode: DictationMode,
     pub microphone_name: Option<String>,
     pub restore_clipboard: bool,
@@ -20,19 +22,14 @@ pub struct AppSettings {
     pub active_model_id: String,
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
-    pub advanced_whisper_cli_path: String,
-    // Companion appearance. Phase A locked settings to the 12 fields above; these
-    // five were promoted from the design prototype's tweak panel into real,
-    // persisted settings. Container-level `serde(default)` keeps older setting
-    // blobs loadable.
+    pub advanced_asr_executable_path: String,
+    // Companion appearance settings are persisted alongside the core profile.
+    // Container-level `serde(default)` keeps older setting blobs loadable.
     pub accent: Accent,
     pub dock_shape: DockShape,
     pub wave_style: WaveStyle,
     pub dock_theme: DockTheme,
     pub motion: Motion,
-    pub model_selection_mode: ModelSelectionMode,
-    pub transcription_profile: TranscriptionProfile,
-    pub acceleration_preference: AccelerationPreference,
     pub live_preview_enabled: bool,
     /// When true, cleaned text is optionally rewritten by an LLM before paste.
     pub auto_polish: bool,
@@ -44,6 +41,16 @@ pub struct AppSettings {
     /// Canonical `scheme://host[:port]` the saved polish API key is bound to.
     #[serde(default)]
     pub polish_api_key_origin: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ApplicationProfile {
+    pub application: String,
+    pub cleanup_enabled: Option<bool>,
+    pub auto_polish: Option<bool>,
+    pub polish_style: Option<PolishStyle>,
+    pub instructions: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -65,21 +72,6 @@ pub enum PolishProvider {
     Bundled,
     Ollama,
     OpenaiCompatible,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum ModelSelectionMode {
-    Automatic,
-    Manual,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AccelerationPreference {
-    Auto,
-    Vulkan,
-    Cpu,
 }
 
 /// Companion pigment. Drives `--accent*` and the neon listening glow.
@@ -127,6 +119,8 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             hotkey: "Ctrl+Win".to_string(),
+            voice_edit_hotkey: "Ctrl+Alt+E".to_string(),
+            application_profiles: Vec::new(),
             mode: DictationMode::PushToTalk,
             microphone_name: None,
             restore_clipboard: true,
@@ -137,24 +131,21 @@ impl Default for AppSettings {
             onboarding_complete: false,
             onboarding_version: String::new(),
             audio_calibration: None,
-            active_model_id: "base.en".to_string(),
+            active_model_id: atmospeak_asr_protocol::PARAKEET_MODEL_ID.to_string(),
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
-            advanced_whisper_cli_path: String::new(),
+            advanced_asr_executable_path: String::new(),
             accent: Accent::Dusk,
             dock_shape: DockShape::Orb,
             wave_style: WaveStyle::Ribbon,
             dock_theme: DockTheme::Dark,
             motion: Motion::Lively,
-            model_selection_mode: ModelSelectionMode::Automatic,
-            transcription_profile: TranscriptionProfile::Balanced,
-            acceleration_preference: AccelerationPreference::Auto,
             live_preview_enabled: true,
             auto_polish: false,
             polish_style: PolishStyle::None,
             custom_instructions: String::new(),
             polish_endpoint: "http://127.0.0.1:11434/v1/chat/completions".to_string(),
-            polish_model: "qwen2.5-0.5b".to_string(),
+            polish_model: "qwen2.5-1.5b".to_string(),
             polish_provider: PolishProvider::Bundled,
             polish_api_key_origin: String::new(),
         }
@@ -406,12 +397,12 @@ pub struct SoundCheckResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatus {
-    pub whisper_cli_found: bool,
+    pub executable_found: bool,
     pub model_found: bool,
     pub ready: bool,
     pub message: String,
     pub source: RuntimeSource,
-    pub whisper_cli_path: String,
+    pub executable_path: String,
     pub model_path: String,
 }
 
@@ -470,6 +461,8 @@ pub struct StageMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeDictationEvent {
+    #[serde(default)]
+    pub generation: u64,
     pub recording: Option<RecordingStarted>,
     pub phase: DictationPhase,
     pub message: String,

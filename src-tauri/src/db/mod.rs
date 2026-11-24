@@ -5,9 +5,10 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::models::{
-    AppSettings, AppSnapshot, AsrBackend, DictationStats, DictionaryEntry, RuntimeEvent, Snippet,
+    AppSettings, AppSnapshot, DictationStats, DictionaryEntry, RuntimeEvent, Snippet,
     StreamingMetrics, TranscriptSession,
 };
+use crate::services::model_downloader::BUNDLED_MODEL_ID;
 
 pub struct Database {
     connection: Connection,
@@ -18,6 +19,11 @@ impl Database {
         std::fs::create_dir_all(&app_dir).context("failed to create application data directory")?;
         let connection = Connection::open(app_dir.join("wind-speak.sqlite3"))
             .context("failed to open sqlite database")?;
+        connection.create_scalar_function(
+            "unicode_lower", 1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| Ok(context.get::<String>(0)?.to_lowercase()),
+        )?;
         let database = Self { connection };
         database.migrate()?;
         Ok(database)
@@ -101,7 +107,10 @@ impl Database {
             .prepare("pragma table_info(transcript_sessions)")?
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        if !session_columns.iter().any(|column| column == "polished_text") {
+        if !session_columns
+            .iter()
+            .any(|column| column == "polished_text")
+        {
             self.connection.execute(
                 "alter table transcript_sessions add column polished_text text",
                 [],
@@ -161,12 +170,23 @@ impl Database {
         Ok(())
     }
 
-    pub fn insert_runtime_event(&self, event: &RuntimeEvent) -> Result<()> {
+    pub fn insert_runtime_events(&self, events: &[RuntimeEvent]) -> Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
         let transaction = self.connection.unchecked_transaction()?;
-        transaction.execute(
-            "insert into runtime_events (kind, message, created_at) values (?1, ?2, ?3)",
-            params![event.kind, event.message, event.created_at.to_rfc3339()],
-        )?;
+        {
+            let mut statement = transaction.prepare(
+                "insert into runtime_events (kind, message, created_at) values (?1, ?2, ?3)",
+            )?;
+            for event in events {
+                statement.execute(params![
+                    event.kind,
+                    event.message,
+                    event.created_at.to_rfc3339()
+                ])?;
+            }
+        }
         transaction.execute(
             "delete from runtime_events where id not in (
                 select id from runtime_events order by id desc limit 500
@@ -232,49 +252,6 @@ impl Database {
             ],
         )?;
         Ok(())
-    }
-
-    pub fn automatic_model_candidate(
-        &self,
-        preferred_model_id: &str,
-        backend: AsrBackend,
-    ) -> Result<Option<String>> {
-        let backend = match backend {
-            AsrBackend::Vulkan => "vulkan",
-            AsrBackend::Cpu => "cpu",
-            AsrBackend::Host => "host",
-            AsrBackend::Cli => "cli",
-        };
-        let preferred_is_healthy: bool = self.connection.query_row(
-            "select count(*) >= 3
-                    and avg(finalize_ms) <= 1500
-                    and max(max_backlog_ms) < 2000
-                    and max(audio_frames_dropped) = 0
-             from dictation_metrics
-             where model_id = ?1 and backend = ?2",
-            params![preferred_model_id, backend],
-            |row| row.get(0),
-        )?;
-        if preferred_is_healthy {
-            return Ok(Some(preferred_model_id.to_string()));
-        }
-        self.connection
-            .query_row(
-                "select model_id
-                 from dictation_metrics
-                 where backend = ?1
-                 group by model_id
-                 having count(*) >= 3
-                    and avg(finalize_ms) <= 1500
-                    and max(max_backlog_ms) < 2000
-                    and max(audio_frames_dropped) = 0
-                 order by avg(finalize_ms) asc
-                 limit 1",
-                params![backend],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("failed to select automatic transcription model")
     }
 
     pub fn list_dictionary(&self) -> Result<Vec<DictionaryEntry>> {
@@ -371,7 +348,13 @@ impl Database {
         self.connection.execute(
             "insert into transcript_sessions
              (id, raw_text, cleaned_text, polished_text, prefer_polished, audio_path, duration_ms, word_count, injected, source_application, created_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             on conflict(id) do update set
+               raw_text = excluded.raw_text, cleaned_text = excluded.cleaned_text,
+               polished_text = excluded.polished_text, prefer_polished = excluded.prefer_polished,
+               audio_path = excluded.audio_path, duration_ms = excluded.duration_ms,
+               word_count = excluded.word_count, injected = excluded.injected,
+               source_application = excluded.source_application",
             params![
                 session.id,
                 session.raw_text,
@@ -400,6 +383,18 @@ impl Database {
 
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("failed to load transcript sessions")
+    }
+
+    pub fn search_sessions(&self, query: &str, offset: u32) -> Result<Vec<TranscriptSession>> {
+        let mut statement = self.connection.prepare(
+            "select id, raw_text, cleaned_text, polished_text, prefer_polished, audio_path, duration_ms, word_count, injected, source_application, created_at
+             from transcript_sessions
+             where instr(unicode_lower(raw_text), unicode_lower(?1)) > 0 or instr(unicode_lower(cleaned_text), unicode_lower(?1)) > 0
+                or instr(unicode_lower(coalesce(polished_text, '')), unicode_lower(?1)) > 0
+             order by created_at desc, id desc limit 101 offset ?2",
+        )?;
+        let rows = statement.query_map(params![query.trim(), offset], session_from_row)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().context("failed to search transcript sessions")
     }
 
     pub fn update_session_polish_preference(
@@ -437,6 +432,25 @@ impl Database {
             return Ok(None);
         }
         self.get_session(id)
+    }
+
+    /// Attach optional output only to the unchanged delivered transcript. Never recreate it.
+    pub fn save_automatic_polish(&self, expected: &TranscriptSession, text: &str) -> Result<bool> {
+        Ok(self.connection.execute(
+            "update transcript_sessions set polished_text = ?1, word_count = ?2
+             where id = ?3 and raw_text = ?4 and cleaned_text = ?5
+               and polished_text is null and prefer_polished = 1",
+            params![text, text.split_whitespace().count() as i64, expected.id,
+                expected.raw_text, expected.cleaned_text],
+        )? == 1)
+    }
+
+    pub fn latest_session(&self) -> Result<Option<TranscriptSession>> {
+        let id = self.connection.query_row(
+            "select id from transcript_sessions order by created_at desc, id desc limit 1",
+            [], |row| row.get::<_, String>(0),
+        ).optional()?;
+        match id { Some(id) => self.get_session(&id), None => Ok(None) }
     }
 
     pub fn get_session(&self, id: &str) -> Result<Option<TranscriptSession>> {
@@ -544,6 +558,7 @@ fn calculate_stats(sessions: &[TranscriptSession]) -> DictationStats {
 }
 
 fn migrate_settings(mut settings: AppSettings) -> AppSettings {
+    settings.active_model_id = BUNDLED_MODEL_ID.to_string();
     if settings
         .hotkey
         .trim()
@@ -573,16 +588,17 @@ mod tests {
         let loaded = database.load_settings().expect("load settings");
         assert_eq!(loaded.mode, DictationMode::PushToTalk);
         assert!(!loaded.restore_clipboard);
+        assert_eq!(
+            loaded.active_model_id,
+            crate::services::model_downloader::BUNDLED_MODEL_ID
+        );
     }
 
     /// Phase A locked settings to 12 fields and shipped blobs with exactly those
     /// keys. Adding the appearance block must not strand an existing profile.
     #[test]
     fn loads_settings_blobs_written_before_the_appearance_fields() {
-        use crate::models::{
-            AccelerationPreference, Accent, DockShape, DockTheme, ModelSelectionMode, Motion,
-            TranscriptionProfile, WaveStyle,
-        };
+        use crate::models::{Accent, DockShape, DockTheme, Motion, WaveStyle};
 
         let temp = tempdir().expect("tempdir");
         let database = Database::open(temp.path().to_path_buf()).expect("database");
@@ -598,7 +614,10 @@ mod tests {
             "onboardingVersion": "phase-a-honest-mvp-v1",
             "advancedRuntimeEnabled": false,
             "advancedModelPath": "",
-            "advancedWhisperCliPath": ""
+            "advancedWhisperCliPath": "",
+            "modelSelectionMode": "manual",
+            "transcriptionProfile": "fast",
+            "accelerationPreference": "vulkan"
         }"#;
         database
             .connection
@@ -614,15 +633,16 @@ mod tests {
         // The pre-existing choices survive.
         assert_eq!(loaded.mode, DictationMode::Toggle);
         assert!(loaded.onboarding_complete);
+        assert_eq!(
+            loaded.active_model_id,
+            crate::services::model_downloader::BUNDLED_MODEL_ID
+        );
         // The new fields fall back to their defaults rather than failing the parse.
         assert_eq!(loaded.accent, Accent::Dusk);
         assert_eq!(loaded.dock_shape, DockShape::Orb);
         assert_eq!(loaded.wave_style, WaveStyle::Ribbon);
         assert_eq!(loaded.dock_theme, DockTheme::Dark);
         assert_eq!(loaded.motion, Motion::Lively);
-        assert_eq!(loaded.model_selection_mode, ModelSelectionMode::Automatic);
-        assert_eq!(loaded.transcription_profile, TranscriptionProfile::Balanced);
-        assert_eq!(loaded.acceleration_preference, AccelerationPreference::Auto);
         assert!(loaded.live_preview_enabled);
     }
 
@@ -649,92 +669,24 @@ mod tests {
     fn runtime_diagnostics_are_persisted_and_bounded() {
         let temp = tempdir().expect("tempdir");
         let database = Database::open(temp.path().to_path_buf()).expect("database");
-        for index in 0..505 {
-            database
-                .insert_runtime_event(&RuntimeEvent {
-                    kind: "shortcut-ack".to_string(),
-                    message: format!("gesture={index}"),
-                    created_at: Utc::now(),
-                })
-                .expect("insert runtime event");
-        }
+        let batch: Vec<_> = (0..505)
+            .map(|index| RuntimeEvent {
+                kind: "shortcut-ack".to_string(),
+                message: format!("gesture={index}"),
+                created_at: Utc::now(),
+            })
+            .collect();
+        database
+            .insert_runtime_events(&batch[..1])
+            .expect("single event");
+        database
+            .insert_runtime_events(&batch)
+            .expect("batch events");
+        database.insert_runtime_events(&[]).expect("empty batch");
         let events = database.list_runtime_events(500).expect("runtime events");
         assert_eq!(events.len(), 500);
         assert_eq!(events[0].message, "gesture=504");
         assert_eq!(events[499].message, "gesture=5");
-    }
-
-    #[test]
-    fn automatic_model_policy_keeps_a_measured_healthy_preference() {
-        use crate::models::{AsrBackend, StreamingMetrics};
-
-        let temp = tempdir().expect("tempdir");
-        let database = Database::open(temp.path().to_path_buf()).expect("database");
-        for index in 0..3 {
-            database
-                .insert_dictation_metrics(&StreamingMetrics {
-                    session_id: format!("session-{index}"),
-                    backend: AsrBackend::Vulkan,
-                    model_id: "distil-large-v3.5".to_string(),
-                    first_partial_ms: Some(900),
-                    stop_ack_ms: 20,
-                    finalize_ms: 600,
-                    paste_ms: 80,
-                    processed_during_recording_ms: 9_500,
-                    tail_audio_ms: 500,
-                    max_backlog_ms: 500,
-                    audio_frames_dropped: 0,
-                    fallback_reason: None,
-                })
-                .expect("dictation metrics");
-        }
-        assert_eq!(
-            database
-                .automatic_model_candidate("distil-large-v3.5", AsrBackend::Vulkan)
-                .expect("automatic candidate")
-                .as_deref(),
-            Some("distil-large-v3.5")
-        );
-    }
-
-    #[test]
-    fn automatic_model_policy_uses_only_the_requested_backend() {
-        use crate::models::{AsrBackend, StreamingMetrics};
-
-        let temp = tempdir().expect("tempdir");
-        let database = Database::open(temp.path().to_path_buf()).expect("database");
-        for index in 0..3 {
-            database
-                .insert_dictation_metrics(&StreamingMetrics {
-                    session_id: format!("cpu-session-{index}"),
-                    backend: AsrBackend::Cpu,
-                    model_id: "distil-large-v3.5".to_string(),
-                    first_partial_ms: Some(900),
-                    stop_ack_ms: 20,
-                    finalize_ms: 600,
-                    paste_ms: 80,
-                    processed_during_recording_ms: 9_500,
-                    tail_audio_ms: 500,
-                    max_backlog_ms: 500,
-                    audio_frames_dropped: 0,
-                    fallback_reason: None,
-                })
-                .expect("dictation metrics");
-        }
-
-        assert_eq!(
-            database
-                .automatic_model_candidate("distil-large-v3.5", AsrBackend::Cpu)
-                .expect("cpu candidate")
-                .as_deref(),
-            Some("distil-large-v3.5")
-        );
-        assert_eq!(
-            database
-                .automatic_model_candidate("distil-large-v3.5", AsrBackend::Vulkan)
-                .expect("vulkan candidate"),
-            None
-        );
     }
 
     #[test]
@@ -748,6 +700,114 @@ mod tests {
 
         let loaded = database.load_settings().expect("load settings");
         assert_eq!(loaded.hotkey, "Ctrl+Win");
+    }
+
+    #[test]
+    fn latest_recovery_respects_preference_and_never_substitutes_an_older_recording() {
+        use crate::services::history_actions::copyable_text;
+        let temp = tempdir().unwrap();
+        let db = Database::open(temp.path().to_path_buf()).unwrap();
+        assert!(db.latest_session().unwrap().is_none());
+        let mut session = TranscriptSession {
+            id: "old".into(), raw_text: "original".into(), cleaned_text: "Cleaned.".into(),
+            polished_text: Some("Edited.".into()), prefer_polished: true,
+            audio_path: "retained.wav".into(), duration_ms: 1000, word_count: 1,
+            injected: false, source_application: None, created_at: Utc::now(),
+        };
+        assert_eq!(copyable_text(&session), Some("Edited."));
+        session.prefer_polished = false;
+        assert_eq!(copyable_text(&session), Some("Cleaned."));
+        db.insert_session(&session).unwrap();
+        session.id = "new".into();
+        session.created_at += chrono::Duration::seconds(1);
+        session.raw_text.clear(); session.cleaned_text.clear(); session.polished_text = None;
+        db.insert_session(&session).unwrap();
+        let latest = db.latest_session().unwrap().unwrap();
+        assert_eq!(latest.id, "new");
+        assert!(copyable_text(&latest).is_none());
+        assert!(db.get_session("missing").unwrap().is_none());
+        db.delete_session("new").unwrap();
+        assert_eq!(db.latest_session().unwrap().unwrap().id, "old");
+    }
+
+    #[test]
+    fn history_search_pages_retained_recordings_and_finds_original_text() {
+        let temp = tempdir().unwrap();
+        let db = Database::open(temp.path().to_path_buf()).unwrap();
+        for index in 0..102 {
+            db.insert_session(&TranscriptSession {
+                id: format!("record-{index:03}"), raw_text: format!("Original token {index}"),
+                cleaned_text: "Cleaned.".into(), polished_text: Some("Edited.".into()),
+                prefer_polished: false, audio_path: "saved.wav".into(), duration_ms: 1000,
+                word_count: 1, injected: false, source_application: None,
+                created_at: Utc::now() + chrono::Duration::seconds(index),
+            }).unwrap();
+        }
+        let first = db.search_sessions("", 0).unwrap();
+        assert_eq!(first.len(), 101); // One extra row signals another page.
+        let second = db.search_sessions("", 100).unwrap();
+        assert_eq!(second.len(), 2);
+        assert_eq!(second[1].id, "record-000");
+        let original = db.search_sessions("ORIGINAL TOKEN 0", 0).unwrap();
+        assert_eq!(original.len(), 1);
+        assert_eq!(original[0].id, "record-000");
+        assert_eq!(db.search_sessions("edited", 100).unwrap().len(), 2);
+        assert!(db.search_sessions("absent", 0).unwrap().is_empty());
+        assert!(db.get_session("record-000").unwrap().is_some());
+        let mut unicode = db.get_session("record-000").unwrap().unwrap();
+        unicode.raw_text = "Café".into();
+        unicode.cleaned_text = "ÉCOLE".into();
+        unicode.polished_text = Some("Привет".into());
+        db.insert_session(&unicode).unwrap();
+        for query in ["CAFÉ", "école", "ПРИВЕТ"] {
+            let rows = db.search_sessions(query, 0).unwrap();
+            assert_eq!(rows.len(), 1, "{query}");
+            assert_eq!(rows[0].id, unicode.id);
+        }
+    }
+
+    #[test]
+    fn automatic_polish_preserves_newer_history_and_never_resurrects_deletions() {
+        let temp = tempdir().expect("tempdir");
+        let db = Database::open(temp.path().to_path_buf()).expect("database");
+        let session = TranscriptSession {
+            id: "delivered".into(), raw_text: "hello".into(), cleaned_text: "Hello.".into(),
+            polished_text: None, prefer_polished: true, audio_path: "retained.wav".into(),
+            duration_ms: 1000, word_count: 1, injected: true,
+            source_application: Some("Notepad".into()), created_at: Utc::now(),
+        };
+        db.insert_session(&session).unwrap();
+        assert!(db.save_automatic_polish(&session, "Hello there.").unwrap());
+        let saved = db.get_session(&session.id).unwrap().unwrap();
+        assert_eq!(saved.polished_text.as_deref(), Some("Hello there."));
+        assert!(saved.injected);
+        assert_eq!(saved.audio_path, session.audio_path);
+        assert_eq!(saved.source_application, session.source_application);
+        assert_eq!(saved.word_count, 2);
+        assert!(!db.save_automatic_polish(&session, "Late duplicate").unwrap());
+
+        db.insert_session(&session).unwrap();
+        db.update_session_polish_preference(&session.id, false).unwrap();
+        assert!(!db.save_automatic_polish(&session, "Unwanted edit").unwrap());
+        assert!(!db.get_session(&session.id).unwrap().unwrap().prefer_polished);
+
+        db.insert_session(&session).unwrap();
+        db.update_session_polished_text(&session.id, "Explicit edit").unwrap();
+        assert!(!db.save_automatic_polish(&session, "Older auto edit").unwrap());
+        assert_eq!(db.get_session(&session.id).unwrap().unwrap().polished_text.as_deref(), Some("Explicit edit"));
+
+        let mut changed = session.clone();
+        changed.cleaned_text = "Corrected wording".into();
+        db.insert_session(&changed).unwrap();
+        assert!(!db.save_automatic_polish(&session, "Stale wording").unwrap());
+        changed = session.clone();
+        changed.raw_text = "new recognition".into();
+        db.insert_session(&changed).unwrap();
+        assert!(!db.save_automatic_polish(&session, "Stale recognition").unwrap());
+
+        db.delete_session(&session.id).unwrap();
+        assert!(!db.save_automatic_polish(&session, "Deleted content").unwrap());
+        assert!(db.get_session(&session.id).unwrap().is_none());
     }
 
     #[test]
@@ -767,8 +827,21 @@ mod tests {
             source_application: Some("Notepad".to_string()),
             created_at: Utc::now() - chrono::Duration::days(40),
         };
-        database.insert_session(&session).expect("insert session");
+        let mut checkpoint = session.clone();
+        checkpoint.raw_text = "partial".to_string();
+        checkpoint.cleaned_text = "Partial.".to_string();
+        checkpoint.injected = false;
+        database
+            .insert_session(&checkpoint)
+            .expect("save checkpoint");
+        database
+            .insert_session(&session)
+            .expect("complete checkpoint");
         let loaded = database.list_sessions().expect("list sessions");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].raw_text, "hello");
+        assert_eq!(loaded[0].audio_path, checkpoint.audio_path);
+        assert!(loaded[0].injected);
         assert_eq!(loaded[0].source_application.as_deref(), Some("Notepad"));
 
         let pruned = database.prune_sessions(30).expect("prune sessions");

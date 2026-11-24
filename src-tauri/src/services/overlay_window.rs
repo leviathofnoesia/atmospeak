@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use serde::Deserialize;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
 };
@@ -9,6 +10,19 @@ const OVERLAY_WIDTH: f64 = 520.0;
 const OVERLAY_HEIGHT: f64 = 150.0;
 const OVERLAY_BOTTOM_MARGIN: f64 = 56.0;
 const POSITION_FILE: &str = "overlay-position.json";
+
+/// A visible client-area rectangle that should receive pointer input.
+///
+/// The overlay webview remains transparent outside these rectangles. The
+/// frontend sends fresh rectangles whenever the dock changes state, so hidden
+/// controls never leave an invisible hit target behind.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OverlayHitRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
 
 /// Show the overlay where the user last dropped it, falling back to bottom-centre.
 /// Used at startup so a moved companion stays put across restarts.
@@ -40,6 +54,95 @@ pub fn show_and_reset(app: &AppHandle) -> Result<()> {
         "wind-speak://overlay-visibility",
         "Floating control shown and reset above other windows.",
     );
+    Ok(())
+}
+
+/// Restrict the native overlay window to the currently visible dock controls.
+///
+/// Windows treats the area outside a window region as belonging to the window
+/// behind it. This keeps the floating companion from intercepting clicks in its
+/// transparent margins while preserving normal WebView event handling inside
+/// the orb and its visible buttons. Logical client coordinates are converted to
+/// physical pixels using the window's current scale factor.
+#[cfg(target_os = "windows")]
+pub fn set_hit_regions(app: &AppHandle, regions: Vec<OverlayHitRegion>) -> Result<()> {
+    use windows::Win32::{
+        Foundation::HWND,
+        Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_OR, SetWindowRgn},
+    };
+
+    let window = overlay(app)?;
+    let handle = window
+        .hwnd()
+        .map_err(|error| anyhow!("could not access overlay window: {error}"))?;
+    let hwnd = HWND(handle.0 as _);
+    let scale = window
+        .scale_factor()
+        .map_err(|error| anyhow!("could not read overlay scale factor: {error}"))?;
+    let mut combined = None;
+    for region in regions {
+        if !region.x.is_finite()
+            || !region.y.is_finite()
+            || !region.width.is_finite()
+            || !region.height.is_finite()
+            || region.width <= 0.0
+            || region.height <= 0.0
+        {
+            continue;
+        }
+        let left = (region.x * scale).floor();
+        let top = (region.y * scale).floor();
+        let right = ((region.x + region.width) * scale).ceil();
+        let bottom = ((region.y + region.height) * scale).ceil();
+        if !left.is_finite()
+            || !top.is_finite()
+            || !right.is_finite()
+            || !bottom.is_finite()
+            || right <= left
+            || bottom <= top
+            || left < i32::MIN as f64
+            || top < i32::MIN as f64
+            || right > i32::MAX as f64
+            || bottom > i32::MAX as f64
+        {
+            continue;
+        }
+        let rect = unsafe {
+            CreateRectRgn(left as i32, top as i32, right as i32, bottom as i32)
+        };
+        if rect.0.is_null() {
+            continue;
+        }
+        if let Some(destination) = combined {
+            unsafe {
+                CombineRgn(Some(destination), Some(destination), Some(rect), RGN_OR);
+                let _ = DeleteObject(rect.into());
+            }
+        } else {
+            combined = Some(rect);
+        }
+    }
+
+    // Keep the whole transparent window click-through while the DOM is between
+    // states or before its first measurement. Passing None would remove the
+    // region and restore the default full-window hit area, so use a zero-sized
+    // region when no visible controls were supplied.
+    let combined = combined.or_else(|| unsafe { Some(CreateRectRgn(0, 0, 0, 0)) });
+    let result = unsafe { SetWindowRgn(hwnd, combined, true) };
+    if result == 0 {
+        if let Some(region) = combined {
+            unsafe {
+                let _ = DeleteObject(region.into());
+            }
+        }
+        return Err(anyhow!("Windows rejected the overlay hit region"));
+    }
+    // SetWindowRgn takes ownership of a successful region handle.
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_hit_regions(_app: &AppHandle, _regions: Vec<OverlayHitRegion>) -> Result<()> {
     Ok(())
 }
 

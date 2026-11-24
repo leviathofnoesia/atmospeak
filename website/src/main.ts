@@ -103,7 +103,7 @@ function featureBand() {
   section.setAttribute("aria-label", "Product features");
 
   for (const item of [
-    ["Stream locally", "Bounded Whisper segments are decoded while you record, leaving only the final tail to reconcile when you stop."],
+    ["Stream locally", "Parakeet Unified English 0.6B decodes English speech on your CPU while you record, then finalizes the remaining audio when you stop."],
     ["Offline by default", "Audio, previews, transcripts, settings, and speech models stay on your Windows PC. No account or cloud transcription is required."],
     ["Hold or Tap", "Release any required key in Hold mode, or press the chord a second time in Tap mode. Both finish with exactly one paste."],
   ] as const) {
@@ -132,10 +132,10 @@ function modelSection() {
   header.append(kicker("+ UNDER THE HOOD / EXACT MODELS"));
   const heading = document.createElement("h2");
   heading.id = "models-title";
-  heading.textContent = "Local Whisper models";
+  heading.textContent = "One local English model";
   const copy = document.createElement("p");
   copy.textContent =
-    "Atmospeak keeps the selected GGML model warm in a crash-isolated streaming sidecar. Automatic mode tries Vulkan first, falls back to CPU, then retains the resident whisper-server and one-shot whisper-cli as local recovery paths.";
+    "Atmospeak keeps Parakeet Unified English 0.6B warm in a crash-isolated CPU sidecar. Live transcription and saved-recording recovery use the same local engine. No GPU or cloud transcription is required.";
   header.append(heading, copy);
   section.append(header);
 
@@ -157,73 +157,19 @@ function modelSection() {
 
   const models = [
     {
-      name: "Tiny English",
-      id: "tiny.en",
-      use: "Swift · setup option",
-      file: "ggml-tiny.en.bin",
-      size: "75 MB",
-      source: "ggerganov/whisper.cpp",
-      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
-    },
-    {
-      name: "Base English",
-      id: "base.en",
-      use: "Balanced · bundled default",
-      file: "ggml-base.en.bin",
-      size: "142 MB",
-      source: "ggerganov/whisper.cpp",
-      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
-    },
-    {
-      name: "Small English",
-      id: "small.en",
-      use: "Faithful · setup option",
-      file: "ggml-small.en.bin",
-      size: "466 MB",
-      source: "ggerganov/whisper.cpp",
-      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
-    },
-    {
-      name: "Medium English",
-      id: "medium.en",
-      use: "Optional · Settings",
-      file: "ggml-medium.en.bin",
-      size: "1,463 MB",
-      source: "ggerganov/whisper.cpp",
-      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
-    },
-    {
-      name: "Distil Large v3 (legacy)",
-      id: "distil-large-v3",
-      use: "Existing installs · Settings",
-      file: "ggml-distil-large-v3.bin",
-      size: "1,450 MB",
-      source: "distil-whisper",
-      href: "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin",
-    },
-    {
-      name: "Large v3 Turbo q5",
-      id: "large-v3-turbo-q5",
-      use: "Current multilingual · Settings",
-      file: "ggml-large-v3-turbo-q5_0.bin",
-      size: "548 MB",
-      source: "ggerganov/whisper.cpp",
-      href: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
-    },
-    {
-      name: "Distil Large v3.5",
-      id: "distil-large-v3.5",
-      use: "Current English · Settings",
-      file: "ggml-distil-large-v3.5.bin",
-      size: "1,450 MB",
-      source: "distil-whisper",
-      href: "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin",
+      name: "Parakeet Unified English 0.6B",
+      id: "parakeet-unified-en",
+      use: "Bundled default · CPU",
+      file: "parakeet-unified-en-0.6b-Q8_0.gguf",
+      size: "697 MiB",
+      source: "NVIDIA (GGUF conversion by Handy)",
+      href: "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
     },
   ] as const;
 
   for (const model of models) {
     const row = document.createElement("div");
-    row.className = model.id === "base.en" ? "model-row model-row--bundled" : "model-row";
+    row.className = "model-row model-row--bundled";
     row.setAttribute("role", "row");
 
     const identity = document.createElement("span");
@@ -262,16 +208,16 @@ function modelSection() {
   notes.className = "model-notes";
   notes.append(
     modelNote(
-      "Selection safety",
-      "Automatic Balanced chooses only among models you installed and uses measured backlog and finalization time. It never downloads or deletes a model on its own.",
+      "On-device processing",
+      "The bundled English model runs on the CPU. Audio and transcripts stay on your device during recognition and saved-recording recovery.",
     ),
     modelNote(
       "Download integrity",
-      "Every managed download is checked against a pinned SHA-256 hash before it is installed.",
+      "All eight model files are checked against pinned SHA-256 hashes before installation.",
     ),
     modelNote(
       "Advanced overrides",
-      "You can pin a model, choose Vulkan or CPU, disable live preview, or turn off streaming with the documented environment switch.",
+      "Custom builds can override the ASR executable and compatible model directory in Advanced settings. Live preview can be disabled without disabling transcription.",
     ),
   );
   section.append(notes);
@@ -451,8 +397,8 @@ function docsSection() {
       "Transcription runs on-device. Removing that folder resets the local profile after the app is closed.",
     ]),
     docCard("06 / Latency", [
-      "Atmospeak processes bounded speech segments during recording and freezes the timer immediately when you stop.",
-      "Finalization time depends on the remaining tail, model size, Vulkan or CPU performance, and current backlog. Local diagnostics show the measured result.",
+      "Atmospeak transcribes while you speak and finalizes the recording before pasting once.",
+      "Finalization time depends on the remaining audio, CPU load, and queued work. Local diagnostics report recognition and delivery timing separately.",
     ]),
   );
   section.append(grid);

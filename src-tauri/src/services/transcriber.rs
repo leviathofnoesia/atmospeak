@@ -1,90 +1,125 @@
-use std::{path::Path, process::Command};
+use std::{
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use tauri::AppHandle;
 
 use crate::{
     models::AppSettings,
-    services::{app_state::AppState, metrics, proc, runtime},
+    services::{app_state::AppState, asr_host::AsrHost, metrics, runtime},
 };
 
-/// A transcript plus which backend produced it, so stage metrics can label the run.
+pub use crate::services::asr_host::DICTATION_CANCELLED;
+
+/// A transcript plus which adapter produced it, so stage metrics can label the
+/// run while the sidecar remains the only inference engine.
 pub struct Transcription {
     pub text: String,
     pub backend: &'static str,
 }
 
-/// Transcribe a recording, preferring the resident host and degrading to the
-/// one-shot CLI whenever the host is unavailable, disabled, or failing.
-pub fn transcribe(
+pub const EMPTY_TRANSCRIPT: &str = "No speech was detected in that recording.";
+
+pub fn transcribe_cancellable(
     app: &AppHandle,
     settings: &AppSettings,
     wav_path: &Path,
+    cancel: &AtomicBool,
 ) -> Result<Transcription> {
+    transcribe_inner(app, settings, wav_path, Some(cancel))
+}
+
+fn transcribe_inner(
+    app: &AppHandle,
+    settings: &AppSettings,
+    wav_path: &Path,
+    cancel: Option<&AtomicBool>,
+) -> Result<Transcription> {
+    if is_cancelled(cancel) {
+        return Err(anyhow!(DICTATION_CANCELLED));
+    }
+
     let status = runtime::model_status(app, settings);
     if !status.ready {
         return Err(anyhow!(status.message));
     }
 
     if let Some(host) = AppState::asr_host_from(app) {
-        match host.transcribe(wav_path) {
-            // An empty transcript means no speech, not a broken host. Retrying on the
-            // CLI would only spend seconds arriving at the same answer.
-            Ok(text) if text.is_empty() => return Err(anyhow!(EMPTY_TRANSCRIPT)),
-            Ok(text) => {
-                return Ok(Transcription {
-                    text,
-                    backend: metrics::ASR_BACKEND_HOST,
-                });
-            }
-            Err(error) => {
-                // Never fail the utterance because the sidecar misbehaved.
-                metrics::emit_runtime(
-                    app,
-                    "asr-host-fallback",
-                    format!("resident host failed, using CLI for this utterance: {error}"),
-                );
-            }
-        }
+        let text = match cancel {
+            Some(cancel) => host.transcribe_cancellable(wav_path, cancel),
+            None => host.transcribe(wav_path),
+        }?;
+        return finish_transcript(text, metrics::ASR_BACKEND_HOST, cancel);
     }
 
-    Ok(Transcription {
-        text: transcribe_with_cli(app, settings, wav_path)?,
-        backend: metrics::ASR_BACKEND_CLI,
-    })
+    let text = match cancel {
+        Some(cancel) => transcribe_with_cli_primitive_cancellable(app, settings, wav_path, cancel),
+        None => transcribe_with_cli_primitive(app, settings, wav_path),
+    }?;
+    finish_transcript(text, metrics::ASR_BACKEND_CLI, cancel)
 }
 
-const EMPTY_TRANSCRIPT: &str = "No speech was detected in that recording.";
+/// Transcribe a durable WAV through the resolved native sidecar for callers
+/// that own a recording but do not keep an AppState host.
+pub fn transcribe_with_cli_primitive(
+    app: &AppHandle,
+    settings: &AppSettings,
+    wav_path: &Path,
+) -> Result<String> {
+    transcribe_with_cli_primitive_inner(app, settings, wav_path, None)
+}
 
-fn transcribe_with_cli(app: &AppHandle, settings: &AppSettings, wav_path: &Path) -> Result<String> {
+pub fn transcribe_with_cli_primitive_cancellable(
+    app: &AppHandle,
+    settings: &AppSettings,
+    wav_path: &Path,
+    cancel: &AtomicBool,
+) -> Result<String> {
+    transcribe_with_cli_primitive_inner(app, settings, wav_path, Some(cancel))
+}
+
+fn transcribe_with_cli_primitive_inner(
+    app: &AppHandle,
+    settings: &AppSettings,
+    wav_path: &Path,
+    cancel: Option<&AtomicBool>,
+) -> Result<String> {
+    if is_cancelled(cancel) {
+        return Err(anyhow!(DICTATION_CANCELLED));
+    }
+
     let resolved = runtime::resolve_runtime(app, settings)?;
-    let wav = wav_path
-        .to_str()
-        .ok_or_else(|| anyhow!("recording path contains invalid unicode"))?;
-    let model = resolved
-        .model_path
-        .to_str()
-        .ok_or_else(|| anyhow!("model path contains invalid unicode"))?;
-    let mut command = Command::new(&resolved.whisper_cli_path);
-    if let Some(runtime_dir) = resolved.whisper_cli_path.parent() {
-        command.current_dir(runtime_dir);
-    }
-    proc::hide_console(&mut command);
+    let host = AsrHost::new(resolved.executable_path, resolved.model_path)?;
+    let text = match cancel {
+        Some(cancel) => host.transcribe_cancellable(wav_path, cancel),
+        None => host.transcribe(wav_path),
+    }?;
 
-    let output = command
-        .args(["-m", model, "-f", wav, "-nt", "-np"])
-        .output()
-        .context("failed to run whisper.cpp CLI")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("whisper.cpp failed: {}", stderr.trim()));
+    if is_cancelled(cancel) {
+        return Err(anyhow!(DICTATION_CANCELLED));
     }
-
-    let transcript = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if transcript.is_empty() {
-        Err(anyhow!(EMPTY_TRANSCRIPT))
-    } else {
-        Ok(transcript)
+    if text.trim().is_empty() {
+        return Err(anyhow!(EMPTY_TRANSCRIPT));
     }
+    Ok(text)
+}
+
+fn finish_transcript(
+    text: String,
+    backend: &'static str,
+    cancel: Option<&AtomicBool>,
+) -> Result<Transcription> {
+    if is_cancelled(cancel) {
+        return Err(anyhow!(DICTATION_CANCELLED));
+    }
+    if text.trim().is_empty() {
+        return Err(anyhow!(EMPTY_TRANSCRIPT));
+    }
+    Ok(Transcription { text, backend })
+}
+
+fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
+    cancel.is_some_and(|signal| signal.load(Ordering::Acquire))
 }
