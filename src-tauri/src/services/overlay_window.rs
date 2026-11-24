@@ -46,7 +46,6 @@ pub fn show_and_reset(app: &AppHandle) -> Result<()> {
     let window = overlay(app)?;
     prepare(&window);
     let _ = app.emit("atmospeak://overlay-position-resetting", ());
-    let _ = app.emit("wind-speak://overlay-position-resetting", ());
     position_near_bottom_center(&window);
     clear_position(app);
     let _ = window.show();
@@ -253,10 +252,7 @@ pub fn clamp_position(
     )
 }
 
-/// Remember where the companion was dropped, clamped so the persisted spot is
-/// always reachable. Returns the clamped coordinates so the frontend can settle
-/// the live window when the OS drag ended off-screen. Kept in its own file
-/// rather than `AppSettings`, which is contract-locked to 12 fields.
+/// Overlay position is stored separately from AppSettings so a drag does not rewrite the settings blob.
 pub fn save_position(app: &AppHandle, x: i32, y: i32) -> (i32, i32) {
     let (x, y) = match overlay(app).ok() {
         Some(window) => clamp_to_visible(&window, x, y),
@@ -269,9 +265,6 @@ pub fn save_position(app: &AppHandle, x: i32, y: i32) -> (i32, i32) {
     (x, y)
 }
 
-/// Keep enough of the dock on a monitor to grab again. Without this, a drag that
-/// ends past the desktop edge (or a monitor that later disappears) strands the
-/// companion somewhere you cannot reach it.
 fn clamp_to_visible(window: &WebviewWindow, x: i32, y: i32) -> (i32, i32) {
     let Ok(monitors) = window.available_monitors() else {
         return (x, y);

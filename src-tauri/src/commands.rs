@@ -39,11 +39,6 @@ pub fn get_shortcut_status(state: State<'_, AppState>) -> CommandResult<Shortcut
 }
 
 #[tauri::command]
-pub fn get_recording_level(state: State<'_, AppState>) -> f32 {
-    state.recorder.level()
-}
-
-#[tauri::command]
 pub fn list_microphones(state: State<'_, AppState>) -> CommandResult<Vec<MicrophoneInfo>> {
     let selected = state
         .database
@@ -249,8 +244,7 @@ fn save_settings_blocking(
     state.clear_shortcut_interaction_state();
     // The overlay lives in its own webview and reads settings once on mount, so
     // appearance and hotkey changes have to be pushed to it.
-    let _ = app.emit("wind-speak://settings-changed", settings.clone());
-    let _ = app.emit("atmospeak://settings-changed", settings.clone());
+    let _ = app.emit("atmospeak://settings-changed", settings);
     let snapshot = database.snapshot().map_err(|e| e.to_string())?;
     drop(database);
     remove_managed_recordings(&state.app_dir, expired_audio);
@@ -623,8 +617,7 @@ pub async fn complete_onboarding(
         return Err(error.to_string());
     }
     state.clear_shortcut_interaction_state();
-    let _ = app.emit("atmospeak://settings-changed", settings.clone());
-    let _ = app.emit("wind-speak://settings-changed", settings);
+    let _ = app.emit("atmospeak://settings-changed", settings);
 
     let window_app = app.clone();
     let finish_result =

@@ -124,21 +124,6 @@ export interface LiveTranscriptEvent {
   firstPartialLatencyMs: number | null;
 }
 
-export interface StreamingMetrics {
-  sessionId: string;
-  backend: "vulkan" | "cpu" | "host" | "cli";
-  modelId: string;
-  firstPartialMs: number | null;
-  stopAckMs: number;
-  finalizeMs: number;
-  pasteMs: number;
-  processedDuringRecordingMs: number;
-  tailAudioMs: number;
-  maxBacklogMs: number;
-  audioFramesDropped: number;
-  fallbackReason: string | null;
-}
-
 export interface NativeDictationEvent {
   generation: number;
   recording: RecordingStarted | null;
@@ -300,20 +285,6 @@ export interface UpdateCheckResult {
   message: string;
 }
 
-export interface ReleaseArtifact {
-  id: string;
-  label: string;
-  fileName: string;
-  kind: "installer" | "msi" | "portable" | "metadata" | "checksum";
-  url: string;
-  recommended: boolean;
-}
-
-export interface DownloadArtifact extends ReleaseArtifact {
-  sizeBytes: number | null;
-  sha256: string | null;
-}
-
 export type HubTab =
   | "home"
   | "history"
@@ -325,8 +296,6 @@ export interface AppNotice {
   tone: "neutral" | "success" | "warning" | "error";
   message: string;
 }
-
-// "warning" is allowed for soft UX notices (e.g. shortcuts paused).
 
 /** Shared onboarding contract — must match Rust `ONBOARDING_VERSION`. */
 export const ONBOARDING_VERSION = "atmospeak-setup-v2";

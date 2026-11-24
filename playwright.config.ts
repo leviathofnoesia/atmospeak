@@ -5,6 +5,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:1420",
     trace: "on-first-retry",
+    locale: "en-US",
+    timezoneId: "America/New_York",
     ...devices["Desktop Chrome"],
   },
   webServer: {

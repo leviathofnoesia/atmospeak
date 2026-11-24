@@ -18,13 +18,10 @@ export type RecorderTheme = "dark" | "light";
 export type RecorderWaveStyle = "ribbon" | "bars" | "pulse";
 export type RecorderDockShape = "orb" | "capsule" | "tape";
 export type RecorderMotion = "lively" | "calm";
-export type BubbleSize = "small" | "medium" | "large";
 
-// Kept for back-compat with callers that still import these names.
 interface LiveTranscript {
   sessionId: string | null;
   phase: "idle" | "partial" | "stable" | "final" | "error";
-  text?: string;
   stableText?: string;
   partialText?: string;
   latencyMs: number | null;
@@ -43,9 +40,6 @@ interface RecorderOverlayProps {
   actionNotice?: string;
   liveTranscript?: LiveTranscript;
   inputLevel?: number;
-  inputBands?: number[];
-  bubbleOpacity?: number;
-  bubbleSize?: BubbleSize;
   hostApp?: string;
   accent?: RecorderAccent;
   theme?: RecorderTheme;
@@ -61,8 +55,6 @@ interface RecorderOverlayProps {
   motion?: RecorderMotion;
   onToggle: () => void;
   onCancel: () => void;
-  onPressStart?: () => void;
-  onPressEnd?: () => void;
   onOpenHub?: () => void;
   onCopyTranscript?: () => void;
   onOpenHistory?: () => void;
@@ -78,11 +70,6 @@ const ACCENTS: Record<RecorderAccent, { accent: string; soft: string; deep: stri
   lilac: { accent: "#be95c4", soft: "#d8bcdc", deep: "#7a5586", glow: "rgba(190,149,196,0.50)", neon: "#eaa6ff" },
 };
 
-const BUBBLE_SCALE: Record<BubbleSize, number> = {
-  small: 0.88,
-  medium: 1,
-  large: 1.08,
-};
 
 // ── inline glyphs (match the design's custom marks) ──────────────────
 function CheckGlyph({ size = 15 }: { size?: number }) {
@@ -251,9 +238,6 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     modelStatus,
     liveTranscript,
     inputLevel = 0,
-    inputBands,
-    bubbleOpacity,
-    bubbleSize = "medium",
     hostApp = "your cursor",
     hotkeyLabel = "your shortcut",
     shortcutArmed = false,
@@ -320,13 +304,11 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
   const txRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ sx: number; sy: number; moved: boolean } | null>(null);
 
-  // live amplitude target read by the wave — fed from real input level/bands
   const levelRef = useRef(0.05);
-  const peakBand = inputBands && inputBands.length ? Math.max(...inputBands) : 0;
-  levelRef.current = Math.max(0.04, Math.min(1, Math.max(inputLevel, peakBand)));
+  levelRef.current = Math.max(0.04, Math.min(1, inputLevel));
 
   // keep the latest words in view; only fade the left once text overflows
-  const stableTranscript = liveTranscript?.stableText ?? liveTranscript?.text ?? "";
+  const stableTranscript = liveTranscript?.stableText ?? "";
   const partialTranscript = liveTranscript?.partialText ?? "";
   const transcript = `${stableTranscript} ${partialTranscript}`.trim();
   useEffect(() => {
@@ -399,9 +381,9 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
     "--accent-deep": pigment.deep,
     "--accent-glow": pigment.glow,
     "--neon": pigment.neon,
-    "--dock-scale": BUBBLE_SCALE[bubbleSize] ?? BUBBLE_SCALE.medium,
+    "--dock-scale": 1,
     "--dur-breath": motion === "calm" ? "8s" : "5s",
-    opacity: bubbleOpacity != null && bubbleOpacity > 0 ? bubbleOpacity : undefined,
+    opacity: 1,
   } as CSSProperties;
 
   const modelReady = modelStatus?.ready ?? true;
@@ -418,7 +400,7 @@ function RecorderOverlayComponent(props: RecorderOverlayProps) {
         ref={dockRef}
         data-state={compactError ? "rest" : state}
         data-shape={dockShape}
-        data-size={bubbleSize}
+        data-size="medium"
         data-recovery={compactError || undefined}
         data-theme={theme}
         data-tauri-drag-region

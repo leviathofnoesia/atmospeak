@@ -439,6 +439,6 @@ mod tests {
             .expect("read command")
             .expect("command frame");
         assert_eq!(decoded, command);
-        assert_eq!(PROTOCOL_VERSION, 2);
+        assert_eq!(PROTOCOL_VERSION, 3);
     }
 }

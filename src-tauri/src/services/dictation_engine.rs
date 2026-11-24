@@ -69,7 +69,6 @@ enum EngineCmd {
     MicCheckStop {
         reply: SyncSender<Result<(), String>>,
     },
-    Shutdown,
 }
 
 #[derive(Clone)]
@@ -153,26 +152,6 @@ impl EngineHandle {
                 queued_at: Instant::now(),
             })
             .is_ok()
-    }
-
-    pub fn dispatch_with_ack(&self, action: EngineAction) -> Result<DispatchResult, String> {
-        if action == EngineAction::Cancel {
-            let _ = self
-                .delivery_boundary
-                .request_cancel(self.cancel_requested.as_ref());
-        }
-        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        self.tx
-            .send(EngineCmd::Action {
-                action,
-                gesture: None,
-                reply: Some(reply_tx),
-                queued_at: Instant::now(),
-            })
-            .map_err(|_| "dictation engine is not running".to_string())?;
-        reply_rx
-            .recv_timeout(Duration::from_secs(5))
-            .map_err(|_| "dictation engine did not acknowledge action".to_string())
     }
 
     pub fn dispatch_gesture(&self, action: EngineAction, gesture: ShortcutGesture) -> bool {
@@ -469,7 +448,6 @@ impl Worker {
                 continue;
             };
             match cmd {
-                EngineCmd::Shutdown => break,
                 EngineCmd::Action {
                     action,
                     gesture,

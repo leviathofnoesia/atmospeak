@@ -30,7 +30,6 @@ interface PasteTestState {
   message: string;
 }
 interface ShortcutCaptureState {
-  arming: boolean;
   active: boolean;
   keys: string[];
   message: string;
@@ -93,7 +92,6 @@ const MODEL_COPY: Record<string, { tag: string; desc: string }> = {
   },
 };
 
-// ── small inline glyphs ──
 function Glyph({ d, size = 16, sw = 2 }: { d: string; size?: number; sw?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw}
@@ -214,7 +212,7 @@ export function Onboarding(props: OnboardingProps) {
         <aside className="ob-rail">
           <div className="ob-brand">
             <span className="ob-aura"><Aura size={40} active /></span>
-            <span className="wm"><strong>Atmospeak Pro</strong><span>Pro setup / on device</span></span>
+            <span className="wm"><strong>Atmospeak</strong><span>Setup on this device</span></span>
           </div>
           <nav className="ob-steps">
             {STEPS.map((s, i) => (
@@ -242,7 +240,7 @@ export function Onboarding(props: OnboardingProps) {
             {step === 0 && (
               <div className="ob-fade">
                 <div className="ob-hero-aura"><Aura size={132} active /></div>
-                <div className="ob-kick">Welcome / Atmospeak Pro setup</div>
+                <div className="ob-kick">Welcome / Atmospeak setup</div>
                 <h1 className="ob-h">Your private voice workspace<br />starts <em>here.</em></h1>
                 <p className="ob-lede">
                   Atmospeak turns your voice into clean text wherever your cursor rests — transcribed entirely
@@ -421,19 +419,15 @@ export function Onboarding(props: OnboardingProps) {
                     <button
                       className={`ob-preset${shortcutCapture.active ? " is-recording" : ""}`}
                       type="button"
-                      disabled={shortcutTest.active || shortcutCapture.active || shortcutCapture.arming}
+                      disabled={shortcutTest.active || shortcutCapture.active}
                       onClick={onRecordShortcut}
                     >
-                      {shortcutCapture.arming
-                        ? "Arming..."
-                        : shortcutCapture.active
-                          ? "Recording keys..."
-                          : "Record shortcut"}
+                      {shortcutCapture.active ? "Recording keys..." : "Record shortcut"}
                     </button>
                     <button
                       className="ob-preset"
                       type="button"
-                      disabled={shortcutTest.active || shortcutCapture.active || shortcutCapture.arming}
+                      disabled={shortcutTest.active || shortcutCapture.active}
                       onClick={onTestShortcut}
                     >
                       {shortcutTest.active
@@ -560,7 +554,7 @@ export function Onboarding(props: OnboardingProps) {
                     {pasteTest.running ? "Testing paste…" : "Run paste test"}
                   </button>
                 </div>
-                {pasteTest.message && pasteTest.message !== "Paste test has not run yet." ? (
+                {pasteTest.message ? (
                   <p className="ob-keyhint">{pasteTest.message}</p>
                 ) : null}
                 {completionError ? <p className="ob-keyhint ob-error">{completionError}</p> : null}
