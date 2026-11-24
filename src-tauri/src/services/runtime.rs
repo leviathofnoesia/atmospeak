@@ -214,7 +214,7 @@ fn resolve_bundled_model(app: &AppHandle) -> Result<PathBuf> {
         Ok(path)
     } else {
         Err(anyhow!(
-            "Bundled Parakeet model directory is incomplete."
+            "Bundled Parakeet GGUF is missing or has the wrong size."
         ))
     }
 }

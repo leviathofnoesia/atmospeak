@@ -1361,7 +1361,7 @@ impl Worker {
                 app.state::<AppState>()
                     .database
                     .lock()
-                    .insert_session(&session)?;
+                    .update_session_checkpoint(&session)?;
 
                 if let Some(selection) = selected_edit.as_ref() {
                     cleaned_text = crate::services::voice_edit::rewrite(
@@ -1376,7 +1376,7 @@ impl Worker {
                     app.state::<AppState>()
                         .database
                         .lock()
-                        .insert_session(&session)?;
+                        .update_session_checkpoint(&session)?;
                 }
 
                 // Remote OpenAI-compatible polish stays copy-only unless the user
@@ -1571,7 +1571,7 @@ impl Worker {
                 &self.app,
                 "dictation-failed",
                 format!(
-                    "session={} outcome=failed_or_cancelled; audio and available text retained",
+                    "session={} outcome=failed_or_cancelled",
                     recording
                         .as_ref()
                         .map_or("unknown", |recording| recording.id.as_str())
@@ -1585,11 +1585,29 @@ impl Worker {
                     .as_ref()
                     .map(|injection| injection.injected)
                     .unwrap_or(false);
+                let save_result = state
+                    .database
+                    .lock()
+                    .update_session_checkpoint(&result.session);
+                let saved = match save_result {
+                    Ok(saved) => saved,
+                    Err(error) => {
+                        metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
+                        false
+                    }
+                };
                 let message = result
                     .injection
                     .as_ref()
                     .map(|injection| injection.message.clone())
-                    .unwrap_or_else(|| "Transcript saved to history.".to_string());
+                    .unwrap_or_else(|| {
+                        if saved {
+                            "Transcript saved to history."
+                        } else {
+                            "Dictation finished."
+                        }
+                        .to_string()
+                    });
                 let (phase, engine_state) = if injected {
                     (DictationPhase::Pasted, EngineState::Pasted)
                 } else if result.injection.is_some() {
@@ -1598,10 +1616,6 @@ impl Worker {
                 } else {
                     (DictationPhase::Saved, EngineState::Pasted)
                 };
-                let state = self.app.state::<AppState>();
-                if let Err(error) = state.database.lock().insert_session(&result.session) {
-                    metrics::emit_runtime(&self.app, "session-save-error", error.to_string());
-                }
                 state.live_paste.clear();
                 drop(state);
                 // History must contain the completed text before the UI refreshes it.
@@ -1621,12 +1635,20 @@ impl Worker {
                 Ok(result)
             }
             Err(error) => {
+                let saved_id = recording
+                    .as_ref()
+                    .map(|value| value.id.as_str())
+                    .filter(|id| {
+                        state.database.lock().get_session(id).is_ok_and(|session| session.is_some())
+                    });
                 let message = if error.to_string() == "dictation cancelled"
                     || self.processing_cancelled()
                 {
-                    Self::cancellation_message(recording.as_ref().map(|value| value.id.as_str()))
-                } else {
+                    Self::cancellation_message(saved_id)
+                } else if saved_id.is_some() {
                     format!("{error}. Captured audio and available text are saved in History.")
+                } else {
+                    error.to_string()
                 };
                 self.state = EngineState::Error;
                 self.active_recording = None;

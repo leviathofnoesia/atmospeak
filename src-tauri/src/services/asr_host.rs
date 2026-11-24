@@ -26,7 +26,6 @@ pub const DICTATION_CANCELLED: &str = "dictation cancelled";
 
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const MAX_CAPTURED_OUTPUT_BYTES: usize = 64 * 1024;
-const MINIMUM_MODEL_FILES: usize = 8;
 const REPLAY_BASE_TIMEOUT: Duration = Duration::from_secs(30);
 const REPLAY_MAX_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const REPLAY_BYTES_PER_SECOND: u64 = 32_000;
@@ -271,16 +270,9 @@ impl AsrHost {
                 self.executable.display()
             ));
         }
-        if !self.model_path.is_dir() {
+        if !super::model_downloader::is_model_file_ready(&self.model_path) {
             return Err(anyhow!(
-                "speech model directory not found at {}",
-                self.model_path.display()
-            ));
-        }
-        let model_file_count = model_file_count(&self.model_path);
-        if model_file_count < MINIMUM_MODEL_FILES {
-            return Err(anyhow!(
-                "speech model directory at {} is incomplete: found {model_file_count} regular files, need at least {MINIMUM_MODEL_FILES}",
+                "Parakeet GGUF is missing or has the wrong size at {}",
                 self.model_path.display()
             ));
         }
@@ -475,19 +467,6 @@ fn format_diagnostics(output: &CapturedOutput) -> String {
         diagnostics.push_str(" [stderr truncated]");
     }
     diagnostics
-}
-
-fn model_file_count(path: &Path) -> usize {
-    let Ok(entries) = std::fs::read_dir(path) else {
-        return 0;
-    };
-
-    entries
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| entry.file_type().ok())
-        .filter(|file_type| file_type.is_file())
-        .take(MINIMUM_MODEL_FILES)
-        .count()
 }
 
 fn replay_timeout_for(wav_path: &Path) -> Result<Duration> {

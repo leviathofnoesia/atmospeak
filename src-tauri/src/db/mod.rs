@@ -221,7 +221,8 @@ impl Database {
                 session_id, backend, model_id, first_partial_ms, stop_ack_ms,
                 finalize_ms, paste_ms, processed_during_recording_ms, tail_audio_ms,
                 max_backlog_ms, audio_frames_dropped, fallback_reason, created_at
-             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ) select ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+             where exists (select 1 from transcript_sessions where id = ?1)
              on conflict(session_id) do update set
                 backend = excluded.backend,
                 model_id = excluded.model_id,
@@ -370,6 +371,26 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    /// Complete an existing capture without recreating a row deleted from History.
+    pub fn update_session_checkpoint(&self, session: &TranscriptSession) -> Result<bool> {
+        let updated = self.connection.execute(
+            "update transcript_sessions
+             set raw_text = ?2, cleaned_text = ?3, polished_text = ?4,
+                 word_count = ?5, injected = ?6, source_application = ?7
+             where id = ?1",
+            params![
+                session.id,
+                session.raw_text,
+                session.cleaned_text,
+                session.polished_text,
+                session.word_count as i64,
+                bool_to_i64(session.injected),
+                session.source_application,
+            ],
+        )?;
+        Ok(updated != 0)
     }
 
     pub fn list_sessions(&self) -> Result<Vec<TranscriptSession>> {
@@ -727,6 +748,7 @@ mod tests {
         assert!(copyable_text(&latest).is_none());
         assert!(db.get_session("missing").unwrap().is_none());
         db.delete_session("new").unwrap();
+        assert!(!db.update_session_checkpoint(&latest).unwrap());
         assert_eq!(db.latest_session().unwrap().unwrap().id, "old");
     }
 
@@ -834,9 +856,7 @@ mod tests {
         database
             .insert_session(&checkpoint)
             .expect("save checkpoint");
-        database
-            .insert_session(&session)
-            .expect("complete checkpoint");
+        assert!(database.update_session_checkpoint(&session).expect("complete checkpoint"));
         let loaded = database.list_sessions().expect("list sessions");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].raw_text, "hello");
@@ -845,7 +865,8 @@ mod tests {
         assert_eq!(loaded[0].source_application.as_deref(), Some("Notepad"));
 
         let pruned = database.prune_sessions(30).expect("prune sessions");
-        assert_eq!(pruned, vec![session.audio_path]);
+        assert_eq!(pruned, vec![session.audio_path.clone()]);
+        assert!(!database.update_session_checkpoint(&session).expect("late completion"));
         assert!(
             database
                 .list_sessions()

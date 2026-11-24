@@ -10,7 +10,7 @@ use crate::{
     services::{
         app_state::AppState,
         dictation_engine::{self, EngineAction},
-        injection, model_downloader, overlay_window, polish, proc, runtime, shortcuts, sound_check,
+        injection, metrics, model_downloader, overlay_window, polish, proc, runtime, shortcuts, sound_check,
         startup, window_manager,
     },
 };
@@ -534,7 +534,10 @@ pub async fn complete_onboarding(
 ) -> CommandResult<AppSnapshot> {
     crate::services::application_profiles::validate(&settings)
         .map_err(|error| error.to_string())?;
-    crate::services::voice_edit::validate_hotkey(&settings).map_err(|error| error.to_string())?;
+    if let Err(error) = crate::services::voice_edit::validate_hotkey(&settings) {
+        metrics::emit_runtime(&app, "voice-edit-shortcut-error", error.to_string());
+        settings.voice_edit_hotkey.clear();
+    }
     let persisted = state
         .database
         .lock()
@@ -588,11 +591,6 @@ pub async fn complete_onboarding(
             shortcuts::set_paused(&shortcut_app, shortcut_status, shortcuts_paused, true);
             return Err(error.to_string());
         }
-        if let Err(error) = crate::services::voice_edit::register(&shortcut_app, "", &edit_hotkey) {
-            let _ = startup::set_start_at_login(previous_start_at_login);
-            shortcuts::set_paused(&shortcut_app, shortcut_status, shortcuts_paused, true);
-            return Err(error.to_string());
-        }
         Ok(shortcut)
     })
     .await
@@ -620,10 +618,15 @@ pub async fn complete_onboarding(
     let _ = app.emit("atmospeak://settings-changed", settings);
 
     let window_app = app.clone();
-    let finish_result =
-        tauri::async_runtime::spawn_blocking(move || window_manager::finish_setup(&window_app))
-            .await
-            .map_err(|error| error.to_string())?;
+    let finish_result = tauri::async_runtime::spawn_blocking(move || {
+        window_manager::finish_setup(&window_app)?;
+        if let Err(error) = crate::services::voice_edit::register(&window_app, "", &edit_hotkey) {
+            metrics::emit_runtime(&window_app, "voice-edit-shortcut-error", error.to_string());
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .map_err(|error| error.to_string())?;
     if let Err(error) = finish_result {
         {
             let database = state.database.lock();

@@ -96,7 +96,7 @@ fn streaming_warmup_is_current(app: &tauri::AppHandle, generation: u64) -> bool 
 }
 
 /// Publish the generic CPU host without warming a second model copy. The host
-/// validates the shared executable and model directory when first used.
+/// validates the shared executable and model file when first used.
 pub(crate) fn publish_lazy_asr_host(app: &tauri::AppHandle) {
     let Ok(settings) = app.state::<AppState>().database.lock().load_settings() else {
         return;
