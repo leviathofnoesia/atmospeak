@@ -81,6 +81,7 @@ pub fn inventory(app_dir: &Path) -> Vec<ModelInventoryItem> {
                 bundled: false,
                 path: installed.then(|| path.to_string_lossy().to_string()),
                 size_mb: Some((model.size_bytes + 1024 * 1024 - 1) / (1024 * 1024)),
+                speech: None,
             }
         })
         .collect()

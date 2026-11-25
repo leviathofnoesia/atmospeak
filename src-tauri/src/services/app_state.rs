@@ -35,6 +35,7 @@ pub struct AppState {
     pub shortcut_capture_active: Arc<Mutex<bool>>,
     pub last_external_target_window: Arc<Mutex<Option<isize>>>,
     pub runtime_events: Arc<Mutex<Vec<RuntimeEvent>>>,
+    pub speech_model_operation: Mutex<()>,
     pub model_download_cancel: Arc<AtomicBool>,
     level_stream_generation: AtomicU64,
     model_download_active: Mutex<Option<String>>,
@@ -85,6 +86,7 @@ impl AppState {
             shortcut_capture_active: Arc::new(Mutex::new(false)),
             last_external_target_window: Arc::new(Mutex::new(None)),
             runtime_events: Arc::new(Mutex::new(runtime_events)),
+            speech_model_operation: Mutex::new(()),
             model_download_cancel: Arc::new(AtomicBool::new(false)),
             level_stream_generation: AtomicU64::new(0),
             model_download_active: Mutex::new(None),
@@ -286,18 +288,19 @@ impl AppState {
     }
 
     pub fn finish_model_download(&self) {
-        *self.model_download_active.lock() = None;
+        let mut active = self.model_download_active.lock();
+        *active = None;
         self.model_download_cancel
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn cancel_model_download(&self) -> bool {
-        let active = self.model_download_active.lock().is_some();
-        if active {
+        let active = self.model_download_active.lock();
+        if active.is_some() {
             self.model_download_cancel
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        active
+        active.is_some()
     }
 
     pub fn begin_level_stream(&self) -> u64 {

@@ -75,6 +75,8 @@ fn save_settings_blocking(
     crate::services::voice_edit::validate_hotkey(&settings).map_err(|error| error.to_string())?;
 
     let state = app.state::<AppState>();
+    let _model_operation = state.speech_model_operation.try_lock()
+        .ok_or("Wait for the speech model operation to finish before saving Settings.")?;
     let previous_settings = state
         .database
         .lock()
@@ -147,9 +149,14 @@ fn save_settings_blocking(
     }
 
     let runtime_changed = previous_settings.active_model_id != settings.active_model_id
+        || previous_settings.speech_language != settings.speech_language
         || previous_settings.advanced_runtime_enabled != settings.advanced_runtime_enabled
         || previous_settings.advanced_model_path != settings.advanced_model_path
         || previous_settings.advanced_asr_executable_path != settings.advanced_asr_executable_path;
+    if runtime_changed {
+        ensure_model_switch_allowed(&state)?;
+        runtime::resolve_runtime(&app, &settings).map_err(|error| error.to_string())?;
+    }
     let setup_complete = settings.onboarding_complete
         && settings.onboarding_version == crate::ONBOARDING_VERSION
         && settings
@@ -249,9 +256,7 @@ fn save_settings_blocking(
     drop(database);
     remove_managed_recordings(&state.app_dir, expired_audio);
     if runtime_changed {
-        state.shutdown_streaming_asr();
-        state.shutdown_asr_host();
-        crate::start_preferred_asr(&app);
+        restart_speech_runtime(&app, &state);
     }
     Ok(snapshot)
 }
@@ -954,9 +959,66 @@ pub fn get_model_inventory(
     Ok(runtime::model_inventory(&app, &settings))
 }
 
+fn ensure_model_switch_allowed(state: &AppState) -> CommandResult<()> {
+    use crate::models::DictationPhase;
+
+    let phase = state.dictation_snapshot.lock().snapshot().map(|event| event.phase);
+    if matches!(phase, Some(DictationPhase::Listening | DictationPhase::Finalizing)) {
+        return Err("Finish dictating before switching speech models.".into());
+    }
+    Ok(())
+}
+
+fn restart_speech_runtime(app: &AppHandle, state: &AppState) {
+    state.shutdown_streaming_asr();
+    state.shutdown_asr_host();
+    crate::publish_lazy_asr_host(app);
+    crate::start_preferred_asr(app);
+}
+
+#[tauri::command]
+pub async fn select_model(app: AppHandle, model_id: String, language: Option<String>) -> CommandResult<AppSnapshot> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let _operation = state.speech_model_operation.try_lock()
+            .ok_or("Wait for the speech model operation to finish before switching.")?;
+        let database = state.database.lock();
+        let mut settings = database.load_settings().map_err(|error| error.to_string())?;
+        let model = atmospeak_asr_protocol::speech_models::by_id(&model_id)
+            .ok_or("Unknown speech model.")?;
+        let next_language = match language {
+            Some(language) if model.supports_language(&language) => language,
+            Some(_) => return Err(format!("{} does not support the selected language.", model.label)),
+            None => model.language_or_default(&settings.speech_language).to_string(),
+        };
+        if settings.active_model_id == model_id && !settings.advanced_runtime_enabled
+            && settings.speech_language == next_language
+        {
+            return database.snapshot().map_err(|error| error.to_string());
+        }
+        ensure_model_switch_allowed(&state)?;
+        settings.active_model_id = model_id;
+        settings.speech_language = next_language;
+        settings.advanced_runtime_enabled = false;
+        if !settings.onboarding_complete {
+            settings.audio_calibration = None;
+        }
+        runtime::resolve_runtime(&app, &settings).map_err(|error| error.to_string())?;
+        database.save_settings(&settings).map_err(|error| error.to_string())?;
+        let snapshot = database.snapshot().map_err(|error| error.to_string())?;
+        drop(database);
+        restart_speech_runtime(&app, &state);
+        let _ = app.emit("atmospeak://settings-changed", settings);
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 pub async fn download_model(app: AppHandle, model_id: String) -> CommandResult<ModelInventory> {
     let download_app = app.clone();
+    let downloaded_id = model_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         model_downloader::download(&download_app, &model_id)
     })
@@ -965,13 +1027,15 @@ pub async fn download_model(app: AppHandle, model_id: String) -> CommandResult<M
     .map_err(|error| error.to_string())?;
 
     let state = app.state::<AppState>();
-    state.shutdown_asr_host();
-    crate::publish_lazy_asr_host(&app);
     let settings = state
         .database
         .lock()
         .load_settings()
         .map_err(|error| error.to_string())?;
+    if settings.active_model_id == downloaded_id && state.asr_host().is_none() {
+        crate::publish_lazy_asr_host(&app);
+        crate::start_preferred_asr(&app);
+    }
     Ok(runtime::model_inventory(&app, &settings))
 }
 
@@ -986,11 +1050,14 @@ pub fn delete_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> CommandResult<ModelInventory> {
-    model_downloader::delete(&app, &model_id).map_err(|error| error.to_string())?;
+    let _operation = state.speech_model_operation.try_lock()
+        .ok_or("Wait for the speech model operation to finish before deleting a model.")?;
     let settings = state
         .database
         .lock()
         .load_settings()
+        .map_err(|error| error.to_string())?;
+    model_downloader::delete(&state, &model_id, &settings.active_model_id)
         .map_err(|error| error.to_string())?;
     Ok(runtime::model_inventory(&app, &settings))
 }

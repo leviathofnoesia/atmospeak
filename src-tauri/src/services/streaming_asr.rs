@@ -36,6 +36,7 @@ pub struct StreamingAsr {
     child: Mutex<Child>,
     sequence: Mutex<SequenceState>,
     backend: AsrBackend,
+    language: String,
     first_partial_ms: Arc<AtomicU64>,
     session_started: Arc<Mutex<Option<Instant>>>,
     delivery_failed: Arc<AtomicBool>,
@@ -109,6 +110,7 @@ impl StreamingAsr {
         app: AppHandle,
         executable: PathBuf,
         model_path: PathBuf,
+        language: String,
         threads: u16,
         startup_is_current: impl Fn() -> bool,
     ) -> Result<Arc<Self>> {
@@ -244,6 +246,7 @@ impl StreamingAsr {
             child: Mutex::new(child),
             sequence: Mutex::new(SequenceState::default()),
             backend,
+            language,
             first_partial_ms,
             session_started,
             delivery_failed,
@@ -266,6 +269,9 @@ impl StreamingAsr {
             AsrEvent::Ready { capabilities }
                 if capabilities.protocol_version == PROTOCOL_VERSION =>
             {
+                if !capabilities.streaming {
+                    return Err(anyhow!("The loaded voice model does not stream."));
+                }
                 Ok(host)
             }
             AsrEvent::Ready { capabilities } => Err(anyhow!(
@@ -289,7 +295,7 @@ impl StreamingAsr {
         let mut sequence = self.sequence.lock();
         self.send(&AsrCommand::StartSession {
             session_id: session_id.clone(),
-            language: "en".to_string(),
+            language: self.language.clone(),
             initial_prompt: prompt,
             profile,
         })?;

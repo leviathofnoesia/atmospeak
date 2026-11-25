@@ -17,13 +17,13 @@
 <p align="center">
   <a href="https://www.novpax.org/projects/atmospeak"><strong>Website</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.4"><strong>Download v1.0.4</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.5"><strong>Download v1.0.5</strong></a>
   ·
-  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.4"><strong>Release notes</strong></a>
+  <a href="https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.5"><strong>Release notes</strong></a>
 </p>
 
-Atmospeak is a Windows desktop dictation app built around the bundled
-Parakeet Unified English 0.6B CPU engine. It requires no account and sends no
+Atmospeak is a Windows desktop dictation app with offline English speech
+recognition on the CPU. It requires no account and sends no
 microphone audio to a transcription service.
 
 ## Free dictation
@@ -32,9 +32,9 @@ Free dictation is unlimited and works without an account.
 
 - **Speak and paste.** Hold or tap your hotkey, watch the live preview in the
   dock, and get exactly one paste into whatever application had focus. The
-  bundled speech engine runs locally on the CPU and is English-only.
-- **Bundled Parakeet speech.** English dictation with live preview and local
-  punctuation. The bundled Q8_0 model uses about 697 MiB of disk space.
+  speech engine runs locally on the CPU and is configured for English.
+- **Offline speech models.** Parakeet Unified English is the default. Settings
+  lets you download and switch to speech models from the Handy catalog.
 - **Control how each app receives dictation.** Set app-specific cleanup and
   writing preferences. Use Ctrl+Alt+E to edit the current text selection by voice.
 - **Deterministic Backtrack.** Cleanup collapses stutters, applies
@@ -51,14 +51,14 @@ Free dictation is unlimited and works without an account.
   recovery, export, undo / redo for AI edits, a personal dictionary, snippets,
   and local diagnostics — all on disk, on your machine.
 
-Latest patch notes: [`docs/releases/v1.0.4.md`](docs/releases/v1.0.4.md).
+Latest patch notes: [`docs/releases/v1.0.5.md`](docs/releases/v1.0.5.md).
 The 1.0.0 product declaration remains in
 [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md).
 
 ## Install
 
 Atmospeak currently supports **Windows 10/11 x64**. Download free installers
-from [GitHub Releases](https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.4).
+from [GitHub Releases](https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.5).
 
 | Package | Use it when |
 | --- | --- |
@@ -167,13 +167,12 @@ when you enable the toggle). The paste path never waits on a model download.
 
 ## Speech engine
 
-Atmospeak bundles Parakeet Unified English 0.6B Q8_0. The 731,357,568-byte
-GGUF runs on the CPU through transcribe.cpp. Settings shows Handy?s
-reference accuracy and speed measurements. Recordings, History, and
-previously downloaded model files remain on disk during an upgrade.
-
-Debug builds support a custom ASR executable and a verified copy of the
-bundled Parakeet weights. Release packages include both with the model license.
+Parakeet Unified English 0.6B Q8_0 is the default model. Download it or a
+model from the Handy catalog. Settings lets you compare languages, download
+sizes, and Handy's reference CPU speed and error rates. Models with live
+preview transcribe as you speak. Other models transcribe from the captured
+recording when you stop. Downloaded weights live in your user profile and
+can be used offline. Choose Use before removing your previous model.
 
 Optional **AI edit** model (separate from speech recognition):
 
@@ -187,7 +186,7 @@ Optional **AI edit** model (separate from speech recognition):
 flowchart TD
   A[Hold / Tap shortcut or dock] --> B[Rust dictation engine]
   B --> C[CPAL capture → mono 16 kHz]
-  C --> D[Parakeet CPU sidecar → rolling preview]
+  C --> D[Speech CPU sidecar → rolling preview]
   D --> E[Durable WAV replay → same CPU sidecar → final transcript]
   E --> F[Tail reconcile → cleanup + Backtrack]
   F --> G{AI auto-edit ready?}
@@ -197,8 +196,7 @@ flowchart TD
   I --> J
 ```
 
-Streaming preview and durable-WAV replay use the same bundled Parakeet CPU
-engine. Audio quality checks are advisory: quiet, noisy, or clipped input can
+Streaming preview and durable-WAV replay use the same selected CPU model. Audio quality checks are advisory: quiet, noisy, or clipped input can
 emit a warning, but the captured WAV remains available in History and the
 warning does not delete audio or abort dictation.
 
@@ -218,14 +216,14 @@ cd atmospeak
 git lfs install
 bun install
 
-# Build the pinned CPU decoder and stage the verified Parakeet weights.
-powershell -ExecutionPolicy Bypass -File scripts/build-asr-sidecars.ps1
+# Build the pinned CPU decoder.
+powershell -ExecutionPolicy Bypass -File scripts/build-asr-sidecars.ps1 -SkipModel
 bun run tauri dev
 ```
 
 Use an E: checkout for native builds. The first build downloads the pinned
-transcribe.cpp source and Parakeet GGUF. The package includes the speech
-sidecar, CPU backend DLLs, model, and license notices.
+transcribe.cpp source. The package includes the speech sidecar, CPU backend
+DLLs, and license notices.
 See [Model bootstrap](docs/MODEL_BOOTSTRAP.md).
 
 ## Validate a change
@@ -258,7 +256,7 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
 - Unsigned installers; SmartScreen warnings remain.
 - No cloud STT, mobile client, cross-device synchronization, or live typing
   into the target application.
-- The bundled ASR engine supports English only and runs on the CPU.
+- The speech engine runs on the CPU. The selected model determines supported languages and live preview.
 - Live preview is local and appears only in the Atmospeak dock.
 - AI auto-edit is optional and must not block paste; first-time setup is
   Settings-driven and downloads ~470&nbsp;MB once.
@@ -269,7 +267,7 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
 
 ## What is free
 
-Bundled local Parakeet English dictation, cleanup, Backtrack, injection,
+Local English dictation, cleanup, Backtrack, injection,
 history, dictionary, snippets, and on-device AI edit are **free, unlimited, and
 require no account** in the public MIT build.
 
@@ -279,7 +277,7 @@ gated updates, Pro-only modules such as airplane mode and the network ledger).
 See [`docs/PRO_BUILD.md`](docs/PRO_BUILD.md) and [`docs/POLAR.md`](docs/POLAR.md).
 
 Nov Pax product page: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
-Free updater feed: `https://www.novpax.org/downloads/atmospeak/free/latest.json`.
+Free updater feed: `https://github.com/leviathofnoesia/atmospeak/releases/latest/download/latest.json`.
 
 ## Project
 

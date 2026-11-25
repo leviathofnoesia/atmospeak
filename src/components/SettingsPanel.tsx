@@ -336,8 +336,8 @@ export function SettingsPanel({
           <div className="settings-section" id="settings-transcription">
             <PanelTitle icon={<Radio size={22} />} title="Local transcription" />
             <p className="muted">
-              The bundled CPU engine decodes bounded segments while you speak. Live text stays in
-              the companion and the final result is pasted only once.
+              Models with live preview show text in the companion while you speak. Other models
+              transcribe after you stop. Atmospeak pastes the final text once.
             </p>
             <ToggleRow
               icon={<Radio size={18} />}

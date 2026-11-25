@@ -1,6 +1,6 @@
 //! Bounded PCM16 WAV ingress with sample-identical downmix and resampling.
 
-use crate::parakeet::SAMPLE_RATE;
+use crate::decoder::SAMPLE_RATE;
 use anyhow::{Context, Result, bail};
 use std::{
     fs::File,

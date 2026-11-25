@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5 - Downloadable voice models
+
+Parakeet Unified English remains the recommended default for offline dictation. Setup downloads a voice model once, and dictation runs offline after that.
+
+- Browse 59 downloadable models from Handy in Settings. Filter by language and compare size, reference CPU speed, and accuracy where measured.
+- Switch dictation languages for supported models. Models with live preview show text as you speak. Other models transcribe the saved recording when you stop.
+- Download, switch, and delete models from Settings. Delete an inactive model to reclaim its disk space, and download it again anytime.
+
+The Free installer is available as a Windows x64 setup EXE, MSI, or portable ZIP.
+
 ## 1.0.4 - Parakeet and recoverable dictation (2026-11-24)
 
 ### Changed

@@ -42,6 +42,13 @@ $PreviousDebugPort = $env:ATMOSPEAK_WEBVIEW_DEBUG_PORT
 $Process = $null
 $DevServer = $null
 try {
+  $fixtureModel = Join-Path $Root "src-tauri/resources/models/parakeet-unified-en-0.6b-Q8_0.gguf"
+  if (-not (Test-Path -LiteralPath $fixtureModel -PathType Leaf)) {
+    throw "Stage the Parakeet fixture with scripts/build-asr-sidecars.ps1 before running this check."
+  }
+  $modelDir = Join-Path $ProfileDir "models"
+  New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+  Copy-Item -LiteralPath $fixtureModel -Destination $modelDir
   $Bun = Get-Command bun -ErrorAction Stop
   $DevServer = Start-Process -FilePath $Bun.Source `
     -WorkingDirectory $Root `

@@ -373,6 +373,14 @@
 .hub-shell .toggle-row > span { flex: 1; font-size: 13.5px; color: var(--ink); text-transform: none; letter-spacing: 0; font-family: var(--font-body); }
 .hub-shell .toggle-row input { margin-left: auto; }
 .hub-shell .model-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.hub-shell .speech-model-grid { max-height: 65vh; overflow: auto; padding: 2px; }
+.hub-shell .speech-model-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.hub-shell .speech-model-filters input { flex: 1 1 160px; min-width: 0; }
+.hub-shell .speech-language-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hub-shell .speech-model-filters :is(input, select), .hub-shell .speech-language-control select {
+  padding: 7px 9px; border: 1px solid rgba(18,17,19,0.2); border-radius: 6px;
+  background: #fbfbf7; color: #1b1a1d; font: inherit;
+}
 .hub-shell .model-pill { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 14px 16px; border: 1px solid rgba(18,17,19,0.14); border-radius: 10px; background: #fbfbf7; text-align: left; transition: border-color 0.18s, background 0.18s; }
 .hub-shell .model-pill:hover:not(:disabled) { border-color: rgba(18,17,19,0.3); }
 .hub-shell .model-pill:disabled { opacity: 0.5; cursor: not-allowed; }

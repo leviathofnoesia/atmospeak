@@ -91,7 +91,7 @@ fn transcribe_with_cli_primitive_inner(
     }
 
     let resolved = runtime::resolve_runtime(app, settings)?;
-    let host = AsrHost::new(resolved.executable_path, resolved.model_path)?;
+    let host = AsrHost::new(resolved.executable_path, resolved.model_path, resolved.speech_language)?;
     let text = match cancel {
         Some(cancel) => host.transcribe_cancellable(wav_path, cancel),
         None => host.transcribe(wav_path),

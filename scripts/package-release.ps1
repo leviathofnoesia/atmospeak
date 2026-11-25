@@ -40,13 +40,12 @@ $env:ATMOSPEAK_ASR_TARGET_DIR = $AsrTarget
 if ([string]::IsNullOrWhiteSpace($ReleaseRepo)) {
   $ReleaseRepo = "leviathofnoesia/atmospeak"
 }
-if ([string]::IsNullOrWhiteSpace($FreeCdnBase)) {
-  $FreeCdnBase = "https://www.novpax.org/downloads/atmospeak/free"
-}
-$FreeCdnBase = $FreeCdnBase.TrimEnd("/")
-
 $Package = Get-Content (Join-Path $Root "package.json") -Raw | ConvertFrom-Json
 $Version = [string]$Package.version
+if ([string]::IsNullOrWhiteSpace($FreeCdnBase)) {
+  $FreeCdnBase = "https://github.com/$ReleaseRepo/releases/download/v$Version"
+}
+$FreeCdnBase = $FreeCdnBase.TrimEnd("/")
 $ReleaseDir = Join-Path $Root "release\free"
 $StageDir = Join-Path $ReleaseDir "portable-stage"
 # Honor CARGO_TARGET_DIR (Cursor sandboxes redirect here). Without this, the
@@ -108,7 +107,7 @@ if (-not $SkipTauriBuild) {
     $previousCargoTargetDir = $env:CARGO_TARGET_DIR
     $sidecarExitCode = 0
     try {
-      & (Join-Path $PSScriptRoot "build-asr-sidecars.ps1")
+      & (Join-Path $PSScriptRoot "build-asr-sidecars.ps1") -SkipModel
       $sidecarExitCode = $LASTEXITCODE
     } finally {
       if ($null -eq $previousCargoTargetDir) {
@@ -265,5 +264,5 @@ if ($HasUpdaterSigningKey -and (Test-Path $UpdaterSignaturePath)) {
 }
 
 Write-Host "Free release artifacts in $ReleaseDir"
-Write-Host "Upload installers first, then latest.json last - see scripts/upload-free-cdn.md"
+Write-Host "Publish installers, signatures and latest.json together on GitHub."
 Write-Host "Pro builds: private Nov-Pax-Web products/atmospeak-pro (scripts/package-pro.ps1)."

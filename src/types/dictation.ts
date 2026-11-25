@@ -15,6 +15,7 @@ export interface AppSettings {
   onboardingVersion: string;
   audioCalibration: AudioCalibrationRecord | null;
   activeModelId: string;
+  speechLanguage: string;
   advancedRuntimeEnabled: boolean;
   advancedModelPath: string;
   advancedAsrExecutablePath: string;
@@ -249,6 +250,19 @@ export interface ModelInventory {
   models: ModelInventoryItem[];
 }
 
+export interface SpeechModelDetails {
+  description: string;
+  languages: string[];
+  supportsStreaming: boolean;
+  supportsLanguageDetection: boolean;
+  recommended: boolean;
+  sourceUrl: string;
+  benchmark: {
+    accuracy: Record<string, { grade: string; errorPercent: number }>;
+    cpuSeconds: number | null;
+  } | null;
+}
+
 export interface ModelInventoryItem {
   id: string;
   label: string;
@@ -256,6 +270,7 @@ export interface ModelInventoryItem {
   bundled: boolean;
   path: string | null;
   sizeMb: number | null;
+  speech?: SpeechModelDetails;
 }
 
 export interface ModelDownloadProgress {
@@ -313,7 +328,8 @@ export function defaultSettings(): AppSettings {
     onboardingComplete: false,
     onboardingVersion: "",
     audioCalibration: null,
-    activeModelId: "moonshine-medium-streaming-en",
+    activeModelId: "parakeet-unified-en",
+    speechLanguage: "en",
     advancedRuntimeEnabled: false,
     advancedModelPath: "",
     advancedAsrExecutablePath: "",

@@ -64,6 +64,7 @@ import {
   resetOverlayPosition,
   saveOverlayPosition,
   saveSettings,
+  selectModel,
   setShortcutTestActive,
   setShortcutsPaused,
   showFloatingControl,
@@ -950,8 +951,12 @@ function AppShell() {
       const next = await saveSettings(settingsDraft, { confirmKeyRebinding });
       setSnapshot(next);
       setSettingsDraft(next.settings);
-      const shortcut = await getShortcutStatus();
+      const [shortcut, status, inventory] = await Promise.all([
+        getShortcutStatus(), getModelStatus(), getModelInventory(),
+      ]);
       setShortcutStatus(shortcut);
+      setModelStatus(status);
+      setModelInventory(inventory);
       setNotice({ tone: "success", message: "Settings saved." });
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
@@ -960,6 +965,34 @@ function AppShell() {
       setBusyState(false);
     }
   }, [setBusyState, settingsDraft, settingsSaving]);
+
+  const switchSpeechModel = useCallback(async (modelId: string, language?: string) => {
+    const next = await selectModel(modelId, language);
+    setSnapshot(next);
+    setSettingsDraft((current) => current ? {
+      ...current,
+      activeModelId: next.settings.activeModelId,
+      speechLanguage: next.settings.speechLanguage,
+      advancedRuntimeEnabled: next.settings.advancedRuntimeEnabled,
+      audioCalibration: next.settings.audioCalibration,
+    } : next.settings);
+    if (!next.settings.onboardingComplete) {
+      setSoundCheck({ active: false, result: null, message: "Complete the sound check with this model." });
+    }
+    const [status, inventory] = await Promise.all([getModelStatus(), getModelInventory()]);
+    setModelStatus(status);
+    setModelInventory(inventory);
+  }, [setSnapshot]);
+
+  const onSelectModel = useCallback((modelId: string, language?: string) => {
+    void switchSpeechModel(modelId, language).catch((error: unknown) => {
+      const message = stringifyError(error);
+      setNotice({ tone: "error", message });
+      setModelDownload({
+        modelId, status: "error", bytesDownloaded: 0, totalBytes: null, percent: null, message,
+      });
+    });
+  }, [switchSpeechModel]);
 
   const onDownloadModel = useCallback(async (modelId: string) => {
     setModelDownload({
@@ -974,55 +1007,37 @@ function AppShell() {
       const inventory = await downloadModel(modelId);
       setModelInventory(inventory);
       const installedModel = inventory.models.find((model) => model.id === modelId);
-      const installedBytes =
-        installedModel?.sizeMb != null
-          ? Math.round(installedModel.sizeMb * 1024 * 1024)
-          : 0;
-      setModelDownload({
-        modelId,
-        status: "installed",
-        bytesDownloaded: installedBytes,
-        totalBytes: installedBytes || null,
-        percent: 100,
-        message: `${installedModel?.label ?? modelId} installed and verified.`,
-      });
+      setModelDownload((current) => current?.status === "installed" ? current : null);
       const current = settingsRef.current;
       if (current && !current.onboardingComplete) {
-        const selected = {
-          ...current,
-          activeModelId: modelId,
-          onboardingComplete: false,
-          onboardingVersion: "",
-          audioCalibration: null,
-        };
-        const saved = await saveSettings(selected);
-        setSnapshot(saved);
-        setSettingsDraft(saved.settings);
+        await switchSpeechModel(modelId, "en");
+      } else {
+        setModelStatus(await getModelStatus());
       }
-      setModelStatus(await getModelStatus());
       setNotice({
         tone: "success",
         message: current?.onboardingComplete
-          ? `${modelId} is installed. Choose Use, then save Settings to activate it.`
+          ? `${installedModel?.label ?? modelId} is installed. Choose Use to activate it.`
           : `${modelId} is installed and ready for setup.`,
       });
     } catch (error: unknown) {
-      setNotice({ tone: "error", message: stringifyError(error) });
-      throw error;
+      const message = stringifyError(error);
+      setModelDownload((current) =>
+        current?.status === "cancelled" ? current : {
+          modelId, status: "error", bytesDownloaded: 0, totalBytes: null, percent: null, message,
+        },
+      );
+      if (!message.includes("cancelled")) setNotice({ tone: "error", message });
     }
-  }, []);
+  }, [switchSpeechModel]);
 
   const onDeleteModel = useCallback(async (modelId: string) => {
     try {
       const inventory = await deleteModel(modelId);
       setModelInventory(inventory);
-      setSettingsDraft((current) =>
-        current?.activeModelId === modelId
-          ? { ...current, activeModelId: "moonshine-medium-streaming-en" }
-          : current,
-      );
-      setModelStatus(await getModelStatus());
-      setNotice({ tone: "success", message: `${modelId} was removed.` });
+      setModelDownload((current) => current?.modelId === modelId ? null : current);
+      const label = inventory.models.find((model) => model.id === modelId)?.label ?? modelId;
+      setNotice({ tone: "success", message: `${label} was removed.` });
     } catch (error: unknown) {
       setNotice({ tone: "error", message: stringifyError(error) });
     }
@@ -1226,26 +1241,7 @@ function AppShell() {
             });
           }
         }}
-        onSelectModel={(modelId) => {
-          const current = settingsRef.current;
-          if (!current) return;
-          const selected = {
-            ...current,
-            activeModelId: modelId,
-            onboardingComplete: false,
-            onboardingVersion: "",
-            audioCalibration: null,
-          };
-          setSettingsDraft(selected);
-          void saveSettings(selected)
-            .then((next) => {
-              setSnapshot(next);
-              setSettingsDraft(next.settings);
-            })
-            .catch((error: unknown) => {
-              setNotice({ tone: "error", message: stringifyError(error) });
-            });
-        }}
+        onSelectModel={(modelId) => onSelectModel(modelId, "en")}
         onDownloadModel={onDownloadModel}
         onCancelModelDownload={async () => {
           await cancelModelDownload();
@@ -1294,7 +1290,7 @@ function AppShell() {
           })}
         </nav>
         <div className="marquee-foot">
-          + ON DEVICE · NO CLOUD · MOONSHINE CPU · {modelInventory?.activeModelId ?? "MOONSHINE-MEDIUM-STREAMING-EN"} +
+          + ON DEVICE · NO CLOUD · CPU +
         </div>
       </aside>
       <main className="hub__main">
@@ -1614,19 +1610,10 @@ function AppShell() {
             }
             modelManagement={
               <ModelManagement
-                settings={settingsDraft}
+                language={settingsDraft.speechLanguage}
                 inventory={modelInventory}
                 download={modelDownload}
-                onSelect={(modelId) =>
-                  setSettingsDraft((current) =>
-                    current
-                      ? {
-                          ...current,
-                          activeModelId: modelId,
-                        }
-                      : current,
-                  )
-                }
+                onSelect={onSelectModel}
                 onDownload={onDownloadModel}
                 onCancelDownload={async () => {
                   await cancelModelDownload();

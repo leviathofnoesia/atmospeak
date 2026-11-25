@@ -1,4 +1,4 @@
-export const APP_VERSION = "1.0.4";
+export const APP_VERSION = "1.0.5";
 
 export const GITHUB_RELEASE_BASE = `https://github.com/leviathofnoesia/atmospeak/releases/download/v${APP_VERSION}`;
 

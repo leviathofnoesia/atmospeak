@@ -21,7 +21,7 @@ use atmospeak_asr_protocol::{
     AsrBackend, AsrCapabilities, AsrCommand, AsrEvent, PROTOCOL_VERSION, StreamingMetrics,
 };
 
-use crate::{parakeet::Parakeet, wire};
+use crate::{decoder::SpeechDecoder, wire};
 
 const AUDIO_DRAIN_BATCH: usize = 25;
 const IDLE_WAKE: Duration = Duration::from_millis(100);
@@ -39,7 +39,7 @@ pub struct AudioFrameMsg {
 }
 
 struct Model {
-    engine: Parakeet,
+    engine: SpeechDecoder,
     backend: AsrBackend,
 }
 
@@ -268,7 +268,7 @@ fn handle_control(
             model_path,
             backend,
             threads,
-        } => match Parakeet::load(std::path::Path::new(&model_path), backend, threads) {
+        } => match SpeechDecoder::load(std::path::Path::new(&model_path), backend, threads) {
             Ok(engine) => {
                 write_event(
                     output,
@@ -276,7 +276,7 @@ fn handle_control(
                         capabilities: AsrCapabilities {
                             protocol_version: PROTOCOL_VERSION,
                             backend,
-                            streaming: true,
+                            streaming: engine.supports_streaming(),
                             vad: false,
                         },
                     },
@@ -291,17 +291,6 @@ fn handle_control(
             initial_prompt: _,
             profile: _profile,
         } => {
-            if !is_english(&language) {
-                write_error(
-                    output,
-                    Some(session_id),
-                    &format!(
-                        "unsupported Parakeet language: {language}; only English is available"
-                    ),
-                    true,
-                )?;
-                return Ok(false);
-            }
             if model.is_none() {
                 write_error(output, Some(session_id), "model is not loaded", true)?;
                 return Ok(false);
@@ -316,7 +305,7 @@ fn handle_control(
                 return Ok(false);
             }
             let engine = &mut model.as_mut().expect("model checked above").engine;
-            if let Err(error) = engine.start() {
+            if let Err(error) = engine.start(&language) {
                 write_error(output, Some(session_id), &error.to_string(), true)?;
                 return Ok(false);
             }
@@ -365,16 +354,6 @@ fn handle_control(
     Ok(false)
 }
 
-fn is_english(language: &str) -> bool {
-    let language = language.trim().to_ascii_lowercase();
-    language.is_empty()
-        || language == "en"
-        || language == "eng"
-        || language == "en-us"
-        || language == "en_us"
-        || language == "en-gb"
-        || language == "en_gb"
-}
 
 fn append_frame(
     model: &mut Option<Model>,
@@ -527,7 +506,7 @@ fn finalize_stopped_session(
     let metrics = StreamingMetrics {
         session_id: session_id.clone(),
         backend: loaded.backend,
-        model_id: atmospeak_asr_protocol::PARAKEET_MODEL_ID.to_owned(),
+        model_id: loaded.engine.model().id.clone(),
         first_partial_ms: active.first_partial_ms,
         stop_ack_ms,
         finalize_ms: finalize_started.elapsed().as_millis() as u64,

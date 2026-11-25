@@ -159,7 +159,7 @@ function modelSection() {
     {
       name: "Parakeet Unified English 0.6B",
       id: "parakeet-unified-en",
-      use: "Bundled default · CPU",
+      use: "Default download · CPU",
       file: "parakeet-unified-en-0.6b-Q8_0.gguf",
       size: "697 MiB",
       source: "NVIDIA (GGUF conversion by Handy)",
@@ -169,7 +169,7 @@ function modelSection() {
 
   for (const model of models) {
     const row = document.createElement("div");
-    row.className = "model-row model-row--bundled";
+    row.className = "model-row";
     row.setAttribute("role", "row");
 
     const identity = document.createElement("span");
@@ -209,7 +209,7 @@ function modelSection() {
   notes.append(
     modelNote(
       "On-device processing",
-      "The bundled English model runs on the CPU. Audio and transcripts stay on your device during recognition and saved-recording recovery.",
+      "Downloaded voice models run locally on the CPU. Audio and transcripts stay on your device during recognition and saved-recording recovery.",
     ),
     modelNote(
       "Download integrity",
@@ -258,7 +258,7 @@ function downloadSection() {
     downloadCard(
       "Setup EXE",
       "Recommended",
-      "Standard Windows installer with the bundled offline English model.",
+      "Standard Windows installer. Choose a voice model during setup.",
       releaseArtifacts.setup,
       true,
     ),

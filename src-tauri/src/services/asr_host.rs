@@ -1,7 +1,7 @@
 //! Durable-WAV replay adapter for the native ASR sidecar.
 //!
 //! The sidecar contract is deliberately small: it receives `--model <path>
-//! --transcribe-wav <path>`, writes one UTF-8 transcript to stdout, and writes
+//! --transcribe-wav <path> --language <code>`, writes one UTF-8 transcript to stdout, and writes
 //! diagnostics to stderr. This module owns the child process and its pipes so
 //! cancellation and application shutdown cannot leave native work behind.
 
@@ -46,7 +46,7 @@ struct OwnedProcess {
 }
 
 impl OwnedProcess {
-    fn spawn(executable: &Path, model_path: &Path, wav_path: &Path) -> Result<Self> {
+    fn spawn(executable: &Path, model_path: &Path, wav_path: &Path, language: &str) -> Result<Self> {
         let mut command = Command::new(executable);
         if let Some(runtime_dir) = executable.parent() {
             command.current_dir(runtime_dir);
@@ -57,6 +57,8 @@ impl OwnedProcess {
             .arg(model_path)
             .arg("--transcribe-wav")
             .arg(wav_path)
+            .arg("--language")
+            .arg(language)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -249,14 +251,16 @@ impl Drop for OwnedProcess {
 pub struct AsrHost {
     executable: PathBuf,
     model_path: PathBuf,
+    language: String,
     active: Mutex<Option<Arc<OwnedProcess>>>,
 }
 
 impl AsrHost {
-    pub fn new(executable: PathBuf, model_path: PathBuf) -> Result<Self> {
+    pub fn new(executable: PathBuf, model_path: PathBuf, language: String) -> Result<Self> {
         Ok(Self {
             executable,
             model_path,
+            language,
             active: Mutex::new(None),
         })
     }
@@ -272,7 +276,7 @@ impl AsrHost {
         }
         if !super::model_downloader::is_model_file_ready(&self.model_path) {
             return Err(anyhow!(
-                "Parakeet GGUF is missing or has the wrong size at {}",
+                "Speech model is missing or has the wrong size at {}",
                 self.model_path.display()
             ));
         }
@@ -319,6 +323,7 @@ impl AsrHost {
             &self.executable,
             &self.model_path,
             wav_path,
+            &self.language,
         )?);
         *active = Some(process.clone());
         Ok(process)
@@ -617,6 +622,7 @@ mod tests {
         let host = AsrHost::new(
             PathBuf::from("does-not-exist-asr-sidecar.exe"),
             PathBuf::from("does-not-exist.bin"),
+            "en".to_string(),
         )
         .expect("client builds");
         let error = host.ensure_running().expect_err("must not start");

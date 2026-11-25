@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
+use atmospeak_asr_protocol::speech_models;
 use tauri::{AppHandle, Manager, path::BaseDirectory};
 
 use crate::models::{AppSettings, ModelInventory, ModelInventoryItem, ModelStatus, RuntimeSource};
@@ -11,24 +12,31 @@ pub struct ResolvedRuntime {
     pub source: RuntimeSource,
     pub executable_path: PathBuf,
     pub model_path: PathBuf,
+    pub speech_language: String,
+    pub supports_streaming: bool,
 }
 
 pub fn resolve_runtime(app: &AppHandle, settings: &AppSettings) -> Result<ResolvedRuntime> {
-    if settings.advanced_runtime_enabled && cfg!(debug_assertions) {
-        return Ok(ResolvedRuntime {
-            source: RuntimeSource::AdvancedOverride,
-            executable_path: validate_advanced_executable(
-                app,
-                settings.advanced_asr_executable_path.trim(),
-            )?,
-            model_path: validate_advanced_model_path(app, settings.advanced_model_path.trim())?,
-        });
-    }
-
+    let (source, executable_path, model_path) = if settings.advanced_runtime_enabled && cfg!(debug_assertions) {
+        (
+            RuntimeSource::AdvancedOverride,
+            validate_advanced_executable(app, settings.advanced_asr_executable_path.trim())?,
+            validate_advanced_model_path(app, settings.advanced_model_path.trim())?,
+        )
+    } else {
+        (
+            RuntimeSource::ManagedModel,
+            resolve_executable(app)?,
+            resolve_managed_model(app, &settings.active_model_id)?,
+        )
+    };
+    let model = speech_models::by_path(&model_path).context("Unknown speech model")?;
     Ok(ResolvedRuntime {
-        source: RuntimeSource::Bundled,
-        executable_path: resolve_executable(app)?,
-        model_path: resolve_bundled_model(app)?,
+        source,
+        executable_path,
+        model_path,
+        speech_language: model.language_or_default(&settings.speech_language).to_string(),
+        supports_streaming: model.details.supports_streaming,
     })
 }
 
@@ -85,7 +93,7 @@ fn validate_advanced_model_path(app: &AppHandle, raw: &str) -> Result<PathBuf> {
         .map_err(|error| anyhow!("advanced model path is invalid: {error}"))?;
     if !model_downloader::is_model_file_ready(&canonical) {
         return Err(anyhow!(
-            "advanced model path must point to the complete Parakeet GGUF"
+            "advanced model path must point to a complete supported speech model"
         ));
     }
     ensure_trusted_path(app, &canonical)?;
@@ -141,10 +149,10 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
             };
             let message = match (ready, executable_found, model_found, &runtime.source) {
                 (true, _, _, RuntimeSource::Bundled) => {
-                    "Bundled Parakeet runtime is ready.".to_string()
+                    "Bundled speech runtime is ready.".to_string()
                 }
                 (true, _, _, RuntimeSource::ManagedModel) => {
-                    "Managed Parakeet runtime is ready.".to_string()
+                    "Selected local speech model is ready.".to_string()
                 }
                 (true, _, _, RuntimeSource::AdvancedOverride) => {
                     "Advanced transcription runtime override is ready.".to_string()
@@ -153,7 +161,7 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
                     format!("The {source_label} ASR executable could not be found.")
                 }
                 (false, true, false, _) => {
-                    format!("The {source_label} Parakeet GGUF is missing or has the wrong size.")
+                    format!("The {source_label} speech model is missing or has the wrong size.")
                 }
                 _ => format!("The {source_label} transcription runtime is incomplete."),
             };
@@ -176,7 +184,7 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
             source: if settings.advanced_runtime_enabled {
                 RuntimeSource::AdvancedOverride
             } else {
-                RuntimeSource::Bundled
+                RuntimeSource::ManagedModel
             },
             executable_path: String::new(),
             model_path: String::new(),
@@ -185,38 +193,32 @@ pub fn model_status(app: &AppHandle, settings: &AppSettings) -> ModelStatus {
 }
 
 pub fn model_inventory(app: &AppHandle, settings: &AppSettings) -> ModelInventory {
-    let bundled_path = resolve_bundled_model(app).ok();
     let app_dir = app
         .try_state::<AppState>()
         .map(|state| state.app_dir.clone())
         .unwrap_or_default();
-    let models = model_downloader::MODELS
+    let models = speech_models::models()
         .iter()
-        .map(|model| model_downloader::inventory_item(&app_dir, model, bundled_path.as_deref()))
+        .map(|model| model_downloader::inventory_item(&app_dir, model))
         .collect::<Vec<ModelInventoryItem>>();
     ModelInventory {
         active_model_id: if settings.advanced_runtime_enabled {
             "advanced-override".to_string()
         } else {
-            model_downloader::BUNDLED_MODEL_ID.to_string()
+            settings.active_model_id.clone()
         },
         models,
     }
 }
 
-fn resolve_bundled_model(app: &AppHandle) -> Result<PathBuf> {
-    let filename = model_downloader::BUNDLED_MODEL_FILE;
-    let path = resolve_first_existing(
-        app,
-        &[&format!("resources/models/{filename}"), &format!("models/{filename}")],
-    )?;
-    if model_downloader::is_model_file_ready(&path) {
-        Ok(path)
-    } else {
-        Err(anyhow!(
-            "Bundled Parakeet GGUF is missing or has the wrong size."
-        ))
+fn resolve_managed_model(app: &AppHandle, model_id: &str) -> Result<PathBuf> {
+    let model = speech_models::by_id(model_id).context("Unknown speech model")?;
+    let state = app.state::<AppState>();
+    let path = model_downloader::installed_model_path(&state.app_dir, model);
+    if !model_downloader::is_model_file_ready(&path) {
+        return Err(anyhow!("Download {} in Voice models to use it.", model.label));
     }
+    Ok(path)
 }
 
 fn resolve_first_existing(app: &AppHandle, candidates: &[&str]) -> Result<PathBuf> {
@@ -268,7 +270,7 @@ mod tests {
     fn advanced_overrides_are_disabled_by_default() {
         let settings = AppSettings::default();
         assert!(!settings.advanced_runtime_enabled);
-        assert_eq!(settings.active_model_id, model_downloader::BUNDLED_MODEL_ID);
+        assert_eq!(settings.active_model_id, atmospeak_asr_protocol::PARAKEET_MODEL_ID);
         assert!(settings.advanced_model_path.is_empty());
         assert!(settings.advanced_asr_executable_path.is_empty());
     }
@@ -276,7 +278,7 @@ mod tests {
     #[test]
     fn model_file_rejects_missing_or_incomplete_weights() {
         let directory = tempfile::tempdir().expect("temp dir");
-        let path = directory.path().join(model_downloader::BUNDLED_MODEL_FILE);
+        let path = directory.path().join(atmospeak_asr_protocol::PARAKEET_MODEL_FILE);
         assert!(!model_downloader::is_model_file_ready(&path));
         std::fs::write(&path, b"incomplete").expect("truncated model");
         assert!(!model_downloader::is_model_file_ready(&path));

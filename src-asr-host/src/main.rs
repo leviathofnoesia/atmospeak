@@ -1,10 +1,9 @@
 //! Entry point: a dedicated reader thread. It only parses stdin frames and
 //! forwards them — audio over a bounded channel, control commands over their
-//! own channel — so ingestion never blocks on native Moonshine updates. All
-//! session state lives in `moonshine_session`; the C ABI bridge lives in
-//! `moonshine`.
+//! own channel — so ingestion never blocks on native decoder updates. The speech worker owns inference state.
 
-mod parakeet;
+mod decoder;
+mod replay;
 mod session;
 mod wav;
 mod wire;
@@ -32,7 +31,7 @@ const AUDIO_QUEUE_CAPACITY: usize = 3_000;
 
 fn main() -> Result<()> {
     if std::env::args_os().len() > 1 {
-        return run_batch_command();
+        return replay::run();
     }
     let stdin = io::stdin();
     let mut input = stdin.lock();
@@ -91,30 +90,6 @@ fn main() -> Result<()> {
     worker
         .join()
         .map_err(|_| anyhow::anyhow!("inference worker panicked"))?
-}
-
-fn run_batch_command() -> Result<()> {
-    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
-    if args.len() != 4 || args[0] != "--model" || args[2] != "--transcribe-wav" {
-        bail!("usage: atmospeak-asr-host --model <gguf> --transcribe-wav <path>");
-    }
-    let model_path = std::path::PathBuf::from(&args[1]);
-    let wav_path = std::path::PathBuf::from(&args[3]);
-    let input = wav::WavInput::open(&wav_path)?;
-    let mut engine =
-        parakeet::Parakeet::load(&model_path, atmospeak_asr_protocol::AsrBackend::Cpu, 0)?;
-    engine.start()?;
-    input
-        .for_each_frame(|frame| {
-            if engine.push(frame)? {
-                engine.advance()?;
-            }
-            Ok(())
-        })
-        .with_context(|| format!("failed to replay {}", wav_path.display()))?;
-    let text = engine.finish()?;
-    println!("{text}");
-    Ok(())
 }
 
 fn dispatch_command(
@@ -308,14 +283,14 @@ mod tests {
                                 / channels as f32
                         })
                         .collect::<Vec<_>>();
-                    let expected = if rate == parakeet::SAMPLE_RATE as u32 || mono.is_empty() {
+                    let expected = if rate == decoder::SAMPLE_RATE as u32 || mono.is_empty() {
                         mono
                     } else {
-                        let length = mono.len() * parakeet::SAMPLE_RATE / rate as usize;
+                        let length = mono.len() * decoder::SAMPLE_RATE / rate as usize;
                         (0..length)
                             .map(|index| {
                                 let position =
-                                    index as f64 * rate as f64 / parakeet::SAMPLE_RATE as f64;
+                                    index as f64 * rate as f64 / decoder::SAMPLE_RATE as f64;
                                 let left = position.floor() as usize;
                                 let fraction = (position - left as f64) as f32;
                                 let a = mono[left.min(mono.len() - 1)];
@@ -343,14 +318,14 @@ mod tests {
                     assert!(
                         lengths
                             .iter()
-                            .all(|length| *length > 0 && *length <= parakeet::SAMPLE_RATE / 50)
+                            .all(|length| *length > 0 && *length <= decoder::SAMPLE_RATE / 50)
                     );
                     assert!(
                         lengths
                             .iter()
                             .rev()
                             .skip(1)
-                            .all(|length| *length == parakeet::SAMPLE_RATE / 50)
+                            .all(|length| *length == decoder::SAMPLE_RATE / 50)
                     );
                 }
             }

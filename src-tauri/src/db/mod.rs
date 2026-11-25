@@ -8,7 +8,7 @@ use crate::models::{
     AppSettings, AppSnapshot, DictationStats, DictionaryEntry, RuntimeEvent, Snippet,
     StreamingMetrics, TranscriptSession,
 };
-use crate::services::model_downloader::BUNDLED_MODEL_ID;
+use atmospeak_asr_protocol::{PARAKEET_MODEL_ID, speech_models};
 
 pub struct Database {
     connection: Connection,
@@ -579,7 +579,12 @@ fn calculate_stats(sessions: &[TranscriptSession]) -> DictationStats {
 }
 
 fn migrate_settings(mut settings: AppSettings) -> AppSettings {
-    settings.active_model_id = BUNDLED_MODEL_ID.to_string();
+    if speech_models::by_id(&settings.active_model_id).is_none() {
+        settings.active_model_id = PARAKEET_MODEL_ID.to_string();
+    }
+    if let Some(model) = speech_models::by_id(&settings.active_model_id) {
+        settings.speech_language = model.language_or_default(&settings.speech_language).to_string();
+    }
     if settings
         .hotkey
         .trim()
@@ -602,6 +607,7 @@ mod tests {
         let database = Database::open(temp.path().to_path_buf()).expect("database");
         let mut settings = AppSettings::default();
         settings.mode = DictationMode::PushToTalk;
+        settings.active_model_id = "nemotron-streaming-en".to_string();
         settings.restore_clipboard = false;
 
         database.save_settings(&settings).expect("save settings");
@@ -609,10 +615,7 @@ mod tests {
         let loaded = database.load_settings().expect("load settings");
         assert_eq!(loaded.mode, DictationMode::PushToTalk);
         assert!(!loaded.restore_clipboard);
-        assert_eq!(
-            loaded.active_model_id,
-            crate::services::model_downloader::BUNDLED_MODEL_ID
-        );
+        assert_eq!(loaded.active_model_id, "nemotron-streaming-en");
     }
 
     /// Phase A locked settings to 12 fields and shipped blobs with exactly those
@@ -656,7 +659,7 @@ mod tests {
         assert!(loaded.onboarding_complete);
         assert_eq!(
             loaded.active_model_id,
-            crate::services::model_downloader::BUNDLED_MODEL_ID
+            PARAKEET_MODEL_ID
         );
         // The new fields fall back to their defaults rather than failing the parse.
         assert_eq!(loaded.accent, Accent::Dusk);

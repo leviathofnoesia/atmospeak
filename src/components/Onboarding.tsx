@@ -4,7 +4,6 @@ import type {
   MicrophoneInfo,
   ModelDownloadProgress,
   ModelInventory,
-  ModelInventoryItem,
   ModelStatus,
   SoundCheckResult,
   ShortcutStatus,
@@ -73,24 +72,6 @@ interface OnboardingProps {
 const STEPS = ["Welcome", "Microphone", "Speech engine", "Shortcut", "Sound check", "Ready"];
 const SC_TARGET = "The porcelain moon hums over the studio.";
 const PARAKEET_MODEL_ID = "parakeet-unified-en";
-
-const FALLBACK_MODELS: ModelInventoryItem[] = [
-  {
-    id: PARAKEET_MODEL_ID,
-    label: "Parakeet Unified English 0.6B",
-    installed: true,
-    bundled: true,
-    path: "bundled",
-    sizeMb: 697,
-  },
-];
-
-const MODEL_COPY: Record<string, { tag: string; desc: string }> = {
-  [PARAKEET_MODEL_ID]: {
-    tag: "bundled · CPU",
-    desc: "English streaming speech recognition that stays on this device.",
-  },
-};
 
 function Glyph({ d, size = 16, sw = 2 }: { d: string; size?: number; sw?: number }) {
   return (
@@ -164,20 +145,29 @@ export function Onboarding(props: OnboardingProps) {
   const currentSoundCheck = soundCheck.result?.deviceName === settings.microphoneName
     ? soundCheck.result : null;
   const [step, setStepRaw] = useState(0);
+  const [modelSearch, setModelSearch] = useState("");
   const [completionError, setCompletionError] = useState("");
   const [completing, setCompleting] = useState(false);
   const setStep = (n: number) => setStepRaw(Math.max(0, Math.min(STEPS.length - 1, n)));
 
   const modelReady = modelStatus?.ready ?? false;
-  const inventoryChoices =
-    modelInventory?.models.filter((model) => model.id === PARAKEET_MODEL_ID) ?? [];
-  const modelChoices = inventoryChoices.length ? inventoryChoices : FALLBACK_MODELS;
+  // The setup sound check uses a fixed English phrase.
+  const modelChoices = modelInventory?.models.filter((model) =>
+    model.speech?.languages.includes("en") ?? model.id === PARAKEET_MODEL_ID,
+  ) ?? [];
   const activeModel =
     modelChoices.find((model) => model.id === settings.activeModelId) ??
     modelChoices.find((model) => model.id === modelInventory?.activeModelId) ??
     modelChoices.find((model) => model.id === PARAKEET_MODEL_ID) ??
     modelChoices[0];
-  const selectedModelReady = activeModel?.installed ?? false;
+  const search = modelSearch.trim().toLowerCase();
+  const visibleModels = modelChoices.filter((model) =>
+    search ? model.label.toLowerCase().includes(search) :
+      model.id === activeModel?.id || model.speech?.recommended || model.installed,
+  );
+  const selectedModelReady = Boolean(
+    activeModel?.installed && settings.speechLanguage === "en",
+  );
   const canContinue = (() => {
     if (step === 1) return micCheck.passed;
     if (step === 2) return modelReady && selectedModelReady;
@@ -302,54 +292,43 @@ export function Onboarding(props: OnboardingProps) {
               <div className="ob-fade">
                 <div className="ob-kick">Step 02 · On-device speech</div>
                 <h1 className="ob-h">Speech stays <em>on this device.</em></h1>
-                <p className="ob-lede">Parakeet Unified English 0.6B runs locally on the CPU.</p>
+                <p className="ob-lede">Download a speech model to use it offline. Parakeet Unified English is the recommended choice.</p>
+                <input
+                  className="ob-model-search"
+                  type="search"
+                  aria-label="Search English models"
+                  placeholder="Search English models"
+                  value={modelSearch}
+                  onChange={(event) => setModelSearch(event.currentTarget.value)}
+                />
                 <div className="ob-panel ob-models">
-                  {modelChoices.map((m) => {
-                    const copy = MODEL_COPY[m.id] ?? {
-                      tag: m.bundled ? "bundled" : m.installed ? "installed" : "available",
-                      desc: m.installed
-                        ? "Local English speech recognition ready to run offline."
-                        : "Visible in inventory; install it before selecting.",
-                    };
-                    const selected = activeModel?.id === m.id;
+                  {visibleModels.length === 0 && <p>No matching English models.</p>}
+                  {visibleModels.map((m) => {
+                    const selected = activeModel?.id === m.id && settings.speechLanguage === "en";
+                    const tag = m.id === PARAKEET_MODEL_ID ? "recommended" :
+                      m.speech?.supportsStreaming ? "live preview" : "after recording";
                     const downloading =
                       modelDownload?.modelId === m.id &&
                       (modelDownload.status === "starting" ||
                         modelDownload.status === "downloading" ||
                         modelDownload.status === "verifying");
                     return (
-                    <div
-                      key={m.id}
-                      className="ob-model"
-                      aria-pressed={selected}
-                      data-selected={selected ? "true" : "false"}
-                      role={m.installed ? "button" : undefined}
-                      tabIndex={m.installed ? 0 : undefined}
-                      onClick={() => m.installed && onSelectModel(m.id)}
-                      onKeyDown={(event) => {
-                        if (m.installed && (event.key === "Enter" || event.key === " ")) {
-                          event.preventDefault();
-                          onSelectModel(m.id);
-                        }
-                      }}
-                    >
-                      <span className="radio" />
-                      <span>
-                        <span className="mname">{m.label}<span className="tag">{selected ? "selected" : copy.tag}</span></span>
-                        <span className="mdesc">{copy.desc}</span>
-                      </span>
-                      <span className="msize">{m.sizeMb ? `${m.sizeMb} MiB` : m.installed ? "local" : "not installed"}</span>
-                      {!m.bundled ? (
+                      <div key={m.id} className="ob-model" data-selected={selected ? "true" : "false"}>
+                        <span className="radio" />
+                        <span>
+                          <span className="mname">{m.label}<span className="tag">{selected && m.installed ? "selected" : tag}</span></span>
+                          {m.speech?.description && <span className="mdesc">{m.speech.description}</span>}
+                        </span>
+                        <span className="msize">{m.sizeMb ? `${m.sizeMb} MiB` : ""}</span>
                         <button
                           type="button"
                           className="ob-model-action"
-                          disabled={Boolean(
+                          disabled={m.installed && selected || Boolean(
                             modelDownload &&
                             !downloading &&
                             ["starting", "downloading", "verifying"].includes(modelDownload.status),
                           )}
-                          onClick={(event) => {
-                            event.stopPropagation();
+                          onClick={() => {
                             if (downloading) {
                               void onCancelModelDownload();
                             } else if (m.installed) {
@@ -361,8 +340,7 @@ export function Onboarding(props: OnboardingProps) {
                         >
                           {downloading ? "Cancel" : m.installed ? (selected ? "Selected" : "Use") : "Download"}
                         </button>
-                      ) : null}
-                    </div>
+                      </div>
                     );
                   })}
                 </div>

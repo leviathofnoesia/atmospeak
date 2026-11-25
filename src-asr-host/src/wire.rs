@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use atmospeak_asr_protocol::{AsrEvent, MAX_FRAME_SIZE};
 
-use crate::parakeet::SAMPLE_RATE;
+use crate::decoder::SAMPLE_RATE;
 
 pub fn pcm_bytes_to_f32(bytes: &[u8]) -> Result<Vec<f32>> {
     if bytes.len() % 2 != 0 {

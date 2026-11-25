@@ -335,6 +335,12 @@ export function getModelInventory(): Promise<ModelInventory> {
   });
 }
 
+export function selectModel(modelId: string, language?: string): Promise<AppSnapshot> {
+  return command("select_model", { modelId, language }, () => {
+    throw new Error("Switch voice models in the Windows app.");
+  });
+}
+
 export function downloadModel(modelId: string): Promise<ModelInventory> {
   return command("download_model", { modelId }, async () => {
     mockInstalledModels.add(modelId);

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// Version 3 replaces the directory-based model with a pinned Parakeet GGUF.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub mod speech_models;
+
+/// Version 5 reports model-specific streaming support and routes language hints.
+pub const PROTOCOL_VERSION: u16 = 5;
 pub const MAX_FRAME_SIZE: usize = 1024 * 1024;
 
 pub const PARAKEET_MODEL_ID: &str = "parakeet-unified-en";

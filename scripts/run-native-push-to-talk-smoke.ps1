@@ -249,6 +249,14 @@ try {
     }
   }
 
+  $fixtureModel = Join-Path $Root "src-tauri/resources/models/parakeet-unified-en-0.6b-Q8_0.gguf"
+  if (-not (Test-Path -LiteralPath $fixtureModel -PathType Leaf)) {
+    throw "Stage the Parakeet fixture with scripts/build-asr-sidecars.ps1 before running this check."
+  }
+  $modelDir = Join-Path $ProfileDir "models"
+  New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+  Copy-Item -LiteralPath $fixtureModel -Destination $modelDir
+
   if (Test-ListeningPort -Port $DevServerPort) {
     throw "Refusing to start Vite: 127.0.0.1:$DevServerPort is already listening. Stop only the owning verification run or choose a clean lane."
   }

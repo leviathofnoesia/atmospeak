@@ -18,7 +18,7 @@ use commands::{
     copy_transcript, open_history, take_history_request, dismiss_dictation_error, get_dictation_snapshot, search_history, get_history_session,
     inject_session, list_microphones, mic_check_start, mic_check_stop, open_windows_sound_settings,
     polish_session, register_setup_shortcut, reset_overlay_position, save_overlay_position,
-    save_settings, set_overlay_hit_regions, set_polish_api_key, set_session_prefer_polished, set_shortcut_test_active,
+    save_settings, select_model, set_overlay_hit_regions, set_polish_api_key, set_session_prefer_polished, set_shortcut_test_active,
     set_shortcuts_paused, show_main_window, show_overlay_window, start_recording,
     start_shortcut_capture, start_sound_check, stop_recording, streaming_asr_available,
     upsert_dictionary_entry, upsert_snippet,
@@ -48,11 +48,11 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                 metrics::emit_runtime(
                     &app,
                     "streaming-asr-unavailable",
-                    "Bundled Parakeet CPU runtime is unavailable.",
+                    "Selected speech model is unavailable.",
                 );
                 return;
             };
-            if !streaming_warmup_is_current(&app, generation) {
+            if !resolved.supports_streaming || !streaming_warmup_is_current(&app, generation) {
                 return;
             }
             let threads = std::thread::available_parallelism()
@@ -63,6 +63,7 @@ pub(crate) fn start_preferred_asr(app: &tauri::AppHandle) {
                 app.clone(),
                 resolved.executable_path,
                 resolved.model_path,
+                resolved.speech_language,
                 threads,
                 startup_is_current,
             ) {
@@ -104,7 +105,7 @@ pub(crate) fn publish_lazy_asr_host(app: &tauri::AppHandle) {
     let Ok(resolved) = runtime::resolve_runtime(app, &settings) else {
         return;
     };
-    if let Ok(host) = asr_host::AsrHost::new(resolved.executable_path, resolved.model_path) {
+    if let Ok(host) = asr_host::AsrHost::new(resolved.executable_path, resolved.model_path, resolved.speech_language) {
         app.state::<AppState>()
             .set_asr_host(std::sync::Arc::new(host));
     }
@@ -308,6 +309,7 @@ fn invoke_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send +
         has_polish_api_key,
         get_model_status,
         get_model_inventory,
+        select_model,
         download_model,
         cancel_model_download,
         delete_model

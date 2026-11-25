@@ -1,9 +1,10 @@
 #Requires -Version 5.1
-# Build the pinned transcribe.cpp CPU sidecar and stage its verified Parakeet weights.
+# Build the pinned transcribe.cpp CPU sidecar. Optionally stage Parakeet for smoke tests.
 [CmdletBinding()]
 param(
   [string]$BuildRoot = $(if ($env:ATMOSPEAK_ASR_BUILD_ROOT) { $env:ATMOSPEAK_ASR_BUILD_ROOT } else { "E:\BuildCache\atmospeak-asr-build" }),
-  [string]$SelectionRoot = $(if ($env:ATMOSPEAK_ASR_SELECTION_ROOT) { $env:ATMOSPEAK_ASR_SELECTION_ROOT } else { "E:\BuildCache\atmospeak-asr-cache\parakeet" })
+  [string]$SelectionRoot = $(if ($env:ATMOSPEAK_ASR_SELECTION_ROOT) { $env:ATMOSPEAK_ASR_SELECTION_ROOT } else { "E:\BuildCache\atmospeak-asr-cache\parakeet" }),
+  [switch]$SkipModel
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,13 +32,17 @@ function Assert-EPath {
 }
 
 $BuildRoot = Assert-EPath $BuildRoot "ASR build root"
-$SelectionRoot = Assert-EPath $SelectionRoot "ASR selection cache"
+if (-not $SkipModel) {
+  $SelectionRoot = Assert-EPath $SelectionRoot "ASR selection cache"
+}
 $TempRoot = Assert-EPath $(if ($env:ATMOSPEAK_BUILD_TEMP) { $env:ATMOSPEAK_BUILD_TEMP } else { $DefaultTempRoot }) "ATMOSPEAK_BUILD_TEMP"
 $TargetDir = Assert-EPath $(if ($env:ATMOSPEAK_ASR_TARGET_DIR) { $env:ATMOSPEAK_ASR_TARGET_DIR } else { $DefaultTargetDir }) "ATMOSPEAK_ASR_TARGET_DIR"
 $CargoHome = Assert-EPath $(if ($env:CARGO_HOME) { $env:CARGO_HOME } else { $DefaultCargoHome }) "CARGO_HOME"
 $OutputDir = Assert-EPath $OutputDir "ASR resource output"
 
-foreach ($directory in @($BuildRoot, $TempRoot, $TargetDir, $CargoHome, $SelectionRoot, $OutputDir)) {
+$directories = @($BuildRoot, $TempRoot, $TargetDir, $CargoHome, $OutputDir)
+if (-not $SkipModel) { $directories += $SelectionRoot }
+foreach ($directory in $directories) {
   New-Item -ItemType Directory -Force -Path $directory | Out-Null
 }
 $env:TEMP = $TempRoot
@@ -46,24 +51,26 @@ $env:CARGO_HOME = $CargoHome
 $env:CARGO_TARGET_DIR = $TargetDir
 $env:ATMOSPEAK_ASR_BUILD_ROOT = $BuildRoot
 
-$modelName = 'parakeet-unified-en-0.6b-Q8_0.gguf'
-$modelHash = '4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795'
-$cached = Join-Path $SelectionRoot $modelName
-if (-not (Test-Path -LiteralPath $cached -PathType Leaf) -or
-    (Get-Item -LiteralPath $cached).Length -ne 731357568 -or
-    (Get-FileHash -LiteralPath $cached -Algorithm SHA256).Hash -ne $modelHash) {
-  $partial = "$cached.$PID.partial"
-  try {
-    $modelUrl = "https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/7e948f21b7bdbac698d3318db9d350f1096f3b6c/$modelName"
-    & curl.exe --fail --location --retry 2 --max-time 900 --output $partial $modelUrl
-    if ($LASTEXITCODE -ne 0) { throw "Parakeet download failed (exit $LASTEXITCODE)." }
-    if ((Get-Item -LiteralPath $partial).Length -ne 731357568 -or
-        (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash -ne $modelHash) {
-      throw "Parakeet weights do not match the pinned artifact."
+if (-not $SkipModel) {
+  $modelName = 'parakeet-unified-en-0.6b-Q8_0.gguf'
+  $modelHash = '4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795'
+  $cached = Join-Path $SelectionRoot $modelName
+  if (-not (Test-Path -LiteralPath $cached -PathType Leaf) -or
+      (Get-Item -LiteralPath $cached).Length -ne 731357568 -or
+      (Get-FileHash -LiteralPath $cached -Algorithm SHA256).Hash -ne $modelHash) {
+    $partial = "$cached.$PID.partial"
+    try {
+      $modelUrl = "https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/7e948f21b7bdbac698d3318db9d350f1096f3b6c/$modelName"
+      & curl.exe --fail --location --retry 2 --max-time 900 --output $partial $modelUrl
+      if ($LASTEXITCODE -ne 0) { throw "Parakeet download failed (exit $LASTEXITCODE)." }
+      if ((Get-Item -LiteralPath $partial).Length -ne 731357568 -or
+          (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash -ne $modelHash) {
+        throw "Parakeet weights do not match the pinned artifact."
+      }
+      Move-Item -LiteralPath $partial -Destination $cached -Force
+    } finally {
+      if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
     }
-    Move-Item -LiteralPath $partial -Destination $cached -Force
-  } finally {
-    if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
   }
 }
 
@@ -98,7 +105,9 @@ foreach ($name in $asrNames) {
   Copy-Item -LiteralPath (Join-Path $directory $name) -Destination (Join-Path $OutputDir $name) -Force
 }
 Copy-Item -LiteralPath (Join-Path $TargetDir "release\atmospeak-asr-host.exe") -Destination (Join-Path $OutputDir "atmospeak-asr-cpu.exe") -Force
-$modelOutput = Join-Path $Root "src-tauri\resources\models"
-New-Item -ItemType Directory -Force -Path $modelOutput | Out-Null
-Copy-Item -LiteralPath $cached -Destination (Join-Path $modelOutput $modelName) -Force
-Write-Host "Parakeet CPU sidecar and model staged."
+if (-not $SkipModel) {
+  $modelOutput = Join-Path $Root "src-tauri\resources\models"
+  New-Item -ItemType Directory -Force -Path $modelOutput | Out-Null
+  Copy-Item -LiteralPath $cached -Destination (Join-Path $modelOutput $modelName) -Force
+}
+Write-Host "CPU speech sidecar staged."

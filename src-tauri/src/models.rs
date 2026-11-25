@@ -20,6 +20,7 @@ pub struct AppSettings {
     pub onboarding_version: String,
     pub audio_calibration: Option<AudioCalibrationRecord>,
     pub active_model_id: String,
+    pub speech_language: String,
     pub advanced_runtime_enabled: bool,
     pub advanced_model_path: String,
     pub advanced_asr_executable_path: String,
@@ -132,6 +133,7 @@ impl Default for AppSettings {
             onboarding_version: String::new(),
             audio_calibration: None,
             active_model_id: atmospeak_asr_protocol::PARAKEET_MODEL_ID.to_string(),
+            speech_language: "en".to_string(),
             advanced_runtime_enabled: false,
             advanced_model_path: String::new(),
             advanced_asr_executable_path: String::new(),
@@ -430,6 +432,8 @@ pub struct ModelInventoryItem {
     pub bundled: bool,
     pub path: Option<String>,
     pub size_mb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech: Option<atmospeak_asr_protocol::speech_models::SpeechModelDetails>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
