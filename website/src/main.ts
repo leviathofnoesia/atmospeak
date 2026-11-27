@@ -378,9 +378,9 @@ function docsSection() {
       "Atmospeak starts in the tray and opens setup only on first run.",
     ]),
     docCard("02 / SmartScreen", [
-      "Windows may show “Windows protected your PC” because this release is not Authenticode-signed.",
-      "Choose More info, verify the app name is Atmospeak, then choose Run anyway.",
-      "You can verify the downloaded file against SHA256SUMS.txt before running it.",
+      "Windows may show “Windows protected your PC” because the free installers are currently unsigned while publisher code signing is prioritized from initial Pro sales.",
+      "Choose More info, check the app name reads atmospeak_1.0.5_x64-setup.exe (or the .msi), then choose Run anyway.",
+      "You can verify every binary against SHA256SUMS.txt in PowerShell before running it.",
     ], true),
     docCard("03 / Hotkey", [
       "The default shortcut is Ctrl+Win in Hold mode.",

@@ -6,10 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import type { TranscriptSession } from "../types/dictation";
 import { sessionDisplayText } from "../types/dictation";
 import { EmptyState } from "./EmptyState";
+import { ProUpgradePrompt } from "./ProUpgradePrompt";
 
 interface HistoryPanelProps {
   sessions: TranscriptSession[];
   selection?: { sessionId: string | null } | null;
+  isProEdition?: boolean;
   onCopy: (session: TranscriptSession) => Promise<void>;
   onInject: (session: TranscriptSession) => Promise<void>;
   onDelete: (session: TranscriptSession) => Promise<void>;
@@ -35,6 +37,7 @@ function formatTime(value: string) {
 export function HistoryPanel({
   sessions,
   selection,
+  isProEdition = false,
   onCopy,
   onInject,
   onDelete,
@@ -188,6 +191,7 @@ export function HistoryPanel({
           </div>
         )}
         {hasMore && <button type="button" className="pill-btn ghost" disabled={loading} onClick={() => void loadMore()}>Load older recordings</button>}
+        {!isProEdition ? <ProUpgradePrompt variant="workspace" /> : null}
       </div>
     </div>
   );

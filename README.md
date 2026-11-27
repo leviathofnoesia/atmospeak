@@ -48,7 +48,7 @@ Free dictation is unlimited and works without an account.
   Atmospeak pastes cleaned text immediately. Timeouts and errors fall back the
   same way.
 - **Your words stay yours.** Searchable history with captured-WAV replay and
-  recovery, export, undo / redo for AI edits, a personal dictionary, snippets,
+  recovery, undo / redo for AI edits, a personal dictionary, snippets,
   and local diagnostics — all on disk, on your machine.
 
 Latest patch notes: [`docs/releases/v1.0.5.md`](docs/releases/v1.0.5.md).
@@ -57,20 +57,38 @@ The 1.0.0 product declaration remains in
 
 ## Install
 
-Atmospeak currently supports **Windows 10/11 x64**. Download free installers
-from [GitHub Releases](https://github.com/leviathofnoesia/atmospeak/releases/tag/v1.0.5).
+Atmospeak currently supports **Windows 10/11 x64** (`v1.0.5`). No account or email gate required:
 
-| Package | Use it when |
-| --- | --- |
-| Setup EXE | Recommended installation |
-| MSI | Managed or MSI-based deployment |
-| Portable ZIP | Run without a system-wide install |
-| Checksums | Verify downloaded artifacts (`SHA256SUMS.txt`) |
+| Package | Direct download (`v1.0.5`) | Use it when |
+| --- | --- | --- |
+| Setup EXE (8.3 MB) | [atmospeak_1.0.5_x64-setup.exe](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.5/atmospeak_1.0.5_x64-setup.exe) | Recommended single-file Windows installer |
+| MSI (13.7 MB) | [atmospeak_1.0.5_x64_en-US.msi](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.5/atmospeak_1.0.5_x64_en-US.msi) | Managed or enterprise MSI rollout |
+| Portable ZIP (13.9 MB) | [atmospeak_1.0.5_x64-portable.zip](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.5/atmospeak_1.0.5_x64-portable.zip) | Run from a folder without system install |
+| Checksums | [SHA256SUMS.txt](https://github.com/leviathofnoesia/atmospeak/releases/download/v1.0.5/SHA256SUMS.txt) | Verify artifacts before launching |
 
-The Windows installers are not Authenticode-signed yet. SmartScreen may show
-**Windows protected your PC**. Choose **More info**, verify the app name is
-Atmospeak, and choose **Run anyway**. You can verify the download against the
-published SHA-256 manifest before opening it.
+**3-step setup:**
+1. Download and run `atmospeak_1.0.5_x64-setup.exe`.
+2. Approve Windows SmartScreen once (see below).
+3. Let first-run setup download the Parakeet English speech model once. After that, hold `Ctrl+Win`, speak, and release to paste. Dictation runs on your CPU with no network.
+
+### Windows SmartScreen & code signing transparency
+
+The free v1.0.5 installers do **not** yet carry an Authenticode publisher signature, so Windows Defender SmartScreen may show **Windows protected your PC**:
+
+1. Click **More info**.
+2. Verify the application name is `atmospeak_1.0.5_x64-setup.exe` (or `.msi`).
+3. Click **Run anyway**.
+
+We will prioritize Windows Authenticode code signing once early Atmospeak Pro sales cover the signing certificate. In the meantime, every release is built transparently in GitHub Actions with SHA-256 verification:
+
+```powershell
+Get-FileHash "$env:USERPROFILE\Downloads\atmospeak_1.0.5_x64-setup.exe" -Algorithm SHA256
+# Expected v1.0.5 setup EXE:
+# 92f7367a09fd045e65526dc19ef799ee43f5051a42e7d68ea0a4870f555bfd70
+```
+
+- `atmospeak_1.0.5_x64_en-US.msi`: `0f99180569b1825a6e5a53c5203615f2fcb2a26aba9aeef3a2af62efcaeed180`
+- `atmospeak_1.0.5_x64-portable.zip`: `0a7e83186c6af3aec6a42629fb84c5e1faca91722eab842f30af85686974aa89`
 
 ## Daily use
 
@@ -265,18 +283,20 @@ push-to-talk (`005`), plus polish/backtrack cases **018–019**, **049–058**,
 - Updating downloads the complete installer; Tauri does not provide delta
   updates here.
 
-## What is free
+## What is free vs Atmospeak Pro
 
-Local English dictation, cleanup, Backtrack, injection,
-history, dictionary, snippets, and on-device AI edit are **free, unlimited, and
-require no account** in the public MIT build.
+Local English dictation, cleanup, Backtrack, injection, history search, replay, dictionary, snippets, and on-device AI edit are **free, unlimited, and require no account** in the public MIT build.
 
-Everything shipped through 1.0.0 stays that way for the free edition. Paid
-capability lives in a **separate Atmospeak Pro build** (online Polar licence,
-gated updates, Pro-only modules such as airplane mode and the network ledger).
+When you want verifiable air-gapped controls or workspace archives, **Atmospeak Pro** is **$69 one-time via Polar** (no subscription, up to 3 Windows PCs, 3 years of updates) at [`pro.novpax.org/buy`](https://pro.novpax.org/buy):
+
+- **Private Workspace & bulk exports**: Markdown and JSON archive exports across local dictation history.
+- **Fail-closed Airplane Mode**: Blocks outbound update checks, account refreshes, and model downloads before they start.
+- **Inspectable Network Ledger**: Writes and exports every allowed or blocked outbound attempt (`network_ledger.jsonl`).
+
 See [`docs/PRO_BUILD.md`](docs/PRO_BUILD.md) and [`docs/POLAR.md`](docs/POLAR.md).
 
-Nov Pax product page: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
+Nov Pax product page & 45-second offline proof: [novpax.org/projects/atmospeak](https://www.novpax.org/projects/atmospeak).
+Atmospeak Pro checkout: [pro.novpax.org/buy](https://pro.novpax.org/buy).
 Free updater feed: `https://github.com/leviathofnoesia/atmospeak/releases/latest/download/latest.json`.
 
 ## Project

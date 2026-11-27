@@ -636,3 +636,27 @@ export function getHistorySession(id: string): Promise<TranscriptSession | null>
 export function dismissDictationError(generation: number): Promise<void> {
   return command("dismiss_dictation_error", { generation }, () => undefined);
 }
+
+export const ATMOSPEAK_PRO_BUY_URL = "https://pro.novpax.org/buy";
+export const ATMOSPEAK_PRO_INFO_URL = "https://www.novpax.org/projects/atmospeak#buy-pro";
+
+export type AppEdition = "free" | "pro";
+
+export async function getEdition(): Promise<AppEdition> {
+  const edition = await command<string>("get_edition", undefined, () => "free");
+  return edition === "pro" ? "pro" : "free";
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`Unsupported external URL protocol: ${parsed.protocol}`);
+  }
+  if (hasTauriRuntime()) {
+    await invoke("plugin:opener|open_url", { url: parsed.toString() });
+    return;
+  }
+  if (typeof window !== "undefined") {
+    window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+  }
+}
