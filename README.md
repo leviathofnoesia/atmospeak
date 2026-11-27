@@ -69,7 +69,7 @@ Atmospeak currently supports **Windows 10/11 x64** (`v1.0.5`). No account or ema
 **3-step setup:**
 1. Download and run `atmospeak_1.0.5_x64-setup.exe`.
 2. Approve Windows SmartScreen once (see below).
-3. Let first-run setup download the Parakeet English speech model once. After that, hold `Ctrl+Win`, speak, and release to paste. Dictation runs on your CPU with no network.
+3. In first-run setup, choose Parakeet English and click **Download** (one time). After that, hold `Ctrl+Win`, speak, and release to paste. Dictation runs on your PC with no network.
 
 ### Windows SmartScreen & code signing transparency
 
@@ -79,7 +79,7 @@ The free v1.0.5 installers do **not** yet carry an Authenticode publisher signat
 2. Verify the application name is `atmospeak_1.0.5_x64-setup.exe` (or `.msi`).
 3. Click **Run anyway**.
 
-We will prioritize Windows Authenticode code signing once early Atmospeak Pro sales cover the signing certificate. In the meantime, every release is built transparently in GitHub Actions with SHA-256 verification:
+We will prioritize Windows Authenticode code signing once early Atmospeak Pro sales cover the signing certificate. In the meantime, every release publishes SHA-256 digests in `SHA256SUMS.txt`; verify your download before opening it:
 
 ```powershell
 Get-FileHash "$env:USERPROFILE\Downloads\atmospeak_1.0.5_x64-setup.exe" -Algorithm SHA256
