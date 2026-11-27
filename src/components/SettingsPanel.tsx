@@ -2,9 +2,11 @@ import {
   CheckCircle2,
   Clipboard,
   Keyboard,
+  Lock,
   Palette,
   Radio,
   RotateCw,
+  ShieldCheck,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -20,6 +22,7 @@ import type {
 import { shortcutOptions } from "../panelOptions";
 import { PanelTitle } from "./PanelTitle";
 import { PolishSettings } from "./PolishSettings";
+import { ProUpgradePrompt } from "./ProUpgradePrompt";
 import { ApplicationProfiles } from "./ApplicationProfiles";
 import { ToggleRow } from "./ToggleRow";
 import { useOverlayVisibility } from "../lib/useOverlayPreference";
@@ -77,6 +80,7 @@ interface SettingsPanelProps {
   polishSetupBusy?: boolean;
   polishSetupMessage?: string;
   onEnsurePolishRuntime?: () => Promise<void>;
+  isProEdition?: boolean;
 }
 
 function scrollToSection(id: string) {
@@ -113,6 +117,7 @@ export function SettingsPanel({
   polishSetupBusy = false,
   polishSetupMessage = "",
   onEnsurePolishRuntime,
+  isProEdition = false,
 }: SettingsPanelProps) {
   const { onlyWhileRecording, setOnlyWhileRecording } = useOverlayVisibility();
   const shortcutKeys = (
@@ -269,6 +274,28 @@ export function SettingsPanel({
               onChange={(cleanupEnabled) => setSettings({ ...settings, cleanupEnabled })}
             />
           </div>
+          {!isProEdition ? (
+            <div className="settings-section" id="settings-pro-privacy">
+              <PanelTitle icon={<ShieldCheck size={22} />} title="Offline proof & privacy (Pro)" />
+              <div className="pro-privacy-preview">
+                <div className="pro-privacy-preview__row">
+                  <span>
+                    <Lock size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />
+                    <strong>Airplane mode</strong> — Fail-closed block on update checks, account refreshes, and model downloads
+                  </span>
+                  <span className="pro-upgrade-card__price" aria-hidden="true">Pro</span>
+                </div>
+                <div className="pro-privacy-preview__row">
+                  <span>
+                    <Lock size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />
+                    <strong>Network ledger</strong> — Audit and export <code>network_ledger.jsonl</code> locally
+                  </span>
+                  <span className="pro-upgrade-card__price" aria-hidden="true">Pro</span>
+                </div>
+              </div>
+              <ProUpgradePrompt variant="privacy" />
+            </div>
+          ) : null}
           <details className="settings-more">
             <summary className="button button--ghost">More settings</summary>
             <p className="muted">AI editing, appearance, models, privacy and troubleshooting.</p>

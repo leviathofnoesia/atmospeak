@@ -45,6 +45,7 @@ import {
   downloadAndInstallUpdate,
   downloadModel,
   getAppSnapshot,
+  getEdition,
   getLastStageMetrics,
   getModelInventory,
   getModelStatus,
@@ -264,6 +265,7 @@ function AppShell() {
   const [modelDownload, setModelDownload] = useState<ModelDownloadProgress | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEvent[]>([]);
+  const [isProEdition, setIsProEdition] = useState(false);
   const [lastMetrics, setLastMetrics] = useState<StageMetrics | null>(null);
   const [activeTab, setActiveTab] = useState<HubTab>("home");
   useEffect(() => {
@@ -521,7 +523,7 @@ function AppShell() {
   }, [completeRecordedShortcut]);
 
   const refresh = useCallback(async () => {
-    const [next, mics, status, inventory, polishModels, shortcut, events, metrics] =
+    const [next, mics, status, inventory, polishModels, shortcut, events, metrics, detectedEdition] =
       await Promise.all([
         refreshSnapshotOnly(),
         listMicrophones(),
@@ -531,6 +533,7 @@ function AppShell() {
         getShortcutStatus(),
         getRuntimeEvents(),
         getLastStageMetrics(),
+        getEdition(),
       ]);
     const preferredMicrophone =
       next.settings.microphoneName ??
@@ -545,6 +548,7 @@ function AppShell() {
     setShortcutStatus(shortcut);
     setRuntimeEvents(events);
     setLastMetrics(metrics);
+    setIsProEdition(detectedEdition === "pro");
     return next;
   }, [refreshSnapshotOnly]);
 
@@ -1315,6 +1319,7 @@ function AppShell() {
           <HistoryPanel
             selection={historySelection}
             sessions={snapshot.sessions}
+            isProEdition={isProEdition}
             onCopy={async (session) => {
               const message = await copyText(sessionDisplayText(session));
               setNotice({ tone: "success", message });
@@ -1433,6 +1438,7 @@ function AppShell() {
           <SettingsPanel
             settings={settingsDraft}
             setSettings={setSettingsDraft}
+            isProEdition={isProEdition}
             microphones={microphones}
             shortcutStatus={shortcutStatus}
             shortcutTest={shortcutTest}

@@ -163,3 +163,18 @@ it("persists the recording-only orb preference and shows the orb on demand", () 
   expect(toggle).not.toBeChecked();
   expect(props.onShowFloatingControl).toHaveBeenCalledOnce();
 });
+
+it("shows locked Airplane Mode and Network Ledger Pro upgrade controls in Free builds", () => {
+  render(<SettingsPanel {...settingsProps()} />);
+
+  expect(screen.getByText("Offline proof & privacy (Pro)")).toBeVisible();
+  expect(screen.getByText("Airplane mode")).toBeVisible();
+  expect(screen.getByText("Network ledger")).toBeVisible();
+  expect(screen.getByTestId("pro-upgrade-privacy")).toBeVisible();
+});
+
+it("omits the Free privacy upsell when running in Pro edition", () => {
+  render(<SettingsPanel {...settingsProps({ isProEdition: true })} />);
+
+  expect(screen.queryByTestId("pro-upgrade-privacy")).toBeNull();
+});

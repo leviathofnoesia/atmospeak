@@ -882,3 +882,90 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+.pro-upgrade-card {
+  margin-top: 22px;
+  padding: 18px 20px;
+  border: 1px solid rgba(18, 17, 19, 0.14);
+  border-radius: 14px;
+  background: rgba(18, 17, 19, 0.025);
+  display: grid;
+  gap: 10px;
+}
+
+.pro-upgrade-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pro-upgrade-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.pro-upgrade-card__price {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--ink);
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 17, 19, 0.16);
+}
+
+.pro-upgrade-card h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pro-upgrade-card p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: rgba(18, 17, 19, 0.78);
+}
+
+.pro-upgrade-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pill-btn.primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.pro-upgrade-card__fallback {
+  font-size: 12.5px;
+  font-family: var(--font-mono, monospace);
+}
+
+.pro-privacy-preview {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.pro-privacy-preview__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(18, 17, 19, 0.16);
+  font-size: 13px;
+}

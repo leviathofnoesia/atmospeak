@@ -229,7 +229,16 @@ describe("History snapshot ownership", () => {
 });
 
 
-vi.mock("../lib/api", () => ({ getAppSnapshot: vi.fn(), hasTauriRuntime: () => false, copyText: vi.fn().mockResolvedValue("Copied.") }));
+vi.mock("../lib/api", async () => {
+  const actual = await vi.importActual<typeof import("../lib/api")>("../lib/api");
+  return {
+    ...actual,
+    getAppSnapshot: vi.fn(),
+    hasTauriRuntime: () => false,
+    copyText: vi.fn().mockResolvedValue("Copied."),
+    openExternalUrl: vi.fn(async () => undefined),
+  };
+});
 
 describe("Transcript comparison and recovery selection", () => {
   it("compares and copies versions without changing the saved preference", async () => {
@@ -272,4 +281,23 @@ it("focuses recovery once, preserves search focus on refresh, and focuses a new 
   expect(search).toHaveFocus();
   rerender(<HistoryPanel {...props} selection={{ sessionId: "saved" }} />);
   await waitFor(() => expect(screen.getByRole("button", { name: "Café" })).toHaveFocus());
+});
+
+describe("HistoryPanel Pro upgrade trigger", () => {
+  it("shows the $69 Pro workspace upgrade prompt in Free builds while keeping search active", () => {
+    const props = historyProps([session({ id: "s1", cleanedText: "Offline dictation test" })]);
+    render(<HistoryPanel {...props} />);
+
+    expect(screen.getByPlaceholderText("Search transcripts…")).toBeEnabled();
+    expect(screen.getByTestId("pro-upgrade-workspace")).toBeVisible();
+    expect(screen.getByText("$69 once · Polar")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Upgrade to Pro — $69 once" })).toBeVisible();
+  });
+
+  it("hides the Pro upgrade prompt when running in Pro edition", () => {
+    const props = historyProps([session({ id: "s1" })]);
+    render(<HistoryPanel {...props} isProEdition />);
+
+    expect(screen.queryByTestId("pro-upgrade-workspace")).toBeNull();
+  });
 });
